@@ -17,6 +17,7 @@ enum HoopTrack {
         static let sessionPreset            = "AVCaptureSessionPreset1280x720"
         static let maxProcessingLatencyMs   = 20.0  // < 20ms per frame target
         static let shotDetectionLatencyMs   = 500.0 // < 0.5s from release to confirm
+        static let ballDetectionConfidenceThreshold: Float = 0.45
     }
 
     // MARK: - Court Geometry (normalised 0–1 half-court space)
