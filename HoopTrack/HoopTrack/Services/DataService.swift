@@ -115,6 +115,21 @@ final class DataService: ObservableObject {
         try modelContext.save()
     }
 
+    /// Called by CVPipeline to resolve a pending shot with its final make/miss result.
+    /// Does NOT set isUserCorrected — only user-initiated edits set that flag.
+    func resolveShot(_ shot: ShotRecord,
+                     result: ShotResult,
+                     zone: CourtZone,
+                     courtX: Double,
+                     courtY: Double) throws {
+        shot.result  = result
+        shot.zone    = zone
+        shot.courtX  = courtX
+        shot.courtY  = courtY
+        shot.session?.recalculateStats()
+        try modelContext.save()
+    }
+
     // MARK: - Goals
 
     func addGoal(_ goal: GoalRecord, to profile: PlayerProfile) throws {
