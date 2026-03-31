@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+    <!-- HealthKit — Phase 6, requires paid Apple Developer account ($99/yr) -->
+    <!-- Uncomment when enrolled:
+    <key>com.apple.developer.healthkit</key>
+    <true/>
+    <key>com.apple.developer.healthkit.access</key>
+    <array/>
+    -->
+
+    <!-- Push Notifications — Phase 6, requires paid Apple Developer account -->
+    <!-- Uncomment when enrolled:
+    <key>aps-environment</key>
+    <string>development</string>
+    -->
+
+    <!-- iCloud / CloudKit — Phase 5, requires paid Apple Developer account -->
+    <!-- Uncomment once enrolled and CloudKit container registered in Developer Portal:
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array><string>iCloud.com.hooptrack.app</string></array>
+    <key>com.apple.developer.icloud-services</key>
+    <array><string>CloudKit</string></array>
+    -->
+
+    <!-- Siri / Shortcuts — Phase 6, requires paid Apple Developer account -->
+    <!-- Uncomment when enrolled:
+    <key>com.apple.developer.siri</key>
+    <true/>
+    -->
+
+</dict>
+</plist>
