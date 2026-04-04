@@ -98,6 +98,18 @@ struct LiveSessionView: View {
 
             calibration = cal
             cvPipeline  = pipeline
+
+            // Optional Phase 2: record session video (uncomment when Phase 3 needs replay)
+            // let recorder = VideoRecordingService()
+            // recorder.configure(captureSession: cameraService.captureSession)
+            // if let sessionID = viewModel.session?.id {
+            //     recorder.startRecording(sessionID: sessionID)
+            //     recorder.onRecordingFinished = { result in
+            //         if case .success(let url) = result {
+            //             viewModel.session?.videoFileName = url.lastPathComponent
+            //         }
+            //     }
+            // }
         }
         .onDisappear {
             cvPipeline?.stop()
