@@ -123,7 +123,7 @@ final class LiveSessionViewModel: ObservableObject {
             recentShots = Array(session.shots.suffix(5))
             lastShotResult = result
             triggerHaptic(for: result)
-            _ = shot  // Future: attach Shot Science metadata here (Phase 3)
+            _ = shot
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -91,6 +91,7 @@ final class CVPipeline {
                 lastDetectionTimestamp = now
 
                 if isAtPeak(trajectory: trajectory) {
+                    // Use first detection (player's shooting position) for court zone mapping.
                     let releaseBox = trajectory.first!.boundingBox
 
                     // Phase 3: compute Shot Science synchronously on the session queue
