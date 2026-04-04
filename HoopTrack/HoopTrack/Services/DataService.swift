@@ -86,7 +86,8 @@ final class DataService: ObservableObject {
                  zone: CourtZone,
                  shotType: ShotType,
                  courtX: Double,
-                 courtY: Double) throws -> ShotRecord {
+                 courtY: Double,
+                 science: ShotScienceMetrics? = nil) throws -> ShotRecord {
         let shot = ShotRecord(
             sequenceIndex: session.shots.count + 1,
             result: result,
@@ -97,6 +98,19 @@ final class DataService: ObservableObject {
         )
         shot.session = session
         session.shots.append(shot)
+
+        // Set video timestamp so the replay view can seek to this shot
+        shot.videoTimestampSeconds = shot.timestamp.timeIntervalSince(session.startedAt)
+
+        // Apply Shot Science metrics if available
+        if let s = science {
+            shot.releaseAngleDeg = s.releaseAngleDeg
+            shot.releaseTimeMs   = s.releaseTimeMs
+            shot.verticalJumpCm  = s.verticalJumpCm
+            shot.legAngleDeg     = s.legAngleDeg
+            shot.shotSpeedMph    = s.shotSpeedMph
+        }
+
         session.recalculateStats()
         modelContext.insert(shot)
         try modelContext.save()
