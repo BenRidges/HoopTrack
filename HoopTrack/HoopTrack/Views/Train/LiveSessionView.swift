@@ -80,24 +80,23 @@ struct LiveSessionView: View {
 
             viewModel.start(drillType: drillType, namedDrill: namedDrill, courtType: .nba)
 
-            // Phase 2: start CV pipeline
-            let cal = CourtCalibrationService()
-            cal.onStateChange = { [weak viewModel] state in
-                viewModel?.updateCalibrationState(isCalibrated: state.isCalibrated)
+            // Phase 2: start CV pipeline (or fall back to manual-only if no model available)
+            if let detector = BallDetectorFactory.make(BallDetectorFactory.active) {
+                let cal = CourtCalibrationService()
+                cal.onStateChange = { [weak viewModel] state in
+                    viewModel?.updateCalibrationState(isCalibrated: state.isCalibrated)
+                }
+                cal.startCalibration()
+
+                let pipeline = CVPipeline(detector: detector, calibration: cal)
+                pipeline.start(framePublisher: cameraService.framePublisher, viewModel: viewModel)
+
+                calibration = cal
+                cvPipeline  = pipeline
+            } else {
+                // No model available — skip calibration overlay and use manual buttons
+                viewModel.updateCalibrationState(isCalibrated: true)
             }
-            cal.startCalibration()
-
-            #if DEBUG
-            let detector: BallDetectorProtocol = BallDetectorStub()
-            #else
-            fatalError("Real BallDetector not yet available — use DEBUG build")
-            #endif
-
-            let pipeline = CVPipeline(detector: detector, calibration: cal)
-            pipeline.start(framePublisher: cameraService.framePublisher, viewModel: viewModel)
-
-            calibration = cal
-            cvPipeline  = pipeline
 
             // Optional Phase 2: record session video (uncomment when Phase 3 needs replay)
             // let recorder = VideoRecordingService()
