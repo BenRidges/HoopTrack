@@ -92,6 +92,17 @@ enum ShotResult: String, Codable {
     case pending = "Pending"  // CV not yet confirmed
 }
 
+extension ShotResult {
+    /// Semantic colour name for the recent-shots HUD dot.
+    var dotColorName: String {
+        switch self {
+        case .make:    return "shotDotGreen"
+        case .miss:    return "shotDotRed"
+        case .pending: return "shotDotGray"
+        }
+    }
+}
+
 // MARK: - Court Type (affects 3-pt line distance)
 
 enum CourtType: String, Codable, CaseIterable, Identifiable {

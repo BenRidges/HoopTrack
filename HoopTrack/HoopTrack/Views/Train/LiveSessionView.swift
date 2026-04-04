@@ -221,7 +221,7 @@ struct LiveSessionView: View {
         HStack(spacing: 8) {
             ForEach(viewModel.recentShots) { shot in
                 Circle()
-                    .fill(shot.isMake ? Color.green : Color.red)
+                    .fill(dotColor(for: shot.result))
                     .frame(width: 18, height: 18)
                     .overlay(
                         Circle().stroke(.white.opacity(0.4), lineWidth: 1)
@@ -232,6 +232,14 @@ struct LiveSessionView: View {
         .padding(.vertical, 10)
         .background(.ultraThinMaterial.opacity(0.7),
                     in: Capsule())
+    }
+
+    private func dotColor(for result: ShotResult) -> Color {
+        switch result {
+        case .make:    return .green
+        case .miss:    return .red
+        case .pending: return Color(.systemGray)
+        }
     }
 
     // MARK: - Bottom Controls
