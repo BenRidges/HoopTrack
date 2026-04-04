@@ -20,6 +20,16 @@ enum HoopTrack {
         static let ballDetectionConfidenceThreshold: Float = 0.45
     }
 
+    // MARK: - ML Model
+    enum MLModel {
+        /// Resource name of the bundled .mlpackage (without extension).
+        static let bundledModelName  = "BallDetector"
+        /// Target label for COCO-trained models (YOLOv8n, YOLOv5n, etc.)
+        static let cocoTargetLabel   = "sports ball"
+        /// Target label for basketball-specific models (Roboflow, custom).
+        static let customTargetLabel = "basketball"
+    }
+
     // MARK: - Court Geometry (normalised 0–1 half-court space)
     // These drive zone classification in the CV pipeline (Phase 2).
     enum CourtGeometry {
