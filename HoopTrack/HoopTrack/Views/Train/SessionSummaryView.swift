@@ -169,7 +169,8 @@ struct SessionSummaryView: View {
                     StatCard(title: "Release Angle",
                              value: String(format: "%.1f°", angle),
                              subtitle: "Optimal: 43–57°",
-                             accent: angle >= 43 && angle <= 57 ? .green : .red)
+                             accent: angle >= HoopTrack.ShotScience.optimalReleaseAngleMin
+                                 && angle <= HoopTrack.ShotScience.optimalReleaseAngleMax ? .green : .red)
                 }
                 if let time = session.avgReleaseTimeMs {
                     StatCard(title: "Release Time",

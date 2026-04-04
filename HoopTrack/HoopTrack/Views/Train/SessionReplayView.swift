@@ -89,7 +89,7 @@ struct SessionReplayView: View {
                         )
                         .offset(
                             x: progressWidth(in: geo.size.width,
-                                             for: shot.videoTimestampSeconds!) - 7,
+                                             for: shot.videoTimestampSeconds ?? 0) - 7,
                             y: -5
                         )
                         .onTapGesture {
@@ -97,7 +97,7 @@ struct SessionReplayView: View {
                             selectedShot = isSame ? nil : shot
                             if !isSame {
                                 player?.seek(
-                                    to: CMTime(seconds: shot.videoTimestampSeconds!,
+                                    to: CMTime(seconds: shot.videoTimestampSeconds ?? 0,
                                                preferredTimescale: 600),
                                     toleranceBefore: .zero,
                                     toleranceAfter:  .zero
