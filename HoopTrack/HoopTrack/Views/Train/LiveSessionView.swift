@@ -29,6 +29,10 @@ struct LiveSessionView: View {
     @State private var showMakeAnimation = false
     @State private var showMissAnimation = false
 
+    // Phase 2: CV pipeline
+    @State private var cvPipeline:  CVPipeline?
+    @State private var calibration: CourtCalibrationService?
+
     var body: some View {
         ZStack {
             // MARK: Camera Preview
@@ -53,16 +57,19 @@ struct LiveSessionView: View {
             }
             .ignoresSafeArea(edges: .bottom)
 
+            // Phase 2: calibration prompt — shown until hoop is locked
+            if !viewModel.isCalibrated {
+                calibrationOverlay
+            }
+
             // MARK: Mid-session breakdown sheet
         }
         .task {
-            // Inject real dependencies before starting the session
             viewModel.configure(
                 dataService: DataService(modelContext: modelContext),
                 hapticService: hapticService
             )
 
-            // Start camera + session
             if cameraService.permissionStatus == .notDetermined {
                 await cameraService.requestPermission()
             }
@@ -70,11 +77,31 @@ struct LiveSessionView: View {
                 cameraService.configureSession(mode: .rear)
                 cameraService.startSession()
             }
-            viewModel.start(drillType: drillType,
-                            namedDrill: namedDrill,
-                            courtType: .nba)
+
+            viewModel.start(drillType: drillType, namedDrill: namedDrill, courtType: .nba)
+
+            // Phase 2: start CV pipeline
+            let cal = CourtCalibrationService()
+            cal.onStateChange = { [weak viewModel] state in
+                viewModel?.updateCalibrationState(isCalibrated: state.isCalibrated)
+            }
+            cal.startCalibration()
+
+            #if DEBUG
+            let detector: BallDetectorProtocol = BallDetectorStub()
+            #else
+            fatalError("Real BallDetector not yet available — use DEBUG build")
+            #endif
+
+            let pipeline = CVPipeline(detector: detector, calibration: cal)
+            pipeline.start(framePublisher: cameraService.framePublisher, viewModel: viewModel)
+
+            calibration = cal
+            cvPipeline  = pipeline
         }
         .onDisappear {
+            cvPipeline?.stop()
+            calibration?.reset()
             cameraService.stopSession()
         }
         .onChange(of: viewModel.lastShotResult) { _, result in
@@ -141,6 +168,29 @@ struct LiveSessionView: View {
         }
         .padding(.horizontal)
         .padding(.top, 12)
+    }
+
+    // MARK: - Calibration Overlay
+
+    private var calibrationOverlay: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "viewfinder")
+                .font(.system(size: 48))
+                .foregroundStyle(.white)
+            Text("Aim at the hoop")
+                .font(.title2.bold())
+                .foregroundStyle(.white)
+            Text("Keep the backboard in frame until the indicator turns green.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black.opacity(0.55))
     }
 
     // MARK: - Make / Miss Animations
