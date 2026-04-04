@@ -93,6 +93,21 @@ final class TrainingSession {
         fgPercent      = shotsAttempted > 0
             ? Double(shotsMade) / Double(shotsAttempted) * 100
             : 0
+
+        // MARK: Shot Science averages
+        func avg(_ values: [Double?]) -> Double? {
+            let v = values.compactMap { $0 }
+            return v.isEmpty ? nil : v.reduce(0, +) / Double(v.count)
+        }
+
+        avgReleaseAngleDeg = avg(completedShots.map { $0.releaseAngleDeg })
+        avgReleaseTimeMs   = avg(completedShots.map { $0.releaseTimeMs   })
+        avgVerticalJumpCm  = avg(completedShots.map { $0.verticalJumpCm  })
+        avgShotSpeedMph    = avg(completedShots.map { $0.shotSpeedMph    })
+
+        // Consistency score = population std dev of release angles
+        let angles = completedShots.compactMap { $0.releaseAngleDeg }
+        consistencyScore = ShotScienceCalculator.consistencyScore(releaseAngles: angles)
     }
 
     // MARK: - Zone Breakdown
