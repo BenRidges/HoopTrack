@@ -133,10 +133,11 @@ final class ShotScienceCalculatorTests: XCTestCase {
     // MARK: - verticalJumpGeometry
 
     func test_verticalJumpGeometry_standingPosition_returnsNilOrNearZero() {
+        // hipHeightFrac exactly at standing baseline (0.55) → excessFrac = 0 → returns nil
         let result = ShotScienceCalculator.verticalJumpGeometry(
-            hipY: 0.55, ankleY: 0.05, shoulderY: 0.90
+            hipY: 0.55, ankleY: 0.0, shoulderY: 1.0
         )
-        if let jump = result { XCTAssertTrue(jump < 5.0) }
+        XCTAssertNil(result)
     }
 
     func test_verticalJumpGeometry_jumpedPosition_returnsPositiveCm() {
