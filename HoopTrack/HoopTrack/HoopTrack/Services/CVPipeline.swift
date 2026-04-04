@@ -23,6 +23,7 @@ final class CVPipeline {
     // MARK: - Dependencies
     private let detector:    BallDetectorProtocol
     private let calibration: CourtCalibrationService
+    private let poseService: PoseEstimationService?
     private weak var viewModel: LiveSessionViewModel?
 
     // MARK: - State
@@ -38,9 +39,12 @@ final class CVPipeline {
     private let shotTimeoutSec: Double = 2.0
 
     // MARK: - Init
-    init(detector: BallDetectorProtocol, calibration: CourtCalibrationService) {
+    init(detector: BallDetectorProtocol,
+         calibration: CourtCalibrationService,
+         poseService: PoseEstimationService? = nil) {
         self.detector    = detector
         self.calibration = calibration
+        self.poseService = poseService
     }
 
     // MARK: - Lifecycle
@@ -88,10 +92,29 @@ final class CVPipeline {
 
                 if isAtPeak(trajectory: trajectory) {
                     let releaseBox = trajectory.first!.boundingBox
-                    pipelineState  = .releaseDetected(releaseBox: releaseBox,
-                                                       trajectory: trajectory)
+
+                    // Phase 3: compute Shot Science synchronously on the session queue
+                    let science: ShotScienceMetrics?
+                    if let ps = poseService {
+                        let observation = ps.detectPose(buffer: buffer)
+                        let hoopWidth: CGFloat
+                        if case .calibrated(let hoopRect) = calibration.state {
+                            hoopWidth = hoopRect.width
+                        } else {
+                            hoopWidth = 0.1
+                        }
+                        science = ShotScienceCalculator.compute(
+                            trajectory: trajectory,
+                            poseObservation: observation,
+                            hoopRectWidth: hoopWidth
+                        )
+                    } else {
+                        science = nil
+                    }
+
+                    pipelineState    = .releaseDetected(releaseBox: releaseBox, trajectory: trajectory)
                     releaseTimestamp = now
-                    logPendingShot(releaseBox: releaseBox)
+                    logPendingShot(releaseBox: releaseBox, science: science)
                 } else {
                     pipelineState = .tracking(trajectory: trajectory)
                 }
@@ -112,7 +135,6 @@ final class CVPipeline {
                     resolveShot(result: .miss, releaseBox: releaseBox)
                     return
                 }
-                _ = trajectory  // reserved for Phase 3 Shot Science
             }
 
             if elapsed > shotTimeoutSec {
@@ -151,11 +173,14 @@ final class CVPipeline {
 
     // MARK: - Shot Logging (dispatches to main actor)
 
-    private func logPendingShot(releaseBox: CGRect) {
+    private func logPendingShot(releaseBox: CGRect, science: ShotScienceMetrics?) {
         let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
         let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
         DispatchQueue.main.async { [weak self] in
-            self?.viewModel?.logPendingShot(zone: zone, courtX: pos.courtX, courtY: pos.courtY)
+            self?.viewModel?.logPendingShot(zone: zone,
+                                            courtX: pos.courtX,
+                                            courtY: pos.courtY,
+                                            science: science)
         }
     }
 
