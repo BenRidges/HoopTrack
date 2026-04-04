@@ -24,6 +24,10 @@ final class LiveSessionViewModel: ObservableObject {
     @Published var isFinished: Bool  = false
     @Published var errorMessage: String?
 
+    // MARK: - Phase 2 CV State
+    @Published var calibrationIsActive: Bool = false
+    @Published var isCalibrated: Bool = false
+
     // MARK: - Computed HUD Values
     var shotsAttempted: Int { session?.shotsAttempted ?? 0 }
     var shotsMade:      Int { session?.shotsMade ?? 0 }
@@ -37,6 +41,9 @@ final class LiveSessionViewModel: ObservableObject {
     // MARK: - Dependencies
     private var dataService: DataService!
     private var hapticService: HapticService
+
+    // Phase 2 — CV pipeline pending shot tracking
+    private var pendingShotRecord: ShotRecord?
 
     /// No-arg init for use with SwiftUI @StateObject; call configure(dataService:hapticService:)
     /// before start() to inject the real dependencies from the view's environment.
@@ -120,6 +127,57 @@ final class LiveSessionViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Phase 2 CV Shot Logging
+
+    /// Called by CVPipeline when the ball peaks (release detected).
+    /// Creates a pending ShotRecord and stores a reference for later resolution.
+    func logPendingShot(zone: CourtZone, courtX: Double, courtY: Double) {
+        guard let session else { return }
+        do {
+            let shot = try dataService.addShot(to: session,
+                                               result: .pending,
+                                               zone: zone,
+                                               shotType: .unknown,
+                                               courtX: courtX,
+                                               courtY: courtY)
+            pendingShotRecord = shot
+            recentShots       = Array(session.shots.suffix(5))
+            lastShotResult    = .pending
+            triggerHaptic(for: .pending)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Called by CVPipeline when make/miss is determined.
+    /// Updates the pending ShotRecord in place; falls back to a fresh logShot if
+    /// no pending record exists (guards against edge-case timing).
+    func resolvePendingShot(result: ShotResult, zone: CourtZone, courtX: Double, courtY: Double) {
+        guard let pending = pendingShotRecord else {
+            logShot(result: result, zone: zone, courtX: courtX, courtY: courtY)
+            return
+        }
+        do {
+            try dataService.resolveShot(pending,
+                                        result: result,
+                                        zone: zone,
+                                        courtX: courtX,
+                                        courtY: courtY)
+            pendingShotRecord = nil
+            recentShots       = Array(session?.shots.suffix(5) ?? [])
+            lastShotResult    = result
+            triggerHaptic(for: result)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Called by LiveSessionView when CourtCalibrationService changes state.
+    func updateCalibrationState(isCalibrated: Bool) {
+        self.isCalibrated        = isCalibrated
+        self.calibrationIsActive = isCalibrated
     }
 
     // MARK: - Timer (private)
