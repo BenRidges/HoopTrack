@@ -74,6 +74,21 @@ final class DataService: ObservableObject {
         try modelContext.save()
     }
 
+    /// Finalises a dribble drill session. Applies live dribble metrics to the session model,
+    /// stamps endedAt, and updates the player profile's ball-handling rating.
+    func finaliseDribbleSession(_ session: TrainingSession,
+                                metrics: DribbleLiveMetrics) throws {
+        session.endedAt         = .now
+        session.durationSeconds = session.endedAt!.timeIntervalSince(session.startedAt)
+        session.applyDribbleMetrics(metrics, durationSec: session.durationSeconds)
+        try modelContext.save()
+
+        let profile = try fetchOrCreateProfile()
+        updateProfileStats(profile, with: session)
+        updateBallHandlingRating(profile, from: session)
+        try modelContext.save()
+    }
+
     func deleteSession(_ session: TrainingSession) throws {
         modelContext.delete(session)
         try modelContext.save()
@@ -253,5 +268,21 @@ final class DataService: ObservableObject {
         }
         profile.longestStreakDays = max(profile.longestStreakDays, profile.currentStreakDays)
         profile.lastSessionDate   = .now
+    }
+
+    private func updateBallHandlingRating(_ profile: PlayerProfile,
+                                          from session: TrainingSession) {
+        guard let bps = session.avgDribblesPerSec, bps > 0 else { return }
+        // Scale: 3 BPS = 40 rating, 7 BPS = 90 rating. Clamp to 0–100.
+        let raw = ((bps - HoopTrack.Dribble.optimalBPSMin)
+                   / (HoopTrack.Dribble.optimalBPSMax - HoopTrack.Dribble.optimalBPSMin))
+                  * 50.0 + 40.0
+        let clamped = max(HoopTrack.SkillRating.minRating,
+                          min(HoopTrack.SkillRating.maxRating, raw))
+        // Exponential moving average (α = 0.3) so one session doesn't swing the rating wildly.
+        let alpha = 0.3
+        profile.ratingBallHandling = profile.ratingBallHandling == 0
+            ? clamped
+            : profile.ratingBallHandling * (1 - alpha) + clamped * alpha
     }
 }

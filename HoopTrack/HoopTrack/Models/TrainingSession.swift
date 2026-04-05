@@ -37,6 +37,13 @@ final class TrainingSession {
     var videoFileName: String?      // stored in Documents/Sessions/<id>.mov
     var videoPinnedByUser: Bool     // prevents auto-deletion
 
+    // MARK: - Dribble Aggregates (Phase 4 — populated at dribble session end)
+    var totalDribbles: Int?
+    var avgDribblesPerSec: Double?
+    var maxDribblesPerSec: Double?
+    var handBalanceFraction: Double?  // 0.0 = all right, 1.0 = all left, nil = no data
+    var dribbleCombosDetected: Int?
+
     // MARK: - Relationships
     var profile: PlayerProfile?
     @Relationship(deleteRule: .cascade) var shots: [ShotRecord]
@@ -70,6 +77,12 @@ final class TrainingSession {
 
         self.videoFileName      = nil
         self.videoPinnedByUser  = false
+
+        self.totalDribbles          = nil
+        self.avgDribblesPerSec      = nil
+        self.maxDribblesPerSec      = nil
+        self.handBalanceFraction    = nil
+        self.dribbleCombosDetected  = nil
 
         self.shots              = []
     }
@@ -108,6 +121,19 @@ final class TrainingSession {
         // Consistency score = population std dev of release angles
         let angles = completedShots.compactMap { $0.releaseAngleDeg }
         consistencyScore = ShotScienceCalculator.consistencyScore(releaseAngles: angles)
+    }
+
+    /// Applies dribble session aggregates. Call from DataService.finaliseDribbleSession.
+    func applyDribbleMetrics(_ metrics: DribbleLiveMetrics, durationSec: Double) {
+        totalDribbles       = metrics.totalDribbles
+        maxDribblesPerSec   = metrics.maxBPS
+        avgDribblesPerSec   = DribbleCalculator.dribblesPerSecond(
+                                  count: metrics.totalDribbles,
+                                  durationSec: durationSec)
+        handBalanceFraction = DribbleCalculator.handBalance(
+                                  leftCount:  metrics.leftHandDribbles,
+                                  rightCount: metrics.rightHandDribbles)
+        dribbleCombosDetected = metrics.combosDetected
     }
 
     // MARK: - Zone Breakdown
