@@ -82,6 +82,8 @@ enum HoopTrack {
         static let athleticismWeight: Double = 0.20
         static let consistencyWeight: Double = 0.15
         static let volumeWeight:     Double = 0.15
+        /// Exponential moving average factor for skill rating updates (lower = slower to change).
+        static let emaAlpha:         Double = 0.3
     }
 
     // MARK: - Storage

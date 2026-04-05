@@ -78,8 +78,9 @@ final class DataService: ObservableObject {
     /// stamps endedAt, and updates the player profile's ball-handling rating.
     func finaliseDribbleSession(_ session: TrainingSession,
                                 metrics: DribbleLiveMetrics) throws {
-        session.endedAt         = .now
-        session.durationSeconds = session.endedAt!.timeIntervalSince(session.startedAt)
+        let now = Date.now
+        session.endedAt         = now
+        session.durationSeconds = now.timeIntervalSince(session.startedAt)
         session.applyDribbleMetrics(metrics, durationSec: session.durationSeconds)
         try modelContext.save()
 
@@ -279,8 +280,8 @@ final class DataService: ObservableObject {
                   * 50.0 + 40.0
         let clamped = max(HoopTrack.SkillRating.minRating,
                           min(HoopTrack.SkillRating.maxRating, raw))
-        // Exponential moving average (α = 0.3) so one session doesn't swing the rating wildly.
-        let alpha = 0.3
+        // Exponential moving average so one session doesn't swing the rating wildly.
+        let alpha = HoopTrack.SkillRating.emaAlpha
         profile.ratingBallHandling = profile.ratingBallHandling == 0
             ? clamped
             : profile.ratingBallHandling * (1 - alpha) + clamped * alpha
