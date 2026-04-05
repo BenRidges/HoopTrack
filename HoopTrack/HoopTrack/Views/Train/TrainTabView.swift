@@ -38,8 +38,8 @@ struct TrainTabView: View {
         }
         // Full-screen live session — routes by drill type
         .fullScreenCover(isPresented: $isShowingLiveSession) {
-            if drillToLaunch?.drillType == .dribble {
-                DribbleDrillView(namedDrill: drillToLaunch) {
+            if let drill = drillToLaunch, drill.drillType == .dribble {
+                DribbleDrillView(namedDrill: drill) {
                     isShowingLiveSession = false
                     drillToLaunch        = nil
                 }
