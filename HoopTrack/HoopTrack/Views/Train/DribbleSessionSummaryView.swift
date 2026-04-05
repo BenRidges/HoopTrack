@@ -50,7 +50,8 @@ struct DribbleSessionSummaryView: View {
     private var statsGrid: some View {
         StatCardGrid {
             StatCard(title: "Dribbles",
-                     value: "\(session.totalDribbles ?? 0)")
+                     value: "\(session.totalDribbles ?? 0)",
+                     accent: .blue)
             StatCard(title: "Avg BPS",
                      value: session.avgDribblesPerSec.map { String(format: "%.1f", $0) } ?? "—",
                      accent: bpsColor(session.avgDribblesPerSec))
