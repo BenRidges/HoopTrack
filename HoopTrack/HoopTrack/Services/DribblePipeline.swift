@@ -25,13 +25,13 @@ final class DribblePipeline {
 
     private let handService = HandTrackingService()
 
-    // Per-hand wrist tracking state
-    nonisolated(unsafe) private var leftState  = WristState()
-    nonisolated(unsafe) private var rightState = WristState()
+    // Per-hand wrist tracking state — @MainActor-isolated; mutated inside DispatchQueue.main.async
+    private var leftState  = WristState()
+    private var rightState = WristState()
 
     // Rolling BPS window (last 3 seconds worth of dribble timestamps)
     private var dribbleTimestamps: [Double] = []  // seconds since session start
-    nonisolated(unsafe) private var sessionStartTime: Double = 0
+    private var sessionStartTime: Double = 0
 
     private var metrics = DribbleLiveMetrics()
 
@@ -81,19 +81,19 @@ final class DribblePipeline {
         let leftSample  = sample(from: leftObs)
         let rightSample = sample(from: rightObs)
 
-        var leftDribble  = false
-        var rightDribble = false
-
-        if let s = leftSample  { leftDribble  = leftState.update(y: s.y)  }
-        if let s = rightSample { rightDribble = rightState.update(y: s.y) }
-
+        // Pass wrist Y scalars to main; WristState mutation happens there under @MainActor isolation.
+        let leftY       = leftSample?.y
+        let rightY      = rightSample?.y
         let newLeftPos  = leftSample?.position   // nil when hand not visible
         let newRightPos = rightSample?.position
 
-        let t = timestamp - sessionStartTime
-
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // sessionStartTime is @MainActor-isolated — safe to read here.
+            let t = timestamp - self.sessionStartTime
+            let leftDribble  = leftY.map  { self.leftState.update(y: $0)  } ?? false
+            let rightDribble = rightY.map { self.rightState.update(y: $0) } ?? false
+
             if leftDribble {
                 self.metrics.totalDribbles     += 1
                 self.metrics.leftHandDribbles  += 1
