@@ -67,6 +67,8 @@ enum HoopTrack {
         static let comboWindowSec: Double = 1.5
         /// Ball diameter in cm — used as scale reference.
         static let ballDiameterCm: Double = 24.0
+        /// Rolling window duration (seconds) used for current BPS calculation.
+        static let bpsWindowSec: Double = 3.0
         /// Number of AR floor targets per dribble drill.
         static let arTargetCount: Int = 3
         /// Radius of each AR floor target (metres).

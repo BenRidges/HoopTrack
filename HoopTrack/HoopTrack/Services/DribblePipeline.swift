@@ -40,6 +40,9 @@ final class DribblePipeline {
 
     // MARK: - Session
 
+    /// Call this before starting the ARSession. The AR session must not be delivering
+    /// frames yet — the reset dispatches asynchronously to main, so in-flight frames
+    /// processed after this call but before the dispatch executes will use stale state.
     nonisolated func startSession(at startTime: Double) {
         DispatchQueue.main.async { [weak self] in
             self?.sessionStartTime = startTime
@@ -64,24 +67,28 @@ final class DribblePipeline {
             if obs.chirality == .right { rightObs = obs }
         }
 
-        let leftWrist  = wristY(from: leftObs)
-        let rightWrist = wristY(from: rightObs)
+        // Single recognizedPoint lookup per hand — feeds both detection and rendering paths.
+        struct WristSample { var y: Double; var position: CGPoint }
 
-        var newLeftPos:  CGPoint? = nil
-        var newRightPos: CGPoint? = nil
+        func sample(from obs: VNHumanHandPoseObservation?) -> WristSample? {
+            guard let obs,
+                  let pt = try? obs.recognizedPoint(.wrist),
+                  pt.confidence > 0.3 else { return nil }
+            return WristSample(y: Double(pt.location.y),
+                               position: CGPoint(x: pt.location.x, y: pt.location.y))
+        }
 
-        if let lp = leftObs.flatMap({ try? $0.recognizedPoint(.wrist) }), lp.confidence > 0.3 {
-            newLeftPos = CGPoint(x: lp.location.x, y: lp.location.y)
-        }
-        if let rp = rightObs.flatMap({ try? $0.recognizedPoint(.wrist) }), rp.confidence > 0.3 {
-            newRightPos = CGPoint(x: rp.location.x, y: rp.location.y)
-        }
+        let leftSample  = sample(from: leftObs)
+        let rightSample = sample(from: rightObs)
 
         var leftDribble  = false
         var rightDribble = false
 
-        if let y = leftWrist  { leftDribble  = leftState.update(y: y)  }
-        if let y = rightWrist { rightDribble = rightState.update(y: y) }
+        if let s = leftSample  { leftDribble  = leftState.update(y: s.y)  }
+        if let s = rightSample { rightDribble = rightState.update(y: s.y) }
+
+        let newLeftPos  = leftSample?.position   // nil when hand not visible
+        let newRightPos = rightSample?.position
 
         let t = timestamp - sessionStartTime
 
@@ -105,9 +112,10 @@ final class DribblePipeline {
             self.metrics.leftWristPosition  = newLeftPos
             self.metrics.rightWristPosition = newRightPos
 
-            // Prune timestamps older than 3 seconds
-            self.dribbleTimestamps = self.dribbleTimestamps.filter { t - $0 <= 3.0 }
-            let currentBPS = Double(self.dribbleTimestamps.count) / 3.0
+            // Prune timestamps outside the rolling BPS window.
+            let window = HoopTrack.Dribble.bpsWindowSec
+            self.dribbleTimestamps = self.dribbleTimestamps.filter { t - $0 <= window }
+            let currentBPS = Double(self.dribbleTimestamps.count) / window
             self.metrics.currentBPS = currentBPS
             if currentBPS > self.metrics.maxBPS { self.metrics.maxBPS = currentBPS }
 
@@ -118,14 +126,6 @@ final class DribblePipeline {
         }
     }
 
-    // MARK: - Helpers
-
-    nonisolated private func wristY(from obs: VNHumanHandPoseObservation?) -> Double? {
-        guard let obs,
-              let wrist = try? obs.recognizedPoint(.wrist),
-              wrist.confidence > 0.3 else { return nil }
-        return Double(wrist.location.y)
-    }
 }
 
 // MARK: - WristState
