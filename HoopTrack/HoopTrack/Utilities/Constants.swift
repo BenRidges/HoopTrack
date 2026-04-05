@@ -54,6 +54,27 @@ enum HoopTrack {
         static let consistencyThreshold:   Double = 3.0 // degrees variance — "good" below this
     }
 
+    // MARK: - Dribble (Phase 4 thresholds)
+    enum Dribble {
+        /// Minimum wrist Y displacement (normalised 0–1) to count as a dribble bounce.
+        static let minWristDisplacementFrac: Double = 0.03
+        /// Frames a wrist velocity must sustain a direction change to avoid noise triggers.
+        static let velocityConfirmFrames: Int = 2
+        /// Optimal dribbles-per-second range for ball-handling drills.
+        static let optimalBPSMin: Double = 3.0
+        static let optimalBPSMax: Double = 7.0
+        /// Max seconds between two dribble events to count as a hand-switch combo.
+        static let comboWindowSec: Double = 1.5
+        /// Ball diameter in cm — used as scale reference.
+        static let ballDiameterCm: Double = 24.0
+        /// Rolling window duration (seconds) used for current BPS calculation.
+        static let bpsWindowSec: Double = 3.0
+        /// Number of AR floor targets per dribble drill.
+        static let arTargetCount: Int = 3
+        /// Radius of each AR floor target (metres).
+        static let arTargetRadiusM: Float = 0.25
+    }
+
     // MARK: - Skill Rating Algorithm
     enum SkillRating {
         static let maxRating:        Double = 100
@@ -63,6 +84,8 @@ enum HoopTrack {
         static let athleticismWeight: Double = 0.20
         static let consistencyWeight: Double = 0.15
         static let volumeWeight:     Double = 0.15
+        /// Exponential moving average factor for skill rating updates (lower = slower to change).
+        static let emaAlpha:         Double = 0.3
     }
 
     // MARK: - Storage

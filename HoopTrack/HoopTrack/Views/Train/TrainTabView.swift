@@ -36,14 +36,21 @@ struct TrainTabView: View {
                 isShowingLiveSession     = true
             }
         }
-        // Full-screen live session
+        // Full-screen live session — routes by drill type
         .fullScreenCover(isPresented: $isShowingLiveSession) {
-            LiveSessionView(
-                drillType: drillToLaunch?.drillType ?? .freeShoot,
-                namedDrill: drillToLaunch
-            ) {
-                isShowingLiveSession = false
-                drillToLaunch        = nil
+            if let drill = drillToLaunch, drill.drillType == .dribble {
+                DribbleDrillView(namedDrill: drill) {
+                    isShowingLiveSession = false
+                    drillToLaunch        = nil
+                }
+            } else {
+                LiveSessionView(
+                    drillType: drillToLaunch?.drillType ?? .freeShoot,
+                    namedDrill: drillToLaunch
+                ) {
+                    isShowingLiveSession = false
+                    drillToLaunch        = nil
+                }
             }
         }
     }
