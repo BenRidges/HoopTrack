@@ -49,8 +49,8 @@ final class CVPipeline {
 
     // MARK: - Lifecycle
 
-    func start(framePublisher: AnyPublisher<CMSampleBuffer, Never>,
-               viewModel: LiveSessionViewModel) {
+    nonisolated func start(framePublisher: AnyPublisher<CMSampleBuffer, Never>,
+                           viewModel: LiveSessionViewModel) {
         self.viewModel = viewModel
         // Frames arrive on sessionQueue — CV work stays there; UI calls dispatch to main.
         frameCancellable = framePublisher
@@ -59,7 +59,7 @@ final class CVPipeline {
             }
     }
 
-    func stop() {
+    nonisolated func stop() {
         frameCancellable?.cancel()
         frameCancellable = nil
         pipelineState = .idle
@@ -67,7 +67,7 @@ final class CVPipeline {
 
     // MARK: - Core Frame Processing
 
-    private func processBuffer(_ buffer: CMSampleBuffer) {
+    nonisolated private func processBuffer(_ buffer: CMSampleBuffer) {
         // Feed calibration during detecting phase
         calibration.processFrame(buffer)
 
@@ -148,7 +148,7 @@ final class CVPipeline {
 
     /// True when the ball has risen at least 5% of frame height and is now 3% below its peak.
     /// Vision Y coordinates: origin bottom-left, increasing upward.
-    private func isAtPeak(trajectory: [BallDetection]) -> Bool {
+    nonisolated private func isAtPeak(trajectory: [BallDetection]) -> Bool {
         guard trajectory.count >= 5 else { return false }
         let ys      = trajectory.suffix(5).map { $0.boundingBox.midY }
         let peak    = ys.max()!
@@ -160,7 +160,7 @@ final class CVPipeline {
     }
 
     /// Ball centre is within an expanded hoop rect — indicates a make.
-    private func isEnteringHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
+    nonisolated private func isEnteringHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
         let expanded   = hoopRect.insetBy(dx: -hoopRect.width  * 0.2,
                                           dy: -hoopRect.height * 0.5)
         let ballCentre = CGPoint(x: ballBox.midX, y: ballBox.midY)
@@ -168,13 +168,13 @@ final class CVPipeline {
     }
 
     /// Ball has fallen below the bottom edge of the hoop rect — indicates a miss.
-    private func isBelowHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
+    nonisolated private func isBelowHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
         return ballBox.midY < hoopRect.minY - 0.05
     }
 
     // MARK: - Shot Logging (dispatches to main actor)
 
-    private func logPendingShot(releaseBox: CGRect, science: ShotScienceMetrics?) {
+    nonisolated private func logPendingShot(releaseBox: CGRect, science: ShotScienceMetrics?) {
         let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
         let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
         DispatchQueue.main.async { [weak self] in
@@ -185,7 +185,7 @@ final class CVPipeline {
         }
     }
 
-    private func resolveShot(result: ShotResult, releaseBox: CGRect) {
+    nonisolated private func resolveShot(result: ShotResult, releaseBox: CGRect) {
         let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
         let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
         pipelineState = .idle

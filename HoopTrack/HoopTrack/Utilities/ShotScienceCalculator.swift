@@ -10,13 +10,18 @@ enum ShotScienceCalculator {
 
     // MARK: - Release Angle
 
+    /// Ball launch angle from horizontal (degrees).
+    /// Uses the midpoints of the first two detections in the trajectory.
+    /// Vision Y origin is bottom-left (increasing upward).
+    /// Returns nil if the ball is not ascending (dy ≤ 0).
     static func releaseAngle(trajectory: [BallDetection]) -> Double? {
         guard trajectory.count >= 2 else { return nil }
         let p1 = trajectory[0].boundingBox
         let p2 = trajectory[1].boundingBox
-        let dx = p2.midX - p1.midX
-        let dy = p2.midY - p1.midY
-        let angleRad = atan2(abs(Double(dy)), abs(Double(dx)))
+        let dx = Double(p2.midX - p1.midX)
+        let dy = Double(p2.midY - p1.midY)
+        guard dy > 0 else { return nil }   // ball must be ascending at release
+        let angleRad = atan2(dy, abs(dx))
         return angleRad * (180.0 / Double.pi)
     }
 

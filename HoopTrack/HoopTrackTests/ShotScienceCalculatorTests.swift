@@ -33,6 +33,19 @@ final class ShotScienceCalculatorTests: XCTestCase {
         XCTAssertNil(ShotScienceCalculator.releaseAngle(trajectory: []))
     }
 
+    func test_releaseAngle_descendingBall_returnsNil() {
+        // Ball moving downward (dy < 0 in Vision coords) — not a valid release angle
+        let detections = [
+            BallDetection(boundingBox: CGRect(x: 0.30, y: 0.50, width: 0.05, height: 0.05),
+                          confidence: 0.9,
+                          frameTimestamp: CMTime(value: 0, timescale: 60)),
+            BallDetection(boundingBox: CGRect(x: 0.34, y: 0.40, width: 0.05, height: 0.05),
+                          confidence: 0.9,
+                          frameTimestamp: CMTime(value: 1, timescale: 60)),
+        ]
+        XCTAssertNil(ShotScienceCalculator.releaseAngle(trajectory: detections))
+    }
+
     // MARK: - releaseTime
 
     func test_releaseTime_thirtyFramesAt60fps_returns500ms() {
