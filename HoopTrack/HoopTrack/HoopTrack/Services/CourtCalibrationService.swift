@@ -64,7 +64,7 @@ final class CourtCalibrationService {
                                             options: [:])
         try? handler.perform([request])
 
-        guard let results = request.results as? [VNRectangleObservation],
+        guard let results = request.results,
               let best    = results.max(by: { $0.boundingBox.width < $1.boundingBox.width })
         else { return }
 
@@ -91,8 +91,8 @@ final class CourtCalibrationService {
         let rawY = max(0, hoopRect.midY - ballCY) / hoopRect.height * 0.5
 
         return (
-            courtX: rawX.clamped(to: 0...1),
-            courtY: rawY.clamped(to: 0...1)
+            courtX: Double(rawX).clamped(to: 0...1),
+            courtY: Double(rawY).clamped(to: 0...1)
         )
     }
 

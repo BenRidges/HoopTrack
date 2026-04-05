@@ -123,7 +123,6 @@ final class LiveSessionViewModel: ObservableObject {
             recentShots = Array(session.shots.suffix(5))
             lastShotResult = result
             triggerHaptic(for: result)
-            _ = shot  // Future: attach Shot Science metadata here (Phase 3)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -133,7 +132,10 @@ final class LiveSessionViewModel: ObservableObject {
 
     /// Called by CVPipeline when the ball peaks (release detected).
     /// Creates a pending ShotRecord and stores a reference for later resolution.
-    func logPendingShot(zone: CourtZone, courtX: Double, courtY: Double) {
+    func logPendingShot(zone: CourtZone,
+                        courtX: Double,
+                        courtY: Double,
+                        science: ShotScienceMetrics? = nil) {
         guard let session else { return }
         do {
             let shot = try dataService.addShot(to: session,
@@ -141,7 +143,8 @@ final class LiveSessionViewModel: ObservableObject {
                                                zone: zone,
                                                shotType: .unknown,
                                                courtX: courtX,
-                                               courtY: courtY)
+                                               courtY: courtY,
+                                               science: science)
             pendingShotRecord = shot
             recentShots       = Array(session.shots.suffix(5))
             lastShotResult    = .pending

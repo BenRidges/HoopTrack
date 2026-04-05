@@ -12,6 +12,7 @@ struct SessionSummaryView: View {
     @EnvironmentObject private var hapticService: HapticService
     @State private var showShareSheet = false
     @State private var selectedShotForReview: ShotRecord? = nil
+    @State private var showReplay = false
 
     var body: some View {
         NavigationStack {
@@ -49,6 +50,16 @@ struct SessionSummaryView: View {
                         Label("Share", systemImage: "square.and.arrow.up")
                     }
                 }
+                if session.videoFileName != nil {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            hapticService.tap()
+                            showReplay = true
+                        } label: {
+                            Label("Replay", systemImage: "play.rectangle.fill")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         hapticService.tap()
@@ -60,6 +71,9 @@ struct SessionSummaryView: View {
             }
             .onAppear {
                 hapticService.milestone()
+            }
+            .fullScreenCover(isPresented: $showReplay) {
+                SessionReplayView(session: session)
             }
         }
     }
@@ -155,7 +169,8 @@ struct SessionSummaryView: View {
                     StatCard(title: "Release Angle",
                              value: String(format: "%.1f°", angle),
                              subtitle: "Optimal: 43–57°",
-                             accent: angle >= 43 && angle <= 57 ? .green : .red)
+                             accent: angle >= HoopTrack.ShotScience.optimalReleaseAngleMin
+                                 && angle <= HoopTrack.ShotScience.optimalReleaseAngleMax ? .green : .red)
                 }
                 if let time = session.avgReleaseTimeMs {
                     StatCard(title: "Release Time",
@@ -232,6 +247,16 @@ private struct ShotReviewRow: View {
             }
 
             Spacer()
+
+            if let angle = shot.releaseAngleDeg {
+                Text(String(format: "%.0f°", angle))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(
+                        angle >= HoopTrack.ShotScience.optimalReleaseAngleMin
+                        && angle <= HoopTrack.ShotScience.optimalReleaseAngleMax
+                            ? .green : .orange
+                    )
+            }
 
             // Correction badge
             if shot.isUserCorrected {

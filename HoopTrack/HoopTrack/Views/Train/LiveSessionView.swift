@@ -33,6 +33,9 @@ struct LiveSessionView: View {
     @State private var cvPipeline:  CVPipeline?
     @State private var calibration: CourtCalibrationService?
 
+    // Phase 3: video recording for Shot Science replay
+    @State private var videoRecorder: VideoRecordingService?
+
     var body: some View {
         ZStack {
             // MARK: Camera Preview
@@ -88,31 +91,35 @@ struct LiveSessionView: View {
                 }
                 cal.startCalibration()
 
-                let pipeline = CVPipeline(detector: detector, calibration: cal)
+                let poseService = PoseEstimationService()
+                let pipeline = CVPipeline(detector: detector,
+                                          calibration: cal,
+                                          poseService: poseService)
                 pipeline.start(framePublisher: cameraService.framePublisher, viewModel: viewModel)
 
                 calibration = cal
                 cvPipeline  = pipeline
             } else {
-                // No model available — skip calibration overlay and use manual buttons
                 viewModel.updateCalibrationState(isCalibrated: true)
             }
 
-            // Optional Phase 2: record session video (uncomment when Phase 3 needs replay)
-            // let recorder = VideoRecordingService()
-            // recorder.configure(captureSession: cameraService.captureSession)
-            // if let sessionID = viewModel.session?.id {
-            //     recorder.startRecording(sessionID: sessionID)
-            //     recorder.onRecordingFinished = { result in
-            //         if case .success(let url) = result {
-            //             viewModel.session?.videoFileName = url.lastPathComponent
-            //         }
-            //     }
-            // }
+            // Phase 3: record session video for replay
+            let recorder = VideoRecordingService()
+            recorder.configure(captureSession: cameraService.captureSession)
+            if let sessionID = viewModel.session?.id {
+                recorder.startRecording(sessionID: sessionID)
+                recorder.onRecordingFinished = { result in
+                    if case .success(let url) = result {
+                        viewModel.session?.videoFileName = url.lastPathComponent
+                    }
+                }
+            }
+            videoRecorder = recorder
         }
         .onDisappear {
             cvPipeline?.stop()
             calibration?.reset()
+            videoRecorder?.stopRecording()
             cameraService.stopSession()
         }
         .onChange(of: viewModel.lastShotResult) { _, result in
