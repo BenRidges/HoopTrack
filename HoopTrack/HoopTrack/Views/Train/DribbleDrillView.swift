@@ -50,9 +50,12 @@ struct DribbleDrillView: View {
 
             // Give pipeline session start time
             pipeline.startSession(at: Date().timeIntervalSinceReferenceDate)
-
-            // Give coordinator the pipeline for frame callbacks
-            arCoordinator?.pipeline = pipeline
+        }
+        // Wire pipeline to coordinator when it becomes non-nil.
+        // Using onChange rather than .task avoids a race: makeUIView sets the coordinator
+        // via DispatchQueue.main.async, which may settle after .task starts executing.
+        .onChange(of: arCoordinator) { _, coordinator in
+            coordinator?.pipeline = pipeline
         }
         .onDisappear {
             arCoordinator?.stopSession()
@@ -209,6 +212,7 @@ final class DribbleARCoordinator: NSObject, ARSessionDelegate {
         self.arView = arView
     }
 
+    // Called from .onDisappear which runs on main — @MainActor isolation is correct here.
     func stopSession() {
         arView.session.pause()
     }
