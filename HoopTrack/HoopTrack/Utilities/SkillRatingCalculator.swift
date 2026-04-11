@@ -76,4 +76,62 @@ enum SkillRatingCalculator {
         let totalWeight = components.reduce(0) { $0 + $1.weight }
         return components.reduce(0.0) { $0 + $1.value * ($1.weight / totalWeight) }
     }
+
+    // MARK: - Ball Handling
+
+    static func ballHandlingScore(
+        avgBPS: Double?,
+        maxBPS: Double?,
+        handBalance: Double?,
+        combos: Int,
+        totalDribbles: Int
+    ) -> Double? {
+        guard totalDribbles > 0 else { return nil }
+        let R = HoopTrack.SkillRating.self
+        var components: [(value: Double, weight: Double)] = []
+
+        if let avg = avgBPS { components.append((normalize(avg, min: R.bpsAvgMin, max: R.bpsAvgMax), 0.30)) }
+        if let mx  = maxBPS { components.append((normalize(mx,  min: R.bpsMaxMin, max: R.bpsMaxMax), 0.15)) }
+
+        if let avg = avgBPS, let mx = maxBPS, mx > 0 {
+            let ratio = avg / mx
+            components.append((normalize(ratio, min: R.bpsSustainedMin, max: R.bpsSustainedMax), 0.15))
+        }
+
+        if let balance = handBalance {
+            components.append(((1 - abs(balance - 0.5) * 2) * 100, 0.25))
+        }
+
+        let comboRate = Double(combos) / Double(totalDribbles)
+        components.append((normalize(comboRate, min: 0, max: R.comboRateMax), 0.15))
+
+        guard !components.isEmpty else { return nil }
+        let totalWeight = components.reduce(0) { $0 + $1.weight }
+        return components.reduce(0.0) { $0 + $1.value * ($1.weight / totalWeight) }
+    }
+
+    // MARK: - Athleticism
+
+    static func athleticismScore(
+        verticalJumpCm: Double?,
+        shuttleRunSec: Double?
+    ) -> Double? {
+        guard verticalJumpCm != nil || shuttleRunSec != nil else { return nil }
+        let R = HoopTrack.SkillRating.self
+        var components: [(value: Double, weight: Double)] = []
+
+        if let jump = verticalJumpCm {
+            let w = shuttleRunSec == nil ? 1.0 : 0.60
+            components.append((normalize(jump, min: R.verticalJumpMinCm, max: R.verticalJumpMaxCm), w))
+        }
+        if let shuttle = shuttleRunSec {
+            let score = normalize(R.laneAgilityWorstSec - shuttle,
+                                   min: 0,
+                                   max: R.laneAgilityWorstSec - R.laneAgilityBestSec)
+            components.append((score, 0.40))
+        }
+
+        let totalWeight = components.reduce(0) { $0 + $1.weight }
+        return components.reduce(0.0) { $0 + $1.value * ($1.weight / totalWeight) }
+    }
 }

@@ -85,4 +85,51 @@ final class SkillRatingCalculatorTests: XCTestCase {
         )!
         XCTAssertLessThan(badAngle, noAngle)
     }
+
+    // MARK: - ballHandlingScore
+
+    func test_ballHandlingScore_noDribbles_returnsNil() {
+        XCTAssertNil(SkillRatingCalculator.ballHandlingScore(
+            avgBPS: nil, maxBPS: nil, handBalance: nil, combos: 0, totalDribbles: 0))
+    }
+
+    func test_ballHandlingScore_eliteBPS_returnsHighScore() {
+        let score = SkillRatingCalculator.ballHandlingScore(
+            avgBPS: 8.0, maxBPS: 10.0, handBalance: 0.5,
+            combos: 15, totalDribbles: 200)
+        XCTAssertNotNil(score)
+        XCTAssertGreaterThan(score!, 70)
+    }
+
+    func test_ballHandlingScore_equalHandBalance_maximisesHandScore() {
+        let balanced = SkillRatingCalculator.ballHandlingScore(
+            avgBPS: 5.0, maxBPS: 7.0, handBalance: 0.5, combos: 5, totalDribbles: 100)!
+        let unbalanced = SkillRatingCalculator.ballHandlingScore(
+            avgBPS: 5.0, maxBPS: 7.0, handBalance: 0.9, combos: 5, totalDribbles: 100)!
+        XCTAssertGreaterThan(balanced, unbalanced)
+    }
+
+    // MARK: - athleticismScore
+
+    func test_athleticismScore_bothNil_returnsNil() {
+        XCTAssertNil(SkillRatingCalculator.athleticismScore(verticalJumpCm: nil, shuttleRunSec: nil))
+    }
+
+    func test_athleticismScore_eliteVertical_returnsHigh() {
+        let score = SkillRatingCalculator.athleticismScore(verticalJumpCm: 90, shuttleRunSec: nil)
+        XCTAssertNotNil(score)
+        XCTAssertEqual(score!, 100, accuracy: 1.0)
+    }
+
+    func test_athleticismScore_fastShuttle_returnsHigh() {
+        let score = SkillRatingCalculator.athleticismScore(verticalJumpCm: nil, shuttleRunSec: 5.5)
+        XCTAssertNotNil(score)
+        XCTAssertEqual(score!, 100, accuracy: 1.0)
+    }
+
+    func test_athleticismScore_jumpOnlyUsesFullWeight() {
+        let jumpOnly = SkillRatingCalculator.athleticismScore(verticalJumpCm: 55, shuttleRunSec: nil)!
+        let bothData = SkillRatingCalculator.athleticismScore(verticalJumpCm: 55, shuttleRunSec: 7.5)!
+        XCTAssertNotEqual(jumpOnly, bothData, accuracy: 5.0)
+    }
 }
