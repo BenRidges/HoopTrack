@@ -1,5 +1,4 @@
 // BadgeTier.swift
-import Foundation
 
 enum BadgeTier: Int, Comparable, Codable, CaseIterable {
     case bronze = 1, silver = 2, gold = 3, platinum = 4, diamond = 5, champion = 6
@@ -43,6 +42,8 @@ struct BadgeRank: Equatable {
 
     var displayName: String {
         guard let d = division else { return tier.label }
-        return "\(tier.label) \(["I","II","III"][d - 1])"
+        let numerals = ["I", "II", "III"]
+        guard d >= 1, d <= numerals.count else { return tier.label }
+        return "\(tier.label) \(numerals[d - 1])"
     }
 }
