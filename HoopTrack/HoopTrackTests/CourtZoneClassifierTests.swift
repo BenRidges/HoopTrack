@@ -38,12 +38,13 @@ final class CourtZoneClassifierTests: XCTestCase {
     }
 
     // Mid-range: inside 3pt arc, outside paint
+    // (0.20, 0.45) would be outside the arc; use (0.30, 0.35) which is clearly elbow mid-range
     func testMidRangeLeft() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.20, courtY: 0.45), .midRange)
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.30, courtY: 0.35), .midRange)
     }
 
     func testMidRangeRight() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.80, courtY: 0.45), .midRange)
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.70, courtY: 0.35), .midRange)
     }
 
     // Above-break three: outside 3pt arc radius, above corner depth

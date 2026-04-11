@@ -26,9 +26,11 @@ enum CourtZoneClassifier {
         let dy = courtY
         let distanceFromBasket = (dx * dx + dy * dy).squareRoot()
 
-        // Corner three: outside paint width, below corner depth
+        // Corner three: outside paint width, below corner depth, AND outside the arc
         let outsidePaintX = abs(courtX - 0.5) > paintHalfWidth
-        if outsidePaintX && courtY <= HoopTrack.CourtGeometry.cornerThreeDepthFraction {
+        if outsidePaintX
+            && courtY <= HoopTrack.CourtGeometry.cornerThreeDepthFraction
+            && distanceFromBasket >= HoopTrack.CourtGeometry.threePointArcRadiusFraction {
             return .cornerThree
         }
 
