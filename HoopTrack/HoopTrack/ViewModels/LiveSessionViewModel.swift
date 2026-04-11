@@ -39,8 +39,11 @@ final class LiveSessionViewModel: ObservableObject {
     private var sessionStartDate: Date?
 
     // MARK: - Dependencies
+    @Published var sessionResult: SessionResult?
+
     private var dataService: DataService!
     private var hapticService: HapticService
+    private var coordinator: SessionFinalizationCoordinator!
 
     // Phase 2 — CV pipeline pending shot tracking
     private var pendingShotRecord: ShotRecord?
@@ -57,9 +60,12 @@ final class LiveSessionViewModel: ObservableObject {
         self.hapticService = hapticService
     }
 
-    func configure(dataService: DataService, hapticService: HapticService) {
+    func configure(dataService: DataService,
+                   hapticService: HapticService,
+                   coordinator: SessionFinalizationCoordinator) {
         self.dataService   = dataService
         self.hapticService = hapticService
+        self.coordinator   = coordinator
     }
 
     // MARK: - Lifecycle
@@ -90,14 +96,13 @@ final class LiveSessionViewModel: ObservableObject {
         startTimer()
     }
 
-    func endSession() {
+    func endSession() async {
         guard let session else { return }
         isSaving = true
         timerCancellable?.cancel()
-
         do {
-            try dataService.finaliseSession(session)
-            isFinished = true
+            sessionResult = try await coordinator.finaliseSession(session)
+            isFinished    = true
         } catch {
             errorMessage = error.localizedDescription
         }
