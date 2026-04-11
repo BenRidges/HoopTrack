@@ -15,15 +15,12 @@ struct HoopTrackApp: App {
     // SwiftData is used on iOS 17+. A Core Data fallback is documented in
     // DataService.swift for users still on iOS 16.
     let modelContainer: ModelContainer = {
-        let schema = Schema([
-            PlayerProfile.self,
-            TrainingSession.self,
-            ShotRecord.self,
-            GoalRecord.self
-        ])
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema, configurations: [config])
+            return try ModelContainer(
+                for: PlayerProfile.self, TrainingSession.self,
+                     ShotRecord.self, GoalRecord.self, EarnedBadge.self,
+                migrationPlan: HoopTrackMigrationPlan.self
+            )
         } catch {
             fatalError("HoopTrack: Failed to create ModelContainer — \(error)")
         }
