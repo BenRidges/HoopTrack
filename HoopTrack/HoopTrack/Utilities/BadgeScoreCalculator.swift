@@ -194,5 +194,107 @@ enum BadgeScoreCalculator {
 
     private static func route(badgeID: BadgeID,
                                session: TrainingSession,
-                               profile: PlayerProfile) -> Double? { nil }
+                               profile: PlayerProfile) -> Double? {
+        switch badgeID {
+        // MARK: Shooting
+        case .deadeye:
+            return deadeye(fgPct: session.fgPercent, shotsAttempted: session.shotsAttempted)
+        case .sniper:
+            return sniper(releaseAngleStdDev: session.consistencyScore, shotsAttempted: session.shotsAttempted)
+        case .quickTrigger:
+            return quickTrigger(avgReleaseTimeMs: session.avgReleaseTimeMs, shotsAttempted: session.shotsAttempted)
+        case .beyondTheArc:
+            let attempts = session.shots.filter {
+                ($0.zone == .cornerThree || $0.zone == .aboveBreakThree) && $0.result != .pending
+            }.count
+            return beyondTheArc(threePct: session.threePointPercentage, threeAttempts: attempts)
+        case .charityStripe:
+            let attempts = session.shots.filter { $0.zone == .freeThrow && $0.result != .pending }.count
+            return charityStripe(ftPct: session.freeThrowPercentage, ftAttempts: attempts)
+        case .threeLevelScorer:
+            let p = session.shots.filter { $0.zone == .paint    && $0.result != .pending }
+            let m = session.shots.filter { $0.zone == .midRange && $0.result != .pending }
+            let t = session.shots.filter { ($0.zone == .cornerThree || $0.zone == .aboveBreakThree) && $0.result != .pending }
+            let pct: ([ShotRecord]) -> Double? = { shots in
+                shots.isEmpty ? nil : Double(shots.filter { $0.result == .make }.count) / Double(shots.count) * 100
+            }
+            return threeLevelScorer(paintFGPct: pct(p), paintAttempts: p.count,
+                                    midFGPct:   pct(m), midAttempts:   m.count,
+                                    threeFGPct: pct(t), threeAttempts: t.count)
+        case .hotHand:
+            return hotHand(longestMakeStreak: session.longestMakeStreak)
+
+        // MARK: Ball Handling
+        case .handles:
+            return handles(avgBPS: session.avgDribblesPerSec)
+        case .ambidextrous:
+            return ambidextrous(handBalance: session.handBalanceFraction,
+                                totalDribbles: session.totalDribbles ?? 0)
+        case .comboKing:
+            return comboKing(combos: session.dribbleCombosDetected ?? 0,
+                             totalDribbles: session.totalDribbles ?? 0)
+        case .floorGeneral:
+            return floorGeneral(avgBPS: session.avgDribblesPerSec,
+                                maxBPS: session.maxDribblesPerSec,
+                                durationSeconds: session.durationSeconds)
+        case .ballWizard:
+            let total = profile.sessions.reduce(0) { $0 + ($1.totalDribbles ?? 0) }
+            return ballWizard(careerTotalDribbles: total)
+
+        // MARK: Athleticism
+        case .posterizer:
+            return posterizer(avgVerticalJumpCm: session.avgVerticalJumpCm)
+        case .lightning:
+            return lightning(bestShuttleRunSec: session.bestShuttleRunSeconds)
+        case .explosive:
+            return explosive(ratingAthleticism: profile.ratingAthleticism)
+        case .highFlyer:
+            return highFlyer(prVerticalJumpCm: profile.prVerticalJumpCm)
+
+        // MARK: Consistency
+        case .automatic:
+            let recent = profile.sessions
+                .filter { $0.drillType == .freeShoot && $0.isComplete }
+                .sorted { $0.startedAt > $1.startedAt }
+                .prefix(10)
+                .map { $0.fgPercent }
+            return automatic(recentFGPcts: Array(recent))
+        case .metronome:
+            let shootingSessions = profile.sessions.filter { $0.drillType == .freeShoot && $0.isComplete }
+            let values = shootingSessions.compactMap { $0.consistencyScore }
+            let avg: Double? = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+            return metronome(avgReleaseAngleStdDev: avg, sessionCount: shootingSessions.count)
+        case .iceVeins:
+            let ftShots = profile.sessions.flatMap { $0.shots }.filter { $0.zone == .freeThrow && $0.result != .pending }
+            let made = ftShots.filter { $0.result == .make }.count
+            let pct  = ftShots.isEmpty ? 0.0 : Double(made) / Double(ftShots.count) * 100
+            return iceVeins(careerFTPct: pct, totalFTAttempts: ftShots.count)
+        case .reliable:
+            let streak = profile.sessions
+                .filter { $0.drillType == .freeShoot && $0.isComplete }
+                .sorted { $0.startedAt > $1.startedAt }
+                .prefix(while: { $0.fgPercent >= 40 })
+                .count
+            return reliable(consecutiveSessionsAbove40FG: streak)
+
+        // MARK: Volume
+        case .ironMan:
+            return ironMan(longestStreakDays: profile.longestStreakDays)
+        case .gymRat:
+            let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: .now)!
+            let count  = profile.sessions.filter { $0.startedAt >= cutoff && $0.isComplete }.count
+            return gymRat(sessionsLast7Days: count)
+        case .workhorse:
+            return workhorse(careerShotsAttempted: profile.careerShotsAttempted)
+        case .specialist:
+            let byType   = Dictionary(grouping: profile.sessions.filter { $0.isComplete }, by: { $0.drillType })
+            let maxCount = byType.values.map { $0.count }.max() ?? 0
+            return specialist(maxSessionsOfOneDrillType: maxCount)
+        case .completePlayer:
+            let minRating = [profile.ratingShooting, profile.ratingBallHandling,
+                             profile.ratingAthleticism, profile.ratingConsistency,
+                             profile.ratingVolume].min() ?? 0
+            return completePlayer(minSkillRating: minRating)
+        }
+    }
 }
