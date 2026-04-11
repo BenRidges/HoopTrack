@@ -86,6 +86,46 @@ enum HoopTrack {
         static let volumeWeight:     Double = 0.15
         /// Exponential moving average factor for skill rating updates (lower = slower to change).
         static let emaAlpha:         Double = 0.3
+
+        // MARK: Release angle
+        static let releaseAngleOptimalMin:  Double = 43    // degrees — optimal band start
+        static let releaseAngleOptimalMax:  Double = 57    // degrees — optimal band end
+        static let releaseAngleFalloffMin:  Double = 30    // degrees — score = 0 below this
+        static let releaseAngleFalloffMax:  Double = 70    // degrees — score = 0 above this
+        static let releaseTimeEliteMs:      Double = 300   // ms — fastest expected release
+        static let releaseTimeSlowMs:       Double = 800   // ms — slowest (score = 0)
+        static let releaseAngleStdDevMax:   Double = 10    // degrees — worst accepted std dev
+
+        // MARK: Shot speed
+        static let shotSpeedOptimalMin:     Double = 18    // mph — optimal range start
+        static let shotSpeedOptimalMax:     Double = 22    // mph — optimal range end
+        static let shotSpeedStdDevMax:      Double = 5     // mph — worst accepted std dev
+
+        // MARK: Ball handling
+        static let bpsAvgMin:               Double = 2.0
+        static let bpsAvgMax:               Double = 8.0
+        static let bpsMaxMin:               Double = 3.0
+        static let bpsMaxMax:               Double = 10.0
+        static let bpsSustainedMin:         Double = 0.4   // avg/max ratio — low end
+        static let bpsSustainedMax:         Double = 0.9   // avg/max ratio — elite end
+        static let comboRateMax:            Double = 0.3   // combos / total dribbles cap
+
+        // MARK: Athleticism
+        static let verticalJumpMinCm:       Double = 20
+        static let verticalJumpMaxCm:       Double = 90
+        static let shuttleRunBestSec:       Double = 5.5   // elite shuttle run time
+        static let shuttleRunWorstSec:      Double = 10.0  // slowest (score = 0)
+        static let laneAgilityBestSec:      Double = 8.5
+        static let laneAgilityWorstSec:     Double = 14.0
+
+        // MARK: Consistency
+        static let fgPctSessionStdDevMax:   Double = 30    // % — worst cross-session variance
+        static let crossSessionMinCount:    Int    = 3     // min sessions for cross-session score
+
+        // MARK: Volume
+        static let sessionsPerWeekCap:      Double = 5
+        static let shotsPerSessionMax:      Double = 200
+        static let weeklyMinutesMax:        Double = 300
     }
 
     // MARK: - Storage
