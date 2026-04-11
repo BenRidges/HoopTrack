@@ -45,6 +45,7 @@ final class PlayerProfile {
     // MARK: - Relationships
     @Relationship(deleteRule: .cascade) var sessions: [TrainingSession]
     @Relationship(deleteRule: .cascade) var goals: [GoalRecord]
+    @Relationship(deleteRule: .cascade) var earnedBadges: [EarnedBadge]
 
     init(name: String = "Player") {
         self.name                   = name
@@ -77,6 +78,7 @@ final class PlayerProfile {
 
         self.sessions               = []
         self.goals                  = []
+        self.earnedBadges           = []
     }
 
     // MARK: - Computed Helpers
@@ -95,5 +97,13 @@ final class PlayerProfile {
             .consistency:  ratingConsistency,
             .volume:       ratingVolume
         ]
+    }
+
+    var weakestSkillDimension: SkillDimension {
+        skillRatings.min { $0.value < $1.value }?.key ?? .volume
+    }
+
+    var strongestSkillDimension: SkillDimension {
+        skillRatings.max { $0.value < $1.value }?.key ?? .shooting
     }
 }

@@ -27,6 +27,7 @@ final class GoalRecord {
 
     // MARK: - Relationship
     var profile: PlayerProfile?
+    var lastMilestoneNotified: Int = 0   // 0, 50, 75, or 100 — tracks highest fired threshold
 
     init(title: String,
          skill: SkillDimension,
