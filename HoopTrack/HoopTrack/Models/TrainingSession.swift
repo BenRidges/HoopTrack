@@ -44,6 +44,12 @@ final class TrainingSession {
     var handBalanceFraction: Double?  // 0.0 = all right, 1.0 = all left, nil = no data
     var dribbleCombosDetected: Int?
 
+    // MARK: - Phase 5A Agility & Consistency Fields
+    var bestShuttleRunSeconds: Double?   // best result this session
+    var bestLaneAgilitySeconds: Double?  // best result this session
+    var longestMakeStreak: Int           // longest consecutive makes; computed in recalculateStats()
+    var shotSpeedStdDev: Double?         // std dev of shotSpeedMph; computed in recalculateStats()
+
     // MARK: - Relationships
     var profile: PlayerProfile?
     @Relationship(deleteRule: .cascade) var shots: [ShotRecord]
@@ -84,12 +90,31 @@ final class TrainingSession {
         self.handBalanceFraction    = nil
         self.dribbleCombosDetected  = nil
 
+        self.bestShuttleRunSeconds  = nil
+        self.bestLaneAgilitySeconds = nil
+        self.longestMakeStreak      = 0
+        self.shotSpeedStdDev        = nil
+
         self.shots              = []
     }
 
     // MARK: - Helpers
 
     var isComplete: Bool { endedAt != nil }
+
+    var threePointPercentage: Double? {
+        let shots3 = shots.filter {
+            ($0.zone == .cornerThree || $0.zone == .aboveBreakThree) && $0.result != .pending
+        }
+        guard !shots3.isEmpty else { return nil }
+        return Double(shots3.filter { $0.result == .make }.count) / Double(shots3.count) * 100
+    }
+
+    var freeThrowPercentage: Double? {
+        let ftShots = shots.filter { $0.zone == .freeThrow && $0.result != .pending }
+        guard !ftShots.isEmpty else { return nil }
+        return Double(ftShots.filter { $0.result == .make }.count) / Double(ftShots.count) * 100
+    }
 
     var formattedDuration: String {
         let mins = Int(durationSeconds) / 60
@@ -121,6 +146,24 @@ final class TrainingSession {
         // Consistency score = population std dev of release angles
         let angles = completedShots.compactMap { $0.releaseAngleDeg }
         consistencyScore = ShotScienceCalculator.consistencyScore(releaseAngles: angles)
+
+        // Longest consecutive makes streak
+        var maxStreak = 0, streak = 0
+        for shot in completedShots {
+            streak = shot.result == .make ? streak + 1 : 0
+            maxStreak = max(maxStreak, streak)
+        }
+        longestMakeStreak = maxStreak
+
+        // Shot speed population std dev
+        let speeds = completedShots.compactMap { $0.shotSpeedMph }
+        if speeds.count > 1 {
+            let mean     = speeds.reduce(0, +) / Double(speeds.count)
+            let variance = speeds.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(speeds.count)
+            shotSpeedStdDev = sqrt(variance)
+        } else {
+            shotSpeedStdDev = nil
+        }
     }
 
     /// Applies dribble session aggregates. Call from DataService.finaliseDribbleSession.
