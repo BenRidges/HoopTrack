@@ -33,7 +33,7 @@ struct HoopTrackApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            CoordinatorHost()
                 .modelContainer(modelContainer)
                 .environmentObject(hapticService)
                 .environmentObject(notificationService)
