@@ -132,4 +132,56 @@ final class SkillRatingCalculatorTests: XCTestCase {
         let bothData = SkillRatingCalculator.athleticismScore(verticalJumpCm: 55, shuttleRunSec: 7.5)!
         XCTAssertNotEqual(jumpOnly, bothData, accuracy: 5.0)
     }
+
+    // MARK: - consistencyScore
+
+    func test_consistencyScore_allNilAndEmpty_returnsNil() {
+        XCTAssertNil(SkillRatingCalculator.consistencyScore(
+            releaseAngleStdDev: nil, fgPctHistory: [], ftPct: nil, shotSpeedStdDev: nil))
+    }
+
+    func test_consistencyScore_zeroStdDev_returnsHigh() {
+        let score = SkillRatingCalculator.consistencyScore(
+            releaseAngleStdDev: 0, fgPctHistory: [], ftPct: nil, shotSpeedStdDev: nil)
+        XCTAssertNotNil(score)
+        XCTAssertGreaterThan(score!, 90)
+    }
+
+    func test_consistencyScore_fewerThanMinSessions_usesNeutralFallback() {
+        let score = SkillRatingCalculator.consistencyScore(
+            releaseAngleStdDev: 2, fgPctHistory: [50, 55], ftPct: nil, shotSpeedStdDev: nil)
+        XCTAssertNotNil(score)
+    }
+
+    // MARK: - volumeScore
+
+    func test_volumeScore_allZeros_returns0() {
+        let score = SkillRatingCalculator.volumeScore(
+            sessionsLast4Weeks: 0, avgShotsPerSession: 0,
+            weeklyTrainingMinutes: 0, drillVarietyLast14Days: 0)
+        XCTAssertEqual(score, 0, accuracy: 0.001)
+    }
+
+    func test_volumeScore_maxValues_returns100() {
+        let score = SkillRatingCalculator.volumeScore(
+            sessionsLast4Weeks: 20, avgShotsPerSession: 200,
+            weeklyTrainingMinutes: 300, drillVarietyLast14Days: 1.0)
+        XCTAssertEqual(score, 100, accuracy: 1.0)
+    }
+
+    // MARK: - overallScore
+
+    func test_overallScore_allDimensionsPresent_returnsWeightedAverage() {
+        let score = SkillRatingCalculator.overallScore(
+            shooting: 80, handling: 60, athleticism: 70,
+            consistency: 50, volume: 40)
+        // 80*0.30 + 60*0.20 + 70*0.20 + 50*0.15 + 40*0.15 = 63.5
+        XCTAssertEqual(score, 63.5, accuracy: 0.5)
+    }
+
+    func test_overallScore_missingDimensions_redistributesWeight() {
+        let withShooting    = SkillRatingCalculator.overallScore(shooting: 100, handling: nil, athleticism: nil, consistency: nil, volume: 0)
+        let withoutShooting = SkillRatingCalculator.overallScore(shooting: nil, handling: nil, athleticism: nil, consistency: nil, volume: 0)
+        XCTAssertGreaterThan(withShooting, withoutShooting)
+    }
 }
