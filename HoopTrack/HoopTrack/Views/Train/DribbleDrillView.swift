@@ -245,6 +245,7 @@ final class DribbleARCoordinator: NSObject, ARSessionDelegate {
 
     @MainActor
     private func placeARTargets(on planeAnchor: ARPlaneAnchor) {
+        guard #available(iOS 18.0, *) else { return }
         let count  = HoopTrack.Dribble.arTargetCount
         let radius = HoopTrack.Dribble.arTargetRadiusM
         for i in 0 ..< count {
