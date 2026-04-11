@@ -17,6 +17,7 @@ struct DribbleDrillView: View {
     let onFinish: () -> Void
 
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
 
     @StateObject private var viewModel = DribbleSessionViewModel()
 
@@ -42,7 +43,8 @@ struct DribbleDrillView: View {
             .ignoresSafeArea(edges: .bottom)
         }
         .task {
-            viewModel.configure(dataService: DataService(modelContext: modelContext))
+            viewModel.configure(dataService: DataService(modelContext: modelContext),
+                                coordinator: coordinator)
             viewModel.start(namedDrill: namedDrill)
 
             // Wire pipeline → viewModel
@@ -153,7 +155,7 @@ struct DribbleDrillView: View {
                             endSessionTask = Task {
                                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                                 guard !Task.isCancelled else { return }
-                                viewModel.endSession()
+                                await viewModel.endSession()
                             }
                         }
                         .onEnded { _ in
