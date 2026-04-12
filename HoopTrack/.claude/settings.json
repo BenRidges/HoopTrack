@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys, json, os; data = json.load(sys.stdin); path = data.get('file_path', ''); blocked = ['Secrets.xcconfig', '.env', 'xcuserstate', 'xcuserdata']; match = next((b for b in blocked if b in path), None); sys.exit(1) if match else sys.exit(0)\"",
+            "on_failure": "block"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys, json; data = json.load(sys.stdin); path = data.get('file_path', ''); needs_test = any(x in path for x in ['Service.swift', 'Calculator.swift', 'Coordinator.swift']) and 'Tests' not in path and '.claude' not in path; print('\\n⚠️  Convention: add a matching test file in HoopTrackTests/ for pure logic in this file.') if needs_test else None\""
+          }
+        ]
+      }
+    ]
+  }
+}
