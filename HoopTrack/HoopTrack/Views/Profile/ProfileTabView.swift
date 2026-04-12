@@ -14,8 +14,9 @@ struct ProfileTabView: View {
         ProfileViewModel(dataService: DataService(modelContext: ModelContext(try! ModelContainer(for: PlayerProfile.self, TrainingSession.self, ShotRecord.self, GoalRecord.self))))
     }()
 
-    @State private var isShowingExportSheet = false
-    @State private var exportCSV: String = ""
+    @State private var exportURL: URL?
+    @State private var isExporting = false
+    @State private var exportErrorMessage: String?
     @State private var reminderEnabled: Bool = UserDefaults.standard.bool(forKey: "trainingReminderEnabled")
     @State private var reminderHour: Int     = UserDefaults.standard.integer(forKey: "trainingReminderHour") == 0
                                                 ? 9
@@ -175,20 +176,41 @@ struct ProfileTabView: View {
             // MARK: Data & Export
             Section("Data") {
                 Button {
-                    exportCSV       = viewModel.exportData()
-                    isShowingExportSheet = true
+                    guard !isExporting, let profile = viewModel.profile else { return }
+                    isExporting = true
+                    Task {
+                        do {
+                            exportURL   = try await ExportService().exportJSON(for: profile)
+                        } catch {
+                            exportErrorMessage = error.localizedDescription
+                        }
+                        isExporting = false
+                    }
                 } label: {
-                    Label("Export Session Data (CSV)", systemImage: "square.and.arrow.up")
-                        .foregroundStyle(.orange)
+                    HStack {
+                        Label("Export Data (JSON)", systemImage: "square.and.arrow.up")
+                            .foregroundStyle(.orange)
+                        if isExporting {
+                            Spacer()
+                            ProgressView()
+                                .tint(.orange)
+                        }
+                    }
                 }
+                .disabled(isExporting)
             }
         }
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.large)
         .task { viewModel.load() }
-        .sheet(isPresented: $isShowingExportSheet) {
-            ShareSheet(items: [exportCSV])
+        .sheet(item: $exportURL) { url in
+            ShareSheet(items: [url])
                 .presentationDetents([.medium, .large])
+        }
+        .alert("Export Failed", isPresented: .constant(exportErrorMessage != nil)) {
+            Button("OK") { exportErrorMessage = nil }
+        } message: {
+            Text(exportErrorMessage ?? "")
         }
     }
 
@@ -330,4 +352,9 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - URL + Identifiable (for .sheet(item:))
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
 }
