@@ -57,8 +57,16 @@ The Train tab hosts the main live session flow:
 
 ### Services (added Phase 6A)
 
-- **`ExportService`** — JSON export of full session history via system share sheet. Entry point: `exportJSON(for:)`.
+- **`ExportService`** — JSON export of full session history via system share sheet. Entry point: `exportJSON(for:)`. Exported files get `FileProtectionType.complete`.
 - **`MetricsService`** — MetricKit subscriber wired at launch. Collects on-device performance diagnostics; do not duplicate with manual logging.
+
+### Security layer (added Phase 7)
+
+- **`Utilities/KeychainService.swift`** — `@MainActor final class`. All auth tokens and sensitive values go here — never `UserDefaults`. Key constants in `HoopTrack.KeychainKey`. Call `deleteAll()` during account deletion.
+- **`Utilities/InputValidator.swift`** — Pure `enum` with static validators. Call before persisting any sensor value or user string: `isValidReleaseAngle`, `isValidJumpHeight`, `isValidCourtCoordinate`, `sanitisedProfileName`.
+- **`Utilities/PinningURLSessionDelegate.swift`** — SPKI SHA-256 cert pinning for Phase 9. **Replace the placeholder hash with real Supabase SPKI before Phase 9 ships.**
+- **`PrivacyInfo.xcprivacy`** — App Store privacy manifest. Auto-discovered by Xcode 26. No pbxproj edits needed.
+- **`DataService.deleteAllUserData()`** — GDPR right-to-delete. Clears SwiftData records, `Documents/Sessions/` files, Keychain, and all known UserDefaults keys.
 
 ## Testing conventions
 
@@ -75,6 +83,9 @@ When adding new pure logic (calculators, services that take value-type inputs), 
 - **Portrait-only.** The app is locked to portrait; landscape breaks CV coordinate mapping.
 - **Video storage.** Session videos go to `Documents/Sessions/<uuid>.mov`. Auto-deleted after `HoopTrack.Storage.defaultVideoRetainDays` (60) days unless `videoPinnedByUser = true`.
 - **Swift 6 async pattern.** Never use `DispatchQueue.main.async` inside `@MainActor` classes — use `Task { @MainActor in }` instead. The project targets strict concurrency compliance.
+- **Sensitive data in Keychain only.** Auth tokens, user IDs, and API keys go in `KeychainService`. `UserDefaults` and `@AppStorage` are for non-sensitive UI preferences only.
+- **Validate before persisting.** All sensor values (release angle, jump height, court coordinates) and user-provided strings must pass `InputValidator` checks before writing to SwiftData or sending to any API.
+- **File protection on sensitive files.** Session videos (`Documents/Sessions/`) and exported JSON must have `FileProtectionType.complete`. `HoopTrackApp` re-applies this at launch.
 - **Phase plan.** See `docs/ROADMAP.md` for the full implementation roadmap and upcoming phases.
 
 ## Parallel Agent Dispatch
@@ -158,6 +169,23 @@ Skills are invoked via the `Skill` tool (or `/skill-name` shorthand). Use the ri
 | `superpowers:requesting-code-review` | After completing a feature or phase — validates work before merging |
 | `superpowers:receiving-code-review` | When review feedback arrives — prevents blind implementation of unclear suggestions |
 | `superpowers:finishing-a-development-branch` | When implementation is complete and tests pass — guides merge/PR/cleanup |
+
+### Phase completion checklist
+
+Before merging any phase branch, run a security review using the `.claude/agents/swift-security-reviewer.md` agent:
+
+```
+# Lightweight end-of-phase security scan
+# Dispatch a single swift-security-reviewer subagent covering all files changed in the phase.
+# Fix all CRITICAL and HIGH issues before merging.
+# Full 4-domain parallel sweep (like Phase 7) is reserved for security-focused phases.
+```
+
+Steps:
+1. `git diff origin/main..HEAD --name-only` — get the list of changed files
+2. Dispatch one `swift-security-reviewer` subagent with all changed files in scope
+3. Fix any CRITICAL/HIGH findings; note MEDIUM/LOW for future phases
+4. Then use `superpowers:finishing-a-development-branch` to merge
 
 ### Project maintenance
 
