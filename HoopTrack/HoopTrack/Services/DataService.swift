@@ -205,6 +205,51 @@ final class DataService: ObservableObject {
         try modelContext.save()
     }
 
+    // Phase 7 — Security / GDPR right-to-delete
+    /// Permanently removes all user data: SwiftData records, session videos,
+    /// Keychain entries, and app-level UserDefaults keys.
+    /// Call this when the user deletes their account.
+    func deleteAllUserData() async {
+        // 1. Delete all SwiftData model instances
+        do {
+            let sessions = try modelContext.fetch(FetchDescriptor<TrainingSession>())
+            sessions.forEach { modelContext.delete($0) }
+
+            let goals = try modelContext.fetch(FetchDescriptor<GoalRecord>())
+            goals.forEach { modelContext.delete($0) }
+
+            let profiles = try modelContext.fetch(FetchDescriptor<PlayerProfile>())
+            profiles.forEach { modelContext.delete($0) }
+
+            try modelContext.save()
+        } catch {
+            print("[DataService] deleteAllUserData: SwiftData error: \(error)")
+        }
+
+        // 2. Delete session video files from Documents/Sessions/
+        let sessionsDir = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
+
+        if let contents = try? FileManager.default.contentsOfDirectory(
+            at: sessionsDir,
+            includingPropertiesForKeys: nil
+        ) {
+            contents.forEach { try? FileManager.default.removeItem(at: $0) }
+        }
+
+        // 3. Wipe Keychain
+        KeychainService().deleteAll()
+
+        // 4. Remove app-level UserDefaults keys
+        let appDefaults: [String] = [
+            "hasCompletedOnboarding",
+            "preferredCameraPosition",
+            "selectedDrillType"
+        ]
+        appDefaults.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+    }
+
     // MARK: - Analytics Helpers
 
     /// FG% for the last `days` days.
