@@ -64,7 +64,10 @@ struct DribbleDrillView: View {
         }
         .fullScreenCover(isPresented: $viewModel.isFinished) {
             if let session = viewModel.session {
-                DribbleSessionSummaryView(session: session) {
+                DribbleSessionSummaryView(
+                    session:      session,
+                    badgeChanges: viewModel.sessionResult?.badgeChanges ?? []
+                ) {
                     viewModel.isFinished = false
                     onFinish()
                 }

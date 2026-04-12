@@ -7,6 +7,7 @@ import SwiftUI
 struct DribbleSessionSummaryView: View {
 
     let session: TrainingSession
+    var badgeChanges: [BadgeTierChange] = []
     let onDismiss: () -> Void
 
     var body: some View {
@@ -16,6 +17,9 @@ struct DribbleSessionSummaryView: View {
                     drillHeader
                     statsGrid
                     handBalanceBar
+
+                    // MARK: Badges Updated (Phase 5B)
+                    BadgesUpdatedSection(changes: badgeChanges)
                 }
                 .padding()
             }

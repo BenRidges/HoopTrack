@@ -180,12 +180,17 @@ struct ProgressTabView: View {
                 Text("Goals")
                     .font(.headline)
                 Spacer()
-                NavigationLink {
-                    GoalListView()
-                } label: {
-                    Label("Manage", systemImage: "plus")
-                        .font(.subheadline)
-                        .tint(.orange)
+                if let profile = viewModel.profile {
+                    NavigationLink {
+                        GoalListView(viewModel: GoalListViewModel(
+                            modelContext: modelContext,
+                            profile: profile
+                        ))
+                    } label: {
+                        Label("Manage", systemImage: "plus")
+                            .font(.subheadline)
+                            .tint(.orange)
+                    }
                 }
             }
 
@@ -321,14 +326,5 @@ struct GoalProgressRow: View {
         }
         .padding(10)
         .background(Color.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-// MARK: - GoalListView (stub — Phase 5 full implementation)
-struct GoalListView: View {
-    var body: some View {
-        Text("Goal management — coming in Phase 5")
-            .foregroundStyle(.secondary)
-            .navigationTitle("Goals")
     }
 }

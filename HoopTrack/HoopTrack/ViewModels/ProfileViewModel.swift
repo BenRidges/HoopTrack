@@ -105,4 +105,5 @@ final class ProfileViewModel: ObservableObject {
     var totalSessions: Int    { profile?.totalSessionCount ?? 0 }
     var totalMinutes:  Double { profile?.totalTrainingMinutes ?? 0 }
     var careerFG:      String { String(format: "%.1f%%", profile?.careerFGPercent ?? 0) }
+    var badgeCount: Int { profile?.earnedBadges.count ?? 0 }
 }

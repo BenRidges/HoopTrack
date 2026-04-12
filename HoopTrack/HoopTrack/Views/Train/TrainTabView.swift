@@ -43,6 +43,11 @@ struct TrainTabView: View {
                     isShowingLiveSession = false
                     drillToLaunch        = nil
                 }
+            } else if let drill = drillToLaunch, drill.drillType == .agility {
+                AgilitySessionView(namedDrill: drill) {
+                    isShowingLiveSession = false
+                    drillToLaunch        = nil
+                }
             } else {
                 LiveSessionView(
                     drillType: drillToLaunch?.drillType ?? .freeShoot,
