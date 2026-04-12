@@ -141,7 +141,10 @@ struct LiveSessionView: View {
         }
         .fullScreenCover(isPresented: $viewModel.isFinished) {
             if let session = viewModel.session {
-                SessionSummaryView(session: session) {
+                SessionSummaryView(
+                    session:      session,
+                    badgeChanges: viewModel.sessionResult?.badgeChanges ?? []
+                ) {
                     viewModel.isFinished = false
                     onFinish()
                 }
