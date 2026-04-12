@@ -1,6 +1,7 @@
 import XCTest
 @testable import HoopTrack
 
+@MainActor
 final class KeychainServiceTests: XCTestCase {
 
     private let service = KeychainService()
@@ -9,6 +10,11 @@ final class KeychainServiceTests: XCTestCase {
     override func tearDown() {
         super.tearDown()
         service.delete(forKey: testKey)
+        // Clean up any production-adjacent slots written by tests
+        [HoopTrack.KeychainKey.accessToken,
+         HoopTrack.KeychainKey.refreshToken,
+         HoopTrack.KeychainKey.userID,
+         HoopTrack.KeychainKey.biometricToken].forEach { service.delete(forKey: $0) }
     }
 
     // MARK: - String round-trip
@@ -43,7 +49,8 @@ final class KeychainServiceTests: XCTestCase {
     func test_deleteAllClearsAllKeys() {
         let keys = [HoopTrack.KeychainKey.accessToken,
                     HoopTrack.KeychainKey.refreshToken,
-                    HoopTrack.KeychainKey.userID]
+                    HoopTrack.KeychainKey.userID,
+                    HoopTrack.KeychainKey.biometricToken]
         keys.forEach { service.save("token", forKey: $0) }
 
         service.deleteAll()

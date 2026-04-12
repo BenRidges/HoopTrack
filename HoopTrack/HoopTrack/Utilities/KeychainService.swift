@@ -21,15 +21,16 @@ final class KeychainService {
     // MARK: - Data primitives
 
     func save(_ data: Data, forKey key: String) {
-        delete(forKey: key) // ensure no duplicate
+        delete(forKey: key)
 
         let query: [CFString: Any] = [
-            kSecClass:           kSecClassGenericPassword,
-            kSecAttrAccount:     key,
-            kSecAttrAccessible:  kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-            kSecValueData:       data
+            kSecClass:          kSecClassGenericPassword,
+            kSecAttrAccount:    key,
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData:      data
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        assert(status == errSecSuccess, "KeychainService: SecItemAdd failed with \(status) for key \(key)")
     }
 
     func data(forKey key: String) -> Data? {
@@ -73,18 +74,20 @@ final class KeychainService {
         guard let data = value.data(using: .utf8) else { return }
         delete(forKey: key)
 
-        let access = SecAccessControlCreateWithFlags(
+        guard let access = SecAccessControlCreateWithFlags(
             nil,
             kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
             .biometryCurrentSet,
             nil
-        )
+        ) else { return } // device has no passcode; biometric storage unavailable
+
         let query: [CFString: Any] = [
             kSecClass:             kSecClassGenericPassword,
             kSecAttrAccount:       key,
-            kSecAttrAccessControl: access as Any,
+            kSecAttrAccessControl: access,
             kSecValueData:         data
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        assert(status == errSecSuccess, "KeychainService: saveBiometricProtected SecItemAdd failed with \(status)")
     }
 }
