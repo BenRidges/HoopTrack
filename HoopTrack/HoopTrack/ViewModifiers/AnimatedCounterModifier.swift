@@ -36,7 +36,18 @@ struct AnimatedCounterModifier: AnimatableModifier {
 
     // MARK: - Body
 
-    func body(content: Content) -> some View {
+    // content is intentionally discarded — this modifier replaces the view entirely
+    func body(content _: Content) -> some View {
         Text(String(format: format, currentValue))
     }
+}
+
+#Preview {
+    @Previewable @State var value: Double = 0
+    EmptyView()
+        .modifier(AnimatedCounterModifier(currentValue: value, format: "%.0f%%"))
+        .font(.system(size: 72, weight: .black, design: .rounded))
+        .foregroundStyle(.orange)
+        .animation(.easeOut(duration: 0.6), value: value)
+        .onAppear { value = 48.3 }
 }
