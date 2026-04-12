@@ -96,17 +96,6 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Export
-    // Phase 6: generate CSV from all sessions + shots and present UIActivityViewController.
-    func exportData() -> String {
-        var csv = "session_id,date,drill,fg_percent,shots_made,shots_attempted,duration_s\n"
-        for s in sessions {
-            let dateStr = ISO8601DateFormatter().string(from: s.startedAt)
-            csv += "\(s.id),\(dateStr),\(s.drillType.rawValue),\(s.fgPercent),\(s.shotsMade),\(s.shotsAttempted),\(s.durationSeconds)\n"
-        }
-        return csv
-    }
-
     // MARK: - Stats Summary
 
     var totalSessions: Int    { profile?.totalSessionCount ?? 0 }

@@ -8,10 +8,10 @@ import SwiftUI
 
 struct ContentView: View {
 
-    @State private var selectedTab: AppTab = .home
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: $appState.selectedTab) {
 
             // MARK: Home — Dashboard
             NavigationStack {
@@ -60,4 +60,5 @@ enum AppTab: Hashable {
 
 #Preview {
     ContentView()
+        .environmentObject(AppState())
 }

@@ -72,6 +72,20 @@ enum CourtZone: String, Codable, CaseIterable {
     case aboveBreakThree = "Above-Break 3"
     case freeThrow      = "Free Throw"
     case unknown        = "Unknown"
+
+    /// Stable camelCase key used in JSON exports (e.g. "midRange", "cornerThree").
+    /// Distinct from `rawValue` (human-readable label) so UI labels can change
+    /// without breaking existing export files.
+    var exportKey: String {
+        switch self {
+        case .paint:           return "paint"
+        case .midRange:        return "midRange"
+        case .cornerThree:     return "cornerThree"
+        case .aboveBreakThree: return "aboveBreakThree"
+        case .freeThrow:       return "freeThrow"
+        case .unknown:         return "unknown"
+        }
+    }
 }
 
 /// How the shot was generated (influences difficulty weighting in skill rating).
