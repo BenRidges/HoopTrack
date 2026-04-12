@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 1 | Critical | `ProfileTabView` constructs a second `ModelContainer` in a `@StateObject` initialiser, bypassing the app-wide SwiftData store | `ProfileTabView.swift:13–15` |
 | 2 | Critical | `DispatchQueue.main.async` used inside `@MainActor` context for error propagation in `CameraService` | `CameraService.swift:78, 94, 126, 134` |
-| 3 | Important | Long-press end-session button pattern duplicated verbatim across three views (~60 lines each) | `LiveSessionView.swift:323–363`, `DribbleDrillView.swift:134–172`, `AgilitySessionView.swift:186–225` |
+| 3 | Important | Long-press end-session button pattern duplicated verbatim across three views (~40 lines each) | `LiveSessionView.swift:323–363`, `DribbleDrillView.swift:134–172`, `AgilitySessionView.swift:186–225` |
 | 4 | Important | Three views each call `DataService(modelContext: modelContext)` directly in `.task`, bypassing the injected environment service | `LiveSessionView.swift:73`, `DribbleDrillView.swift:46`, `AgilitySessionView.swift:68` |
 | 5 | Important | `ProgressViewModel.load()` is synchronous (not `async`) despite executing SwiftData fetches that can throw, silently eating errors | `ProgressViewModel.swift:36–50` |
 | 6 | Important | `LiveSessionViewModel` uses implicitly-unwrapped optionals for injected dependencies, creating a crash surface if `configure()` is not called before `start()` | `LiveSessionViewModel.swift:44–46` |
@@ -120,24 +120,28 @@ Inject a single `DataService` instance through the SwiftUI environment (e.g., `.
 `load()` performs multiple SwiftData fetches synchronously on the main actor. For a player with many sessions, the `fetchSessions()` call and the subsequent `computeFGTrend()` (iterating all shots) block the main thread, causing frame drops on the Progress tab. The method is also triggered by the `$selectedTimeRange` Combine sink (line 29), so every picker change redoes all fetches synchronously. Additionally, errors from the `do/catch` block set `errorMessage` but `isLoading` is still reset to `false`, which is the only correct handling — but the missing `defer` makes the pattern fragile.
 
 **Suggested fix:**  
-Make `load()` `async` and offload the heavy fetch to a background actor:
+Convert `load()` to `async` and call the synchronous SwiftData fetches from a structured `Task` on the `@MainActor` — not a `detached` task, since `DataService`'s `ModelContext` is `@MainActor`-bound and not `Sendable`:
 
 ```swift
-func load() {
-    Task {
-        await MainActor.run { isLoading = true }
-        do {
-            let fetched = try await Task.detached(priority: .userInitiated) {
-                try dataService.fetchSessions()
-            }.value
-            // … assign on main actor
-        } catch { … }
-        await MainActor.run { isLoading = false }
+func load() async {
+    isLoading = true
+    defer { isLoading = false }
+    do {
+        sessions      = try dataService.fetchSessions()
+        weeklyVolume  = try dataService.dailyVolume(lastDays: selectedTimeRange.days)
+        fgTrendData   = computeFGTrend()
+
+        let fetched   = try dataService.fetchOrCreateProfile()
+        profile       = fetched
+        goals         = fetched.goals
+    } catch {
+        errorMessage = error.localizedDescription
     }
 }
 ```
 
-Also, use `defer { isLoading = false }` to guarantee the flag is cleared regardless of throw path.
+Update call sites from `.task { viewModel.load() }` to `.task { await viewModel.load() }`.  
+Note: a background `@ModelActor` context would be required only if fetches become truly expensive and need to be offloaded from the main thread.
 
 ---
 
