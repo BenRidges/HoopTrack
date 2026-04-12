@@ -44,11 +44,21 @@ All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums:
 
 ### Navigation
 
-`ContentView` → `TabView` with 4 `NavigationStack` tabs: **Home**, **Train**, **Progress**, **Profile**.
+`HoopTrackApp` → `CoordinatorHost` → `TabView` with 4 `NavigationStack` tabs: **Home**, **Train**, **Progress**, **Profile**.
 
 The Train tab hosts the main live session flow:
 1. `TrainTabView` — drill picker grid, routes to `LiveSessionView` (shot/dribble) or `AgilityDrillView` (agility) via `fullScreenCover`
 2. Live session ends → `DataService.finalise*()` → `SessionFinalizationCoordinator` → `SessionSummaryView`
+
+### App Intents & Deep Links
+
+- **`AppIntents/`** — Siri Shortcuts: `StartFreeShootSessionIntent`, `ShowMyStatsIntent`, `ShotsTodayIntent`. `HoopTrackShortcuts` is the single registration point — adding a new shortcut requires only a new file + one line there.
+- **`AppState`** — handles `hooptrack://` URL scheme routing via `.onOpenURL` in `HoopTrackApp`. Add new routes as `AppRoute` enum cases.
+
+### Services (added Phase 6A)
+
+- **`ExportService`** — JSON export of full session history via system share sheet. Entry point: `exportJSON(for:)`.
+- **`MetricsService`** — MetricKit subscriber wired at launch. Collects on-device performance diagnostics; do not duplicate with manual logging.
 
 ## Testing conventions
 
@@ -64,3 +74,5 @@ When adding new pure logic (calculators, services that take value-type inputs), 
 - **Phase gating in comments.** Code sections are annotated `// Phase N —` to indicate when they were introduced. Don't remove these.
 - **Portrait-only.** The app is locked to portrait; landscape breaks CV coordinate mapping.
 - **Video storage.** Session videos go to `Documents/Sessions/<uuid>.mov`. Auto-deleted after `HoopTrack.Storage.defaultVideoRetainDays` (60) days unless `videoPinnedByUser = true`.
+- **Swift 6 async pattern.** Never use `DispatchQueue.main.async` inside `@MainActor` classes — use `Task { @MainActor in }` instead. The project targets strict concurrency compliance.
+- **Phase plan.** See `docs/ROADMAP.md` for the full implementation roadmap and upcoming phases.
