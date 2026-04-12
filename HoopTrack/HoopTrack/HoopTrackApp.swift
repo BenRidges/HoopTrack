@@ -31,6 +31,9 @@ struct HoopTrackApp: App {
     @StateObject private var notificationService = NotificationService()
     @StateObject private var cameraService   = CameraService()
 
+    // MARK: - Onboarding Gate
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+
     var body: some Scene {
         WindowGroup {
             CoordinatorHost()
@@ -38,6 +41,12 @@ struct HoopTrackApp: App {
                 .environmentObject(hapticService)
                 .environmentObject(notificationService)
                 .environmentObject(cameraService)
+                .fullScreenCover(isPresented: .init(
+                    get: { !hasCompletedOnboarding },
+                    set: { if !$0 { hasCompletedOnboarding = true } }
+                )) {
+                    OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding)
+                }
         }
     }
 }
