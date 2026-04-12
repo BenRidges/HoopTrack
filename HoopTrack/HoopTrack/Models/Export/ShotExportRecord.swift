@@ -5,7 +5,7 @@ import Foundation
 
 struct ShotExportRecord: Codable {
     let id: String                     // ShotRecord.id (UUID string) — stable identity for diffing
-    let zone: String                   // CourtZone.rawValue
+    let zone: String                   // CourtZone.exportKey — stable camelCase, NOT rawValue
     let made: Bool
     let releaseAngleDeg: Double?
     let releaseTimeMs: Double?

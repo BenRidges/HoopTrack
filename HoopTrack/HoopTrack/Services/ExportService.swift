@@ -17,8 +17,8 @@ final class ExportService {
     // MARK: - Public Interface
 
     /// Builds JSON from `profile` and writes it to a dated temp file.
-    /// Deletes any previous export file for this profile before writing.
-    /// - Returns: URL of the written file in the system temp directory.
+    /// Each call creates a new file in the system temp directory.
+    /// - Returns: URL of the written file.
     func exportJSON(for profile: PlayerProfile) async throws -> URL {
         let envelope = ProfileExport(
             exportedAt:  .now,
