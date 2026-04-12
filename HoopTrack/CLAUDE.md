@@ -76,3 +76,52 @@ When adding new pure logic (calculators, services that take value-type inputs), 
 - **Video storage.** Session videos go to `Documents/Sessions/<uuid>.mov`. Auto-deleted after `HoopTrack.Storage.defaultVideoRetainDays` (60) days unless `videoPinnedByUser = true`.
 - **Swift 6 async pattern.** Never use `DispatchQueue.main.async` inside `@MainActor` classes — use `Task { @MainActor in }` instead. The project targets strict concurrency compliance.
 - **Phase plan.** See `docs/ROADMAP.md` for the full implementation roadmap and upcoming phases.
+
+## Parallel Agent Dispatch
+
+Use parallel agents when tasks are **independent** — no shared state, no sequential dependencies. Dispatch all agents in a single message to run them concurrently.
+
+### When to dispatch parallel agents
+
+| Scenario | Example |
+|---|---|
+| Multiple independent plan docs to write | Writing upgrade plans for Auth, Backend, Security simultaneously |
+| Investigating unrelated bugs | 3 failing test files with different root causes |
+| Cross-cutting research across subsystems | Auditing services, models, and views independently |
+| Implementation plan has parallel tracks | Two features that don't touch shared files |
+
+### When NOT to dispatch parallel agents
+
+- Tasks share state or write to the same files
+- Task B depends on the output of Task A
+- Exploratory work where you don't know the shape yet (investigate first, then dispatch)
+
+### Agent prompt checklist
+
+Each agent prompt must be **self-contained** — agents have no memory of the current session. Include:
+
+1. **App context** — architecture summary, relevant file paths, key types
+2. **Specific scope** — exactly what this agent should do (one domain only)
+3. **Constraints** — what files/areas to avoid, what conventions to follow
+4. **Output format** — what to produce and where to write it
+
+### HoopTrack-specific agent contexts to include
+
+Copy the relevant block into agent prompts:
+
+```
+# iOS app context
+SwiftUI + SwiftData + Combine, iOS 16+, MVVM, @MainActor final class ViewModels,
+SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor, no third-party dependencies.
+Key services: DataService, SessionFinalizationCoordinator, CameraService, CVPipeline.
+Models: PlayerProfile, TrainingSession, ShotRecord, GoalRecord.
+Upcoming stack: Supabase (Phase 9), Hasura GraphQL, Sign in with Apple.
+See docs/ROADMAP.md for full phase plan.
+```
+
+### Collecting results
+
+After all agents complete, review each output before committing. Check for:
+- Conflicting decisions across agents (e.g. two agents chose different table names)
+- Files that need cross-referencing (e.g. a schema change that affects an iOS model)
+- Merge conflicts if agents wrote to overlapping paths
