@@ -16,6 +16,7 @@ struct BadgeBrowserView: View {
                         BadgeRowView(item: item)
                             .contentShape(Rectangle())
                             .onTapGesture { selectedBadgeID = item.id }
+                            .shimmer(isActive: viewModel.isLoading)
                     }
                 } header: {
                     Label(dimension.rawValue, systemImage: dimension.systemImage)
