@@ -49,6 +49,16 @@ final class DataService: ObservableObject {
         return try modelContext.fetch(descriptor)
     }
 
+    /// Fetches sessions that started on or after `date`, most recent first.
+    /// Pass a `limit` to avoid full-table scans when only recent data is needed.
+    func fetchSessions(since date: Date, limit: Int? = nil) throws -> [TrainingSession] {
+        let predicate  = #Predicate<TrainingSession> { $0.startedAt >= date }
+        var descriptor = FetchDescriptor(predicate: predicate,
+                                         sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
+        descriptor.fetchLimit = limit
+        return try modelContext.fetch(descriptor)
+    }
+
     /// Total shots attempted across all sessions that started today.
     /// Used by ShotsTodayIntent for the background spoken response.
     func fetchShotsTodayCount() throws -> Int {

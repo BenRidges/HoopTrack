@@ -36,7 +36,10 @@ final class ProgressViewModel: ObservableObject {
     func load() {
         isLoading = true
         do {
-            sessions     = try dataService.fetchSessions()
+            let cutoff = Calendar.current.date(
+                byAdding: .day, value: -selectedTimeRange.days, to: .now
+            )!
+            sessions     = try dataService.fetchSessions(since: cutoff)
             weeklyVolume = try dataService.dailyVolume(lastDays: selectedTimeRange.days)
             fgTrendData  = computeFGTrend()
 
