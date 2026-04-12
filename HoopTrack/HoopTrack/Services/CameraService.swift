@@ -142,9 +142,15 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(_ output: AVCaptureOutput,
                                    didOutput sampleBuffer: CMSampleBuffer,
                                    from connection: AVCaptureConnection) {
-        // Phase 2: pass to CV pipeline
-        // cvPipeline?.processBuffer(sampleBuffer)
-        frameSubject.send(sampleBuffer)
+        // Wrap in autoreleasepool to ensure the CMSampleBuffer's backing
+        // CVPixelBuffer is released promptly rather than waiting for the
+        // next run loop drain. Without this, 60fps capture can hold 2-3
+        // live pixel buffers (~10-15 MB) simultaneously.
+        autoreleasepool {
+            // Phase 2: pass to CV pipeline
+            // cvPipeline?.processBuffer(sampleBuffer)
+            frameSubject.send(sampleBuffer)
+        }
     }
 
     nonisolated func captureOutput(_ output: AVCaptureOutput,
