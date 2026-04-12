@@ -64,6 +64,54 @@ final class NotificationService: NSObject, ObservableObject {
         center.removePendingNotificationRequests(withIdentifiers: [NotificationID.streakReminder])
     }
 
+    // MARK: - Training Reminder
+
+    func scheduleTrainingReminder(hour: Int) {
+        center.removePendingNotificationRequests(withIdentifiers: [NotificationID.trainingReminder])
+        let content       = UNMutableNotificationContent()
+        content.title     = "Time to Train"
+        content.body      = "Your daily training session is waiting. Make it count."
+        content.sound     = .default
+        var components    = DateComponents()
+        components.hour   = hour
+        components.minute = 0
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        center.add(UNNotificationRequest(identifier: NotificationID.trainingReminder,
+                                         content: content, trigger: trigger))
+    }
+
+    func cancelTrainingReminder() {
+        center.removePendingNotificationRequests(withIdentifiers: [NotificationID.trainingReminder])
+    }
+
+    // MARK: - Milestone Alerts
+
+    /// Fires an immediate notification for each newly crossed 50/75/100% milestone.
+    /// Updates `goal.lastMilestoneNotified` in place (caller must save ModelContext).
+    func checkMilestones(for goals: [GoalRecord]) {
+        for goal in goals {
+            for threshold in [50, 75, 100] where threshold > goal.lastMilestoneNotified {
+                guard goal.progressPercent >= threshold else { continue }
+
+                let content = UNMutableNotificationContent()
+                if threshold == 100 {
+                    content.title = "Goal Achieved!"
+                    content.body  = "You've hit your goal: \(goal.title)"
+                    content.sound = .defaultRingtone
+                } else {
+                    content.title = "\(threshold)% There!"
+                    content.body  = "You're \(threshold)% of the way to: \(goal.title)"
+                    content.sound = .default
+                }
+
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+                let id      = "\(NotificationID.goalMilestone).\(goal.id.uuidString).\(threshold)"
+                center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+                goal.lastMilestoneNotified = threshold
+            }
+        }
+    }
+
     // MARK: - Goal Milestone
 
     func sendGoalAchievedNotification(goalTitle: String) {
@@ -119,7 +167,9 @@ extension NotificationService: UNUserNotificationCenterDelegate {
 
 // MARK: - Notification Identifiers
 private enum NotificationID {
-    static let streakReminder = "com.hooptrack.notification.streak"
-    static let goalAchieved   = "com.hooptrack.notification.goal"
-    static let dailyMission   = "com.hooptrack.notification.mission"
+    static let streakReminder   = "com.hooptrack.notification.streak"
+    static let trainingReminder = "com.hooptrack.notification.training"
+    static let goalAchieved     = "com.hooptrack.notification.goal"
+    static let goalMilestone    = "com.hooptrack.notification.milestone"
+    static let dailyMission     = "com.hooptrack.notification.mission"
 }

@@ -17,6 +17,7 @@ struct DribbleDrillView: View {
     let onFinish: () -> Void
 
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
 
     @StateObject private var viewModel = DribbleSessionViewModel()
 
@@ -42,7 +43,8 @@ struct DribbleDrillView: View {
             .ignoresSafeArea(edges: .bottom)
         }
         .task {
-            viewModel.configure(dataService: DataService(modelContext: modelContext))
+            viewModel.configure(dataService: DataService(modelContext: modelContext),
+                                coordinator: coordinator)
             viewModel.start(namedDrill: namedDrill)
 
             // Wire pipeline → viewModel
@@ -62,7 +64,10 @@ struct DribbleDrillView: View {
         }
         .fullScreenCover(isPresented: $viewModel.isFinished) {
             if let session = viewModel.session {
-                DribbleSessionSummaryView(session: session) {
+                DribbleSessionSummaryView(
+                    session:      session,
+                    badgeChanges: viewModel.sessionResult?.badgeChanges ?? []
+                ) {
                     viewModel.isFinished = false
                     onFinish()
                 }
@@ -153,7 +158,7 @@ struct DribbleDrillView: View {
                             endSessionTask = Task {
                                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                                 guard !Task.isCancelled else { return }
-                                viewModel.endSession()
+                                await viewModel.endSession()
                             }
                         }
                         .onEnded { _ in
@@ -245,6 +250,7 @@ final class DribbleARCoordinator: NSObject, ARSessionDelegate {
 
     @MainActor
     private func placeARTargets(on planeAnchor: ARPlaneAnchor) {
+        guard #available(iOS 18.0, *) else { return }
         let count  = HoopTrack.Dribble.arTargetCount
         let radius = HoopTrack.Dribble.arTargetRadiusM
         for i in 0 ..< count {

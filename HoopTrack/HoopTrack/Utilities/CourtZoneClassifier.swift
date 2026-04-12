@@ -6,12 +6,10 @@ import Foundation
 enum CourtZoneClassifier {
 
     static func classify(courtX: Double, courtY: Double) -> CourtZone {
-        let g = HoopTrack.CourtGeometry
-
-        let paintHalfWidth     = g.paintWidthFraction / 2.0    // 0.16
+        let paintHalfWidth     = HoopTrack.CourtGeometry.paintWidthFraction / 2.0    // 0.16
         let inPaintX           = abs(courtX - 0.5) <= paintHalfWidth
         let freeThrowTolerance = 0.05
-        let atFreeThrowY       = abs(courtY - g.freeThrowLineFraction) <= freeThrowTolerance
+        let atFreeThrowY       = abs(courtY - HoopTrack.CourtGeometry.freeThrowLineFraction) <= freeThrowTolerance
 
         // Free throw (checked before paint to avoid free-throw-line shots classified as paint)
         if inPaintX && atFreeThrowY {
@@ -19,7 +17,7 @@ enum CourtZoneClassifier {
         }
 
         // Paint: horizontally within paint, below free throw line
-        if inPaintX && courtY <= g.paintHeightFraction {
+        if inPaintX && courtY <= HoopTrack.CourtGeometry.paintHeightFraction {
             return .paint
         }
 
@@ -28,14 +26,16 @@ enum CourtZoneClassifier {
         let dy = courtY
         let distanceFromBasket = (dx * dx + dy * dy).squareRoot()
 
-        // Corner three: outside paint width, below corner depth
+        // Corner three: outside paint width, below corner depth, AND outside the arc
         let outsidePaintX = abs(courtX - 0.5) > paintHalfWidth
-        if outsidePaintX && courtY <= g.cornerThreeDepthFraction {
+        if outsidePaintX
+            && courtY <= HoopTrack.CourtGeometry.cornerThreeDepthFraction
+            && distanceFromBasket >= HoopTrack.CourtGeometry.threePointArcRadiusFraction {
             return .cornerThree
         }
 
         // Above-break three: beyond arc radius
-        if distanceFromBasket >= g.threePointArcRadiusFraction {
+        if distanceFromBasket >= HoopTrack.CourtGeometry.threePointArcRadiusFraction {
             return .aboveBreakThree
         }
 

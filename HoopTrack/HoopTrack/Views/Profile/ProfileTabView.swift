@@ -16,6 +16,24 @@ struct ProfileTabView: View {
 
     @State private var isShowingExportSheet = false
     @State private var exportCSV: String = ""
+    @State private var reminderEnabled: Bool = UserDefaults.standard.bool(forKey: "trainingReminderEnabled")
+    @State private var reminderHour: Int     = UserDefaults.standard.integer(forKey: "trainingReminderHour") == 0
+                                                ? 9
+                                                : UserDefaults.standard.integer(forKey: "trainingReminderHour")
+
+    private var reminderTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                components.hour = reminderHour
+                components.minute = 0
+                return Calendar.current.date(from: components) ?? .now
+            },
+            set: { date in
+                reminderHour = Calendar.current.component(.hour, from: date)
+            }
+        )
+    }
 
     var body: some View {
         List {
@@ -74,6 +92,17 @@ struct ProfileTabView: View {
                 }
             }
 
+            // MARK: Badges
+            Section("Badges") {
+                if let profile = viewModel.profile {
+                    NavigationLink {
+                        BadgeBrowserView(viewModel: BadgeBrowserViewModel(profile: profile))
+                    } label: {
+                        LabeledContent("Earned", value: "\(viewModel.badgeCount) / 25")
+                    }
+                }
+            }
+
             // MARK: Settings
             Section("Settings") {
                 // Notifications
@@ -118,6 +147,28 @@ struct ProfileTabView: View {
                     } label: {
                         Label("Default Court", systemImage: "mappin.circle")
                     }
+                }
+
+                // Training Reminder
+                Toggle("Daily Training Reminder", isOn: $reminderEnabled)
+                    .tint(.orange)
+                    .onChange(of: reminderEnabled) { _, on in
+                        if on {
+                            notificationService.scheduleTrainingReminder(hour: reminderHour)
+                        } else {
+                            notificationService.cancelTrainingReminder()
+                        }
+                        UserDefaults.standard.set(on, forKey: "trainingReminderEnabled")
+                    }
+
+                if reminderEnabled {
+                    DatePicker("Reminder Time",
+                               selection: reminderTimeBinding,
+                               displayedComponents: .hourAndMinute)
+                        .onChange(of: reminderHour) { _, hour in
+                            notificationService.scheduleTrainingReminder(hour: hour)
+                            UserDefaults.standard.set(hour, forKey: "trainingReminderHour")
+                        }
                 }
             }
 

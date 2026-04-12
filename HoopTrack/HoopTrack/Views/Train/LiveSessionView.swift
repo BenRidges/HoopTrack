@@ -19,6 +19,7 @@ struct LiveSessionView: View {
     @EnvironmentObject private var cameraService: CameraService
     @EnvironmentObject private var hapticService: HapticService
     @EnvironmentObject private var notificationService: NotificationService
+    @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
 
     @StateObject private var viewModel = LiveSessionViewModel()
 
@@ -69,8 +70,9 @@ struct LiveSessionView: View {
         }
         .task {
             viewModel.configure(
-                dataService: DataService(modelContext: modelContext),
-                hapticService: hapticService
+                dataService:  DataService(modelContext: modelContext),
+                hapticService: hapticService,
+                coordinator:  coordinator
             )
 
             if cameraService.permissionStatus == .notDetermined {
@@ -139,7 +141,10 @@ struct LiveSessionView: View {
         }
         .fullScreenCover(isPresented: $viewModel.isFinished) {
             if let session = viewModel.session {
-                SessionSummaryView(session: session) {
+                SessionSummaryView(
+                    session:      session,
+                    badgeChanges: viewModel.sessionResult?.badgeChanges ?? []
+                ) {
                     viewModel.isFinished = false
                     onFinish()
                 }
@@ -343,7 +348,7 @@ struct LiveSessionView: View {
                                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                                     guard !Task.isCancelled else { return }
                                     hapticService.longPress()
-                                    viewModel.endSession()
+                                    await viewModel.endSession()
                                 }
                             }
                             .onEnded { _ in

@@ -29,7 +29,10 @@ final class DribbleSessionViewModel: ObservableObject, DribblePipelineDelegate {
     }
 
     // MARK: - Dependencies
+    @Published var sessionResult: SessionResult?
+
     private var dataService: DataService!
+    private var coordinator: SessionFinalizationCoordinator!
     private var timerCancellable: AnyCancellable?
 
     init() {}
@@ -38,8 +41,10 @@ final class DribbleSessionViewModel: ObservableObject, DribblePipelineDelegate {
         self.dataService = dataService
     }
 
-    func configure(dataService: DataService) {
+    func configure(dataService: DataService,
+                   coordinator: SessionFinalizationCoordinator) {
         self.dataService = dataService
+        self.coordinator = coordinator
     }
 
     // MARK: - Lifecycle
@@ -64,13 +69,13 @@ final class DribbleSessionViewModel: ObservableObject, DribblePipelineDelegate {
         startTimer()
     }
 
-    func endSession() {
+    func endSession() async {
         guard let session else { return }
         isSaving = true
         timerCancellable?.cancel()
         do {
-            try dataService.finaliseDribbleSession(session, metrics: liveMetrics)
-            isFinished = true
+            sessionResult = try await coordinator.finaliseDribbleSession(session, metrics: liveMetrics)
+            isFinished    = true
         } catch {
             errorMessage = error.localizedDescription
         }
