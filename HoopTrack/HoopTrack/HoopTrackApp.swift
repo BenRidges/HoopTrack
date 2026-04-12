@@ -31,6 +31,7 @@ struct HoopTrackApp: App {
     @StateObject private var notificationService = NotificationService()
     @StateObject private var cameraService       = CameraService()
     @StateObject private var appState            = AppState()
+    @StateObject private var metricsService      = MetricsService()
 
     // MARK: - Onboarding Gate
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -44,6 +45,7 @@ struct HoopTrackApp: App {
                 .environmentObject(cameraService)
                 .environmentObject(appState)
                 .onOpenURL { appState.handleDeepLink($0) }
+                .task { metricsService.register() }
                 .fullScreenCover(isPresented: .init(
                     get: { !hasCompletedOnboarding },
                     set: { if !$0 { hasCompletedOnboarding = true } }
