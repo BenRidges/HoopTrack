@@ -28,15 +28,30 @@ struct HomeTabView: View {
 
                 // MARK: Overall Rating + Radar
                 ratingSection
+                    .shimmer(isActive: viewModel.isLoading)
 
                 // MARK: Shooting %
                 shootingSection
+                    .shimmer(isActive: viewModel.isLoading)
 
                 // MARK: Streaks & Records
                 streakSection
 
                 // MARK: Weekly Volume Chart
-                volumeSection
+                if viewModel.weeklyVolume.isEmpty && !viewModel.isLoading {
+                    ContentUnavailableView {
+                        Label("No Sessions Yet", systemImage: "basketball.fill")
+                    } description: {
+                        Text("Complete your first session to start tracking progress.")
+                    } actions: {
+                        Text("Tap **Train** to get started")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 20)
+                } else {
+                    volumeSection
+                }
 
                 // MARK: Daily Mission
                 missionSection
