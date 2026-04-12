@@ -11,6 +11,9 @@ struct AgilitySessionSummaryView: View {
     var badgeChanges:    [BadgeTierChange] = []
     let onDone:          () -> Void
 
+    @State private var animatedAttempts: Double = 0
+    @State private var animatedBestShuttle: Double = 0
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -38,7 +41,7 @@ struct AgilitySessionSummaryView: View {
         HStack(spacing: 0) {
             statCell(
                 title: "Best Shuttle",
-                value: shuttleAttempts.min().map { String(format: "%.2fs", $0) } ?? "—"
+                value: shuttleAttempts.isEmpty ? "—" : String(format: "%.2fs", animatedBestShuttle)
             )
             Divider().frame(height: 50)
             statCell(
@@ -48,7 +51,7 @@ struct AgilitySessionSummaryView: View {
             Divider().frame(height: 50)
             statCell(
                 title: "Total Attempts",
-                value: "\(shuttleAttempts.count + laneAttempts.count)"
+                value: String(format: "%.0f", animatedAttempts)
             )
             Divider().frame(height: 50)
             statCell(
@@ -58,6 +61,12 @@ struct AgilitySessionSummaryView: View {
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.6)) {
+                animatedAttempts    = Double(shuttleAttempts.count + laneAttempts.count)
+                animatedBestShuttle = shuttleAttempts.min() ?? 0
+            }
+        }
     }
 
     private func statCell(title: String, value: String) -> some View {
