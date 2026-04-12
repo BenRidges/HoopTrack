@@ -27,9 +27,10 @@ struct HoopTrackApp: App {
     }()
 
     // MARK: - Shared Services (injected via environment)
-    @StateObject private var hapticService    = HapticService()
+    @StateObject private var hapticService       = HapticService()
     @StateObject private var notificationService = NotificationService()
-    @StateObject private var cameraService   = CameraService()
+    @StateObject private var cameraService       = CameraService()
+    @StateObject private var appState            = AppState()
 
     // MARK: - Onboarding Gate
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -41,6 +42,8 @@ struct HoopTrackApp: App {
                 .environmentObject(hapticService)
                 .environmentObject(notificationService)
                 .environmentObject(cameraService)
+                .environmentObject(appState)
+                .onOpenURL { appState.handleDeepLink($0) }
                 .fullScreenCover(isPresented: .init(
                     get: { !hasCompletedOnboarding },
                     set: { if !$0 { hasCompletedOnboarding = true } }
