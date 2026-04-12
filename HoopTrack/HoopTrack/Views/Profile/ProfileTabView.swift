@@ -207,8 +207,11 @@ struct ProfileTabView: View {
             ShareSheet(items: [url])
                 .presentationDetents([.medium, .large])
         }
-        .alert("Export Failed", isPresented: .constant(exportErrorMessage != nil)) {
-            Button("OK") { exportErrorMessage = nil }
+        .alert("Export Failed", isPresented: Binding(
+            get: { exportErrorMessage != nil },
+            set: { if !$0 { exportErrorMessage = nil } }
+        )) {
+            Button("OK") {}
         } message: {
             Text(exportErrorMessage ?? "")
         }
@@ -354,7 +357,3 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
-// MARK: - URL + Identifiable (for .sheet(item:))
-extension URL: @retroactive Identifiable {
-    public var id: String { absoluteString }
-}
