@@ -26,8 +26,9 @@ enum HoopTrack {
         static let bundledModelName  = "BallDetector"
         /// Target label for COCO-trained models (YOLOv8n, YOLOv5n, etc.)
         static let cocoTargetLabel   = "sports ball"
-        /// Target label for basketball-specific models (Roboflow, custom).
-        static let customTargetLabel = "basketball"
+        /// Target label for basketball-specific models (Roboflow basketball-detection-dn6fg).
+        /// The Roboflow model uses "ball" — distinct from the COCO "sports ball" label.
+        static let customTargetLabel = "ball"
     }
 
     // MARK: - Court Geometry (normalised 0–1 half-court space)
