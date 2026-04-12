@@ -144,6 +144,14 @@ enum HoopTrack {
         static let maxBatteryPerHourPercent: Double = 20
     }
 
+    // Phase 7 — Security
+    enum KeychainKey {
+        static let accessToken    = "com.hooptrack.keychain.accessToken"
+        static let refreshToken   = "com.hooptrack.keychain.refreshToken"
+        static let userID         = "com.hooptrack.keychain.userID"
+        static let biometricToken = "com.hooptrack.keychain.biometricToken"
+    }
+
     // MARK: - UI
     enum UI {
         static let cornerRadius: Double         = 16
