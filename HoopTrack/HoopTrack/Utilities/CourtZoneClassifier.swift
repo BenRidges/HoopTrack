@@ -6,6 +6,13 @@ import Foundation
 enum CourtZoneClassifier {
 
     static func classify(courtX: Double, courtY: Double) -> CourtZone {
+        // Phase 7 — Security: guard against NaN, Inf, or out-of-range inputs from
+        // uncalibrated frames or future callers that skip the DataService validation layer.
+        guard InputValidator.isValidCourtCoordinate(courtX),
+              InputValidator.isValidCourtCoordinate(courtY) else {
+            return .midRange
+        }
+
         let paintHalfWidth     = HoopTrack.CourtGeometry.paintWidthFraction / 2.0    // 0.16
         let inPaintX           = abs(courtX - 0.5) <= paintHalfWidth
         let freeThrowTolerance = 0.05
