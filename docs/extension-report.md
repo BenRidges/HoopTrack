@@ -110,7 +110,7 @@ Long-term progress data — months of shot charts, zone heat maps, skill rating 
 ### Security
 
 - **Certificate pinning** — implemented via `URLSession` with a custom `URLAuthenticationChallenge` handler; prevents MITM attacks against known API endpoints.
-- **Keychain storage** — all tokens, credentials, and sensitive preferences stored in Keychain; never `UserDefaults`.
+- **Keychain storage** — all tokens, credentials, and sensitive preferences stored in Keychain; never `UserDefaults`. **Recommended starting point: Keychain storage for all credentials + App Transport Security enforcement + Privacy manifest (required for App Store submission).**
 - **App Transport Security** — enforce HTTPS for all domains; no ATS exceptions in production builds.
 - **Data encryption at rest** — iOS file data protection (`FileProtectionType.complete`) applied to exported files and the metrics log.
 - **Privacy manifest (`PrivacyInfo.xcprivacy`)** — required for App Store submission since iOS 17; must declare all API usage reasons. **Required before App Store submission.**
@@ -155,7 +155,7 @@ Long-term progress data — months of shot charts, zone heat maps, skill rating 
 
 ### Accessibility
 
-- **VoiceOver audit** — all custom views need `accessibilityLabel`, `accessibilityValue`, and `accessibilityHint`; all interactive elements must be reachable in the VoiceOver element order.
+- **VoiceOver audit** — all custom views need `accessibilityLabel`, `accessibilityValue`, and `accessibilityHint`; all interactive elements must be reachable in the VoiceOver element order. **Recommended first audit: VoiceOver surfaces the widest class of accessibility issues and is required for App Store Accessibility guidelines compliance.**
 - **Dynamic Type** — verify all `Text` views use semantic font styles (`.body`, `.headline`, not fixed sizes); test at the largest accessibility text size.
 - **WCAG contrast** — the app's orange (`#FF6B35`) on dark backgrounds must meet the 4.5:1 contrast ratio at all opacity levels used in the UI.
 - **Switch Control** — ensure tab order and focus groups are logical; custom gestures such as the long-press end-session button require an accessible alternative activation method.
