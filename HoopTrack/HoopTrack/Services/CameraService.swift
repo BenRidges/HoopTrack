@@ -75,7 +75,7 @@ final class CameraService: NSObject, ObservableObject {
                                                     position: position),
               let input  = try? AVCaptureDeviceInput(device: device),
               captureSession.canAddInput(input) else {
-            DispatchQueue.main.async { self.error = .deviceUnavailable }
+            Task { @MainActor [weak self] in self?.error = .deviceUnavailable }
             return
         }
         captureSession.addInput(input)
@@ -91,7 +91,7 @@ final class CameraService: NSObject, ObservableObject {
         videoOutput.setSampleBufferDelegate(self, queue: sessionQueue)
 
         guard captureSession.canAddOutput(videoOutput) else {
-            DispatchQueue.main.async { self.error = .outputUnavailable }
+            Task { @MainActor [weak self] in self?.error = .outputUnavailable }
             return
         }
         captureSession.addOutput(videoOutput)
@@ -123,7 +123,7 @@ final class CameraService: NSObject, ObservableObject {
         guard !captureSession.isRunning else { return }
         sessionQueue.async { [weak self] in
             self?.captureSession.startRunning()
-            DispatchQueue.main.async { self?.isSessionRunning = true }
+            Task { @MainActor [weak self] in self?.isSessionRunning = true }
         }
     }
 
@@ -131,7 +131,7 @@ final class CameraService: NSObject, ObservableObject {
         guard captureSession.isRunning else { return }
         sessionQueue.async { [weak self] in
             self?.captureSession.stopRunning()
-            DispatchQueue.main.async { self?.isSessionRunning = false }
+            Task { @MainActor [weak self] in self?.isSessionRunning = false }
         }
     }
 }

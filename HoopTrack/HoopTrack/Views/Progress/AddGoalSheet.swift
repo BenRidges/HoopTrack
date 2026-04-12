@@ -107,7 +107,14 @@ struct AddGoalSheet: View {
             validationError = "Target must be a positive number."
             return
         }
-        let baseline = Double(baselineText) ?? 0
+        // Phase 7 — Security: cap goal values to a sane upper bound to prevent
+        // absurd numbers reaching the SwiftData model (e.g. 1e308 from paste).
+        guard target <= 100_000 else {
+            validationError = "Target value is too large."
+            return
+        }
+        let rawBaseline = Double(baselineText) ?? 0
+        let baseline    = max(0, min(rawBaseline, 100_000))
         viewModel.add(
             title:      title,
             skill:      selectedSkill,

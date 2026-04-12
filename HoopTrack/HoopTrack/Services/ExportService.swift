@@ -39,6 +39,14 @@ final class ExportService {
             .temporaryDirectory
             .appendingPathComponent(fileName)
         try data.write(to: url, options: .atomic)
+
+        // Phase 7 — Security: apply complete file protection so the exported JSON
+        // cannot be read from the temp directory without the device being unlocked.
+        try FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.complete],
+            ofItemAtPath: url.path
+        )
+
         return url
     }
 

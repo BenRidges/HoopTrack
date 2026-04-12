@@ -57,7 +57,10 @@ final class ProfileViewModel: ObservableObject {
     }
 
     func saveName() {
-        profile?.name = editingName
+        // Phase 7 — Security: sanitise before writing to SwiftData model
+        if let sanitised = InputValidator.sanitisedProfileName(editingName) {
+            profile?.name = sanitised
+        }
         isEditingName = false
         // SwiftData persists automatically via @Model observation
     }
@@ -94,6 +97,18 @@ final class ProfileViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - GDPR / Right to Delete (Phase 7)
+
+    /// Permanently erases all user data: SwiftData records, session videos,
+    /// Keychain entries, and app UserDefaults keys.
+    /// NOTE: HealthKit workout records written by HealthKitService are NOT
+    /// deleted — users must remove those manually via the Health app.
+    func deleteAllData() async {
+        await dataService.deleteAllUserData()
+        profile  = nil
+        sessions = []
     }
 
     // MARK: - Stats Summary

@@ -25,7 +25,7 @@ final class DribblePipeline {
 
     private let handService = HandTrackingService()
 
-    // Per-hand wrist tracking state — @MainActor-isolated; mutated inside DispatchQueue.main.async
+    // Per-hand wrist tracking state — @MainActor-isolated; mutated inside Task { @MainActor in }
     private var leftState  = WristState()
     private var rightState = WristState()
 
@@ -44,7 +44,7 @@ final class DribblePipeline {
     /// frames yet — the reset dispatches asynchronously to main, so in-flight frames
     /// processed after this call but before the dispatch executes will use stale state.
     nonisolated func startSession(at startTime: Double) {
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.sessionStartTime = startTime
             self?.metrics = DribbleLiveMetrics()
             self?.dribbleTimestamps = []
@@ -87,7 +87,7 @@ final class DribblePipeline {
         let newLeftPos  = leftSample?.position   // nil when hand not visible
         let newRightPos = rightSample?.position
 
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             // sessionStartTime is @MainActor-isolated — safe to read here.
             let t = timestamp - self.sessionStartTime

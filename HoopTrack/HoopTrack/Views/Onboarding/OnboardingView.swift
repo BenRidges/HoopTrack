@@ -314,8 +314,9 @@ private struct ProfileSetupPage: View {
                 .padding(.horizontal, 48)
             Spacer()
             Button {
-                if !playerName.trimmingCharacters(in: .whitespaces).isEmpty {
-                    UserDefaults.standard.set(playerName, forKey: "onboardingPlayerName")
+                // Phase 7 — Security: sanitise name before persisting
+                if let sanitised = InputValidator.sanitisedProfileName(playerName) {
+                    UserDefaults.standard.set(sanitised, forKey: "onboardingPlayerName")
                 }
                 isComplete = true
             } label: {
