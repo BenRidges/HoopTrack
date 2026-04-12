@@ -4,6 +4,7 @@
 import Foundation
 
 struct ShotExportRecord: Codable {
+    let id: String                     // ShotRecord.id (UUID string) — stable identity for diffing
     let zone: String                   // CourtZone.rawValue
     let made: Bool
     let releaseAngleDeg: Double?
@@ -11,10 +12,12 @@ struct ShotExportRecord: Codable {
     let shotSpeedMph: Double?
     let courtX: Double
     let courtY: Double
+    // shotType intentionally excluded — zone is sufficient for JSON consumers
 }
 
 extension ShotExportRecord {
     init(from record: ShotRecord) {
+        self.id               = record.id.uuidString
         self.zone             = record.zone.rawValue
         self.made             = record.result == .make
         self.releaseAngleDeg  = record.releaseAngleDeg
