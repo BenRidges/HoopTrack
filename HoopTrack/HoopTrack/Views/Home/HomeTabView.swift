@@ -45,8 +45,6 @@ struct HomeTabView: View {
                         Text("Complete your first session to start tracking progress.")
                     } actions: {
                         Text("Tap **Train** to get started")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 20)
                 } else {
