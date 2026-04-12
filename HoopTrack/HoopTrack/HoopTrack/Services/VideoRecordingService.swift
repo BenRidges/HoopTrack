@@ -36,7 +36,7 @@ final class VideoRecordingService: NSObject {
 
         let docsURL = FileManager.default.urls(for: .documentDirectory,
                                                 in: .userDomainMask)[0]
-        let sessionsDir = docsURL.appendingPathComponent("Sessions", isDirectory: true)
+        let sessionsDir = docsURL.appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: sessionsDir,
                                                   withIntermediateDirectories: true)
         let outputURL = sessionsDir.appendingPathComponent("\(sessionID.uuidString).mov")
@@ -73,12 +73,12 @@ extension VideoRecordingService: AVCaptureFileOutputRecordingDelegate {
                     error: Error?) {
         isRecording = false
         if let error {
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
                 self?.onRecordingFinished?(.failure(error))
             }
         } else {
             applyFileProtection(to: outputFileURL)
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
                 self?.onRecordingFinished?(.success(outputFileURL))
             }
         }
