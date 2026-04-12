@@ -42,6 +42,7 @@ final class ProfileViewModel: ObservableObject {
                !storedName.isEmpty,
                (profile?.name ?? "").isEmpty {
                 profile?.name = storedName
+                UserDefaults.standard.removeObject(forKey: "onboardingPlayerName")
             }
         } catch {
             errorMessage = error.localizedDescription
