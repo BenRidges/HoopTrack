@@ -10,6 +10,8 @@ struct DribbleSessionSummaryView: View {
     var badgeChanges: [BadgeTierChange] = []
     let onDismiss: () -> Void
 
+    @State private var animatedDribbles: Double = 0
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -54,7 +56,7 @@ struct DribbleSessionSummaryView: View {
     private var statsGrid: some View {
         StatCardGrid {
             StatCard(title: "Dribbles",
-                     value: "\(session.totalDribbles ?? 0)",
+                     value: String(format: "%.0f", animatedDribbles),
                      accent: .blue)
             StatCard(title: "Avg BPS",
                      value: session.avgDribblesPerSec.map { String(format: "%.1f", $0) } ?? "—",
@@ -65,6 +67,11 @@ struct DribbleSessionSummaryView: View {
             StatCard(title: "Combos",
                      value: "\(session.dribbleCombosDetected ?? 0)",
                      accent: .purple)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.6)) {
+                animatedDribbles = Double(session.totalDribbles ?? 0)
+            }
         }
     }
 

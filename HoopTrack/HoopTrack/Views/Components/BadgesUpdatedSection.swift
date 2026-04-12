@@ -2,9 +2,12 @@
 // Inline list of badge rank changes shown at the bottom of session summary views.
 // Renders nothing when changes is empty — callers pass changes unconditionally.
 import SwiftUI
+import UIKit   // for UINotificationFeedbackGenerator
 
 struct BadgesUpdatedSection: View {
     let changes: [BadgeTierChange]
+    private let haptic = UINotificationFeedbackGenerator()
+    @State private var appeared = false
 
     var body: some View {
         if changes.isEmpty { EmptyView() } else { content }
@@ -15,12 +18,24 @@ struct BadgesUpdatedSection: View {
             Text("Badges Updated")
                 .font(.headline)
 
-            ForEach(changes, id: \.badgeID) { change in
+            ForEach(Array(changes.enumerated()), id: \.element.badgeID) { index, change in
                 BadgeTierChangeRow(change: change)
+                    .opacity(appeared ? 1 : 0)
+                    .scaleEffect(appeared ? 1 : 0.8, anchor: .leading)
+                    .animation(
+                        .spring(response: 0.4, dampingFraction: 0.6)
+                        .delay(Double(index) * 0.08),
+                        value: appeared
+                    )
             }
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onAppear {
+            haptic.prepare()
+            haptic.notificationOccurred(.success)
+            appeared = true
+        }
     }
 }
 

@@ -21,7 +21,17 @@ struct ProgressTabView: View {
                 timeRangePicker
 
                 // MARK: FG% Trend Chart
-                fgTrendSection
+                if viewModel.sessions.isEmpty && !viewModel.isLoading {
+                    ContentUnavailableView {
+                        Label("No Data", systemImage: "chart.line.uptrend.xyaxis")
+                    } description: {
+                        Text("Complete your first session to see your \(viewModel.selectedTimeRange.rawValue) trend.")
+                    }
+                    .padding(.vertical, 20)
+                } else {
+                    fgTrendSection
+                        .shimmer(isActive: viewModel.isLoading)
+                }
 
                 // MARK: Shot Heat Map
                 heatMapSection
@@ -42,11 +52,6 @@ struct ProgressTabView: View {
         .navigationBarTitleDisplayMode(.large)
         .task { viewModel.load() }
         .refreshable { viewModel.load() }
-        .overlay {
-            if viewModel.isLoading {
-                ProgressView()
-            }
-        }
     }
 
     // MARK: - Time Range

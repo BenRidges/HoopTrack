@@ -14,6 +14,7 @@ struct SessionSummaryView: View {
     @State private var showShareSheet = false
     @State private var selectedShotForReview: ShotRecord? = nil
     @State private var showReplay = false
+    @State private var animatedFG: Double = 0
 
     var body: some View {
         NavigationStack {
@@ -86,9 +87,11 @@ struct SessionSummaryView: View {
 
     private var heroSection: some View {
         VStack(spacing: 8) {
-            Text(String(format: "%.0f%%", session.fgPercent))
+            EmptyView()
+                .modifier(AnimatedCounterModifier(currentValue: animatedFG, format: "%.0f%%"))
                 .font(.system(size: 72, weight: .black, design: .rounded))
                 .foregroundStyle(.orange)
+                .animation(.easeOut(duration: 0.6), value: animatedFG)
 
             Text("\(session.shotsMade) makes / \(session.shotsAttempted) attempts")
                 .font(.title3)
@@ -105,6 +108,7 @@ struct SessionSummaryView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.top, 8)
+        .onAppear { animatedFG = session.fgPercent }
     }
 
     private var shotChartSection: some View {

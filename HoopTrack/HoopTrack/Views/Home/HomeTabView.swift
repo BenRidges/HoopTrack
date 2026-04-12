@@ -28,15 +28,28 @@ struct HomeTabView: View {
 
                 // MARK: Overall Rating + Radar
                 ratingSection
+                    .shimmer(isActive: viewModel.isLoading)
 
                 // MARK: Shooting %
                 shootingSection
+                    .shimmer(isActive: viewModel.isLoading)
 
                 // MARK: Streaks & Records
                 streakSection
 
                 // MARK: Weekly Volume Chart
-                volumeSection
+                if viewModel.weeklyVolume.isEmpty && !viewModel.isLoading {
+                    ContentUnavailableView {
+                        Label("No Sessions Yet", systemImage: "basketball.fill")
+                    } description: {
+                        Text("Complete your first session to start tracking progress.")
+                    } actions: {
+                        Text("Tap **Train** to get started")
+                    }
+                    .padding(.vertical, 20)
+                } else {
+                    volumeSection
+                }
 
                 // MARK: Daily Mission
                 missionSection
@@ -64,10 +77,10 @@ struct HomeTabView: View {
         }
         .task {
             // Rebuild ViewModel with the injected context (workaround for @StateObject init)
-            viewModel.load()
+            await viewModel.load()
         }
         .refreshable {
-            viewModel.load()
+            await viewModel.load()
         }
     }
 
@@ -180,28 +193,20 @@ struct HomeTabView: View {
             Text("Weekly Volume")
                 .font(.headline)
 
-            if viewModel.weeklyVolume.isEmpty {
-                Text("No session data yet. Start training!")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 30)
-            } else {
-                Chart(viewModel.weeklyVolume, id: \.date) { item in
-                    BarMark(
-                        x: .value("Day", item.date, unit: .day),
-                        y: .value("Shots", item.attempts)
-                    )
-                    .foregroundStyle(.orange.gradient)
-                    .cornerRadius(4)
-                }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .day)) {
-                        AxisValueLabel(format: .dateTime.weekday(.abbreviated))
-                    }
-                }
-                .frame(height: 120)
+            Chart(viewModel.weeklyVolume, id: \.date) { item in
+                BarMark(
+                    x: .value("Day", item.date, unit: .day),
+                    y: .value("Shots", item.attempts)
+                )
+                .foregroundStyle(.orange.gradient)
+                .cornerRadius(4)
             }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day)) {
+                    AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                }
+            }
+            .frame(height: 120)
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

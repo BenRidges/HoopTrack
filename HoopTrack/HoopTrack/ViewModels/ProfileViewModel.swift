@@ -37,6 +37,13 @@ final class ProfileViewModel: ObservableObject {
         do {
             profile  = try dataService.fetchOrCreateProfile()
             sessions = try dataService.fetchSessions()
+            // Apply name entered during onboarding if the profile has no name yet
+            if let storedName = UserDefaults.standard.string(forKey: "onboardingPlayerName"),
+               !storedName.isEmpty,
+               (profile?.name ?? "").isEmpty {
+                profile?.name = storedName
+                UserDefaults.standard.removeObject(forKey: "onboardingPlayerName")
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
