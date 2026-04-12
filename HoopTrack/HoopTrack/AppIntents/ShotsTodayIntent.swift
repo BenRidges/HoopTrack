@@ -5,7 +5,6 @@
 import AppIntents
 import SwiftData
 
-@MainActor
 struct ShotsTodayIntent: AppIntent {
 
     static let title: LocalizedStringResource = "How many shots today?"
@@ -14,6 +13,7 @@ struct ShotsTodayIntent: AppIntent {
         categoryName: "Stats"
     )
 
+    @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let container = try ModelContainer(
             for: PlayerProfile.self, TrainingSession.self,
