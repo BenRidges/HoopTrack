@@ -2,6 +2,7 @@
 // Inline list of badge rank changes shown at the bottom of session summary views.
 // Renders nothing when changes is empty — callers pass changes unconditionally.
 import SwiftUI
+import UIKit   // for UINotificationFeedbackGenerator
 
 struct BadgesUpdatedSection: View {
     let changes: [BadgeTierChange]
@@ -15,12 +16,25 @@ struct BadgesUpdatedSection: View {
             Text("Badges Updated")
                 .font(.headline)
 
-            ForEach(changes, id: \.badgeID) { change in
+            ForEach(Array(changes.enumerated()), id: \.element.badgeID) { index, change in
                 BadgeTierChangeRow(change: change)
+                    .transition(
+                        .scale(scale: 0.8)
+                        .combined(with: .opacity)
+                    )
+                    .animation(
+                        .spring(response: 0.4, dampingFraction: 0.6)
+                        .delay(Double(index) * 0.08),   // stagger rows
+                        value: changes.count
+                    )
             }
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onAppear {
+            // Fire a single success haptic when badge changes appear
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
     }
 }
 
