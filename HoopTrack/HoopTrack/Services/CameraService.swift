@@ -6,9 +6,23 @@
 // Phase 3: Route frames to VNDetectHumanBodyPoseRequest (Shot Science).
 // Phase 4: Switch to front camera + ARKit for dribble drills.
 
-import AVFoundation
+@preconcurrency import AVFoundation
 import Combine
 import UIKit
+
+/// Orientation mode for the camera output.
+/// Portrait = 90° rotation (device upright). Landscape = 0° (device sideways).
+enum CameraOrientation {
+    case portrait
+    case landscape
+
+    var videoRotationAngle: CGFloat {
+        switch self {
+        case .portrait:  return 90
+        case .landscape: return 0
+        }
+    }
+}
 
 @MainActor
 final class CameraService: NSObject, ObservableObject {
@@ -20,16 +34,18 @@ final class CameraService: NSObject, ObservableObject {
     @Published var error: CameraError?
 
     // MARK: - AVFoundation
-    let captureSession = AVCaptureSession()
-    private var videoOutput = AVCaptureVideoDataOutput()
+    // These are marked nonisolated(unsafe) because AVCaptureSession is thread-safe
+    // and Apple recommends calling startRunning/stopRunning off the main thread.
+    // Configuration is serialised on sessionQueue; published state stays on @MainActor.
+    nonisolated(unsafe) let captureSession = AVCaptureSession()
+    nonisolated(unsafe) private var videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "com.hooptrack.camera.session",
                                              qos: .userInitiated)
-    // Phase 2: inject the CV pipeline as the sample buffer delegate
-    // private weak var cvPipeline: CVPipelineProtocol?
 
     // MARK: - Frame Publisher
     // Downstream subscribers (CV pipeline, preview layer) attach here.
-    private let frameSubject = PassthroughSubject<CMSampleBuffer, Never>()
+    // Thread-safe: PassthroughSubject.send can be called from any thread.
+    nonisolated(unsafe) private let frameSubject = PassthroughSubject<CMSampleBuffer, Never>()
     var framePublisher: AnyPublisher<CMSampleBuffer, Never> {
         frameSubject.eraseToAnyPublisher()
     }
@@ -51,14 +67,14 @@ final class CameraService: NSObject, ObservableObject {
 
     // MARK: - Session Configuration
 
-    func configureSession(mode: CameraMode) {
+    func configureSession(mode: CameraMode, orientation: CameraOrientation = .portrait) {
         currentMode = mode
         sessionQueue.async { [weak self] in
-            self?.buildSession(mode: mode)
+            self?.buildSession(mode: mode, orientation: orientation)
         }
     }
 
-    private func buildSession(mode: CameraMode) {
+    nonisolated private func buildSession(mode: CameraMode, orientation: CameraOrientation = .portrait) {
         captureSession.beginConfiguration()
         defer { captureSession.commitConfiguration() }
 
@@ -75,7 +91,7 @@ final class CameraService: NSObject, ObservableObject {
                                                     position: position),
               let input  = try? AVCaptureDeviceInput(device: device),
               captureSession.canAddInput(input) else {
-            DispatchQueue.main.async { self.error = .deviceUnavailable }
+            Task { @MainActor in self.error = .deviceUnavailable }
             return
         }
         captureSession.addInput(input)
@@ -91,20 +107,21 @@ final class CameraService: NSObject, ObservableObject {
         videoOutput.setSampleBufferDelegate(self, queue: sessionQueue)
 
         guard captureSession.canAddOutput(videoOutput) else {
-            DispatchQueue.main.async { self.error = .outputUnavailable }
+            Task { @MainActor in self.error = .outputUnavailable }
             return
         }
         captureSession.addOutput(videoOutput)
 
-        // Lock portrait orientation for consistent CV coordinate mapping
+        // Set video rotation for the requested orientation
         if let connection = videoOutput.connection(with: .video) {
-            if connection.isVideoRotationAngleSupported(90) {
-                connection.videoRotationAngle = 90
+            let angle = orientation.videoRotationAngle
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
             }
         }
     }
 
-    private func configureFPS(device: AVCaptureDevice, fps: Double) {
+    nonisolated private func configureFPS(device: AVCaptureDevice, fps: Double) {
         guard let range = device.activeFormat.videoSupportedFrameRateRanges
             .first(where: { $0.maxFrameRate >= fps }) else { return }
         do {
@@ -121,17 +138,19 @@ final class CameraService: NSObject, ObservableObject {
 
     func startSession() {
         guard !captureSession.isRunning else { return }
+        let session = captureSession
         sessionQueue.async { [weak self] in
-            self?.captureSession.startRunning()
-            DispatchQueue.main.async { self?.isSessionRunning = true }
+            session.startRunning()
+            Task { @MainActor [weak self] in self?.isSessionRunning = true }
         }
     }
 
     func stopSession() {
         guard captureSession.isRunning else { return }
+        let session = captureSession
         sessionQueue.async { [weak self] in
-            self?.captureSession.stopRunning()
-            DispatchQueue.main.async { self?.isSessionRunning = false }
+            session.stopRunning()
+            Task { @MainActor [weak self] in self?.isSessionRunning = false }
         }
     }
 }
@@ -147,8 +166,6 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
         // next run loop drain. Without this, 60fps capture can hold 2-3
         // live pixel buffers (~10-15 MB) simultaneously.
         autoreleasepool {
-            // Phase 2: pass to CV pipeline
-            // cvPipeline?.processBuffer(sampleBuffer)
             frameSubject.send(sampleBuffer)
         }
     }
@@ -156,10 +173,7 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(_ output: AVCaptureOutput,
                                    didDrop sampleBuffer: CMSampleBuffer,
                                    from connection: AVCaptureConnection) {
-        // Dropped frames are expected under heavy CPU load; log in debug builds only
-        #if DEBUG
-        // print("CameraService: dropped frame")
-        #endif
+        // Dropped frames are expected under heavy CPU load; silently ignored
     }
 }
 
