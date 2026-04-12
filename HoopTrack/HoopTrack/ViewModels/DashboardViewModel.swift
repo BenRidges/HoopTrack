@@ -31,7 +31,7 @@ final class DashboardViewModel: ObservableObject {
 
     // MARK: - Load
 
-    func load() {
+    func load() async {
         isLoading = true
         do {
             profile       = try dataService.fetchOrCreateProfile()

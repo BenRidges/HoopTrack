@@ -77,10 +77,10 @@ struct HomeTabView: View {
         }
         .task {
             // Rebuild ViewModel with the injected context (workaround for @StateObject init)
-            viewModel.load()
+            await viewModel.load()
         }
         .refreshable {
-            viewModel.load()
+            await viewModel.load()
         }
     }
 
@@ -193,28 +193,20 @@ struct HomeTabView: View {
             Text("Weekly Volume")
                 .font(.headline)
 
-            if viewModel.weeklyVolume.isEmpty {
-                Text("No session data yet. Start training!")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 30)
-            } else {
-                Chart(viewModel.weeklyVolume, id: \.date) { item in
-                    BarMark(
-                        x: .value("Day", item.date, unit: .day),
-                        y: .value("Shots", item.attempts)
-                    )
-                    .foregroundStyle(.orange.gradient)
-                    .cornerRadius(4)
-                }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .day)) {
-                        AxisValueLabel(format: .dateTime.weekday(.abbreviated))
-                    }
-                }
-                .frame(height: 120)
+            Chart(viewModel.weeklyVolume, id: \.date) { item in
+                BarMark(
+                    x: .value("Day", item.date, unit: .day),
+                    y: .value("Shots", item.attempts)
+                )
+                .foregroundStyle(.orange.gradient)
+                .cornerRadius(4)
             }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day)) {
+                    AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                }
+            }
+            .frame(height: 120)
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
