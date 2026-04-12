@@ -18,7 +18,7 @@ struct ShotExportRecord: Codable {
 extension ShotExportRecord {
     init(from record: ShotRecord) {
         self.id               = record.id.uuidString
-        self.zone             = record.zone.rawValue
+        self.zone             = record.zone.exportKey
         self.made             = record.result == .make
         self.releaseAngleDeg  = record.releaseAngleDeg
         self.releaseTimeMs    = record.releaseTimeMs

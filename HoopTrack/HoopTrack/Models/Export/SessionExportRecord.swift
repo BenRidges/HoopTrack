@@ -23,6 +23,7 @@ extension SessionExportRecord {
         self.threePointPercent  = session.threePointPercentage.map { $0 / 100.0 }
         self.shots              = session.shots
             .filter { $0.result != .pending }
+            .sorted { $0.sequenceIndex < $1.sequenceIndex }
             .map    { ShotExportRecord(from: $0) }
     }
 }

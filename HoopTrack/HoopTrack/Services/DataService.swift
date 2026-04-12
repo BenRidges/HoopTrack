@@ -67,6 +67,9 @@ final class DataService: ObservableObject {
                                      namedDrill: namedDrill,
                                      courtType: courtType,
                                      locationTag: locationTag)
+        let profile = try fetchOrCreateProfile()
+        session.profile = profile
+        profile.sessions.append(session)
         modelContext.insert(session)
         try modelContext.save()
         return session
