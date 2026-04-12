@@ -41,7 +41,8 @@ final class PinningURLSessionDelegate: NSObject, URLSessionDelegate {
 
         // Extract the leaf certificate public key
         guard
-            let leafCert = SecTrustGetCertificateAtIndex(serverTrust, 0),
+            let certChain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
+            let leafCert = certChain.first,
             let publicKey = SecCertificateCopyKey(leafCert),
             let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data?
         else {
