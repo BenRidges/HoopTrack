@@ -125,3 +125,51 @@ After all agents complete, review each output before committing. Check for:
 - Conflicting decisions across agents (e.g. two agents chose different table names)
 - Files that need cross-referencing (e.g. a schema change that affects an iOS model)
 - Merge conflicts if agents wrote to overlapping paths
+
+---
+
+## Available Skills Reference
+
+Skills are invoked via the `Skill` tool (or `/skill-name` shorthand). Use the right skill at the right moment — they enforce discipline that prevents common mistakes.
+
+### Development workflow
+
+| Skill | When to use |
+|---|---|
+| `superpowers:brainstorming` | **Before** starting any new feature or phase — clarifies intent before touching code |
+| `superpowers:writing-plans` | After brainstorming; produces a structured plan doc before implementation begins |
+| `superpowers:executing-plans` | When resuming an existing written plan in a fresh session |
+| `superpowers:subagent-driven-development` | When a plan has parallel independent tasks — coordinates agents against a spec |
+| `superpowers:dispatching-parallel-agents` | When dispatching 2+ independent agents concurrently |
+| `superpowers:using-git-worktrees` | Before feature work — creates isolated worktrees; use via `/phase-start` for HoopTrack phases |
+
+### Implementation quality
+
+| Skill | When to use |
+|---|---|
+| `superpowers:test-driven-development` | **Before writing any implementation code** — write failing tests first |
+| `superpowers:systematic-debugging` | When hitting a bug or test failure — prevents premature fixes without root cause |
+| `superpowers:verification-before-completion` | **Before claiming anything is done** — run commands and confirm output before asserting success |
+
+### Code review
+
+| Skill | When to use |
+|---|---|
+| `superpowers:requesting-code-review` | After completing a feature or phase — validates work before merging |
+| `superpowers:receiving-code-review` | When review feedback arrives — prevents blind implementation of unclear suggestions |
+| `superpowers:finishing-a-development-branch` | When implementation is complete and tests pass — guides merge/PR/cleanup |
+
+### Project maintenance
+
+| Skill | When to use |
+|---|---|
+| `claude-md-management:claude-md-improver` | Periodically audit and improve this file |
+| `claude-code-setup:claude-automation-recommender` | When adding new tools or frameworks — surfaces new automation opportunities |
+| `remember:remember` | At end of session — saves state for clean continuation next session |
+
+### HoopTrack-local skills
+
+| Skill | When to use |
+|---|---|
+| `xcode-test` | Run tests: `/xcode-test` (all) or `/xcode-test ClassName` (single class) |
+| `phase-start` | Begin any new implementation phase — worktree, plan doc, ROADMAP check |
