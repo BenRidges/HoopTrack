@@ -7,6 +7,7 @@ import SwiftUI
 struct SessionSummaryView: View {
 
     let session: TrainingSession
+    var badgeChanges: [BadgeTierChange] = []
     let onDone: () -> Void
 
     @EnvironmentObject private var hapticService: HapticService
@@ -35,6 +36,9 @@ struct SessionSummaryView: View {
 
                     // MARK: Shot-by-shot review
                     shotListSection
+
+                    // MARK: Badges Updated (Phase 5B)
+                    BadgesUpdatedSection(changes: badgeChanges)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
