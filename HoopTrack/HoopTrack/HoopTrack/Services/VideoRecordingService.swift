@@ -71,14 +71,15 @@ extension VideoRecordingService: AVCaptureFileOutputRecordingDelegate {
                     didFinishRecordingTo outputFileURL: URL,
                     from connections: [AVCaptureConnection],
                     error: Error?) {
-        isRecording = false
         if let error {
             Task { @MainActor [weak self] in
+                self?.isRecording = false
                 self?.onRecordingFinished?(.failure(error))
             }
         } else {
             applyFileProtection(to: outputFileURL)
             Task { @MainActor [weak self] in
+                self?.isRecording = false
                 self?.onRecordingFinished?(.success(outputFileURL))
             }
         }

@@ -297,7 +297,9 @@ final class DataService: ObservableObject {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         for session in stale {
             guard let filename = session.videoFileName else { continue }
-            let url = docs.appendingPathComponent("Sessions/\(filename)")
+            let url = docs
+                .appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
+                .appendingPathComponent(filename)
             try? FileManager.default.removeItem(at: url)
             session.videoFileName = nil
         }

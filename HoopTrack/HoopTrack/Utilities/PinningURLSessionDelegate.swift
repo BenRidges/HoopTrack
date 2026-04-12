@@ -50,8 +50,16 @@ final class PinningURLSessionDelegate: NSObject, URLSessionDelegate {
             return
         }
 
-        // SHA-256 hash the raw SPKI DER bytes
-        let hash = SHA256.hash(data: publicKeyData)
+        // Prepend EC P-256 SPKI algorithm-identifier header so the hash matches
+        // the output of: openssl ... | openssl dgst -sha256 -binary | base64
+        let ecP256SpkiHeader = Data([
+            0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86,
+            0x48, 0xCE, 0x3D, 0x02, 0x01, 0x06, 0x08, 0x2A,
+            0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x03,
+            0x42, 0x00
+        ])
+        let spkiData = ecP256SpkiHeader + publicKeyData
+        let hash = SHA256.hash(data: spkiData)
         let base64Hash = Data(hash).base64EncodedString()
 
         if Self.pinnedHashes.contains(base64Hash) {
