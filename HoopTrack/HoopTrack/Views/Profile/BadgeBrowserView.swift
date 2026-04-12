@@ -134,11 +134,9 @@ private struct BadgeDetailSheet: View {
     }
 
     private func nextRankName(current: BadgeRank) -> String? {
-        let nextMMR = current.mmr + 1
+        let nextMMR = (floor(current.mmr / 100) * 100) + 100
         guard nextMMR < 1800 else { return nil }
-        let next = BadgeRank(mmr: nextMMR)
-        if next.tier == current.tier && next.division == current.division { return nil }
-        return next.displayName
+        return BadgeRank(mmr: nextMMR).displayName
     }
 }
 
