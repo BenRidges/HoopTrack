@@ -177,7 +177,7 @@ final class CVPipeline {
     nonisolated private func logPendingShot(releaseBox: CGRect, science: ShotScienceMetrics?) {
         let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
         let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.viewModel?.logPendingShot(zone: zone,
                                             courtX: pos.courtX,
                                             courtY: pos.courtY,
@@ -189,7 +189,7 @@ final class CVPipeline {
         let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
         let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
         pipelineState = .idle
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.viewModel?.resolvePendingShot(result: result,
                                                  zone: zone,
                                                  courtX: pos.courtX,

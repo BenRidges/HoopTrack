@@ -100,7 +100,7 @@ final class CourtCalibrationService {
 
     private func setState(_ newState: CalibrationState) {
         state = newState
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             self.onStateChange?(self.state)
         }
