@@ -30,8 +30,9 @@ final class NotificationService: NSObject, ObservableObject {
     }
 
     private func refreshStatus() {
+        // Phase 7 — Security: @MainActor class must not use DispatchQueue.main.async
         center.getNotificationSettings { [weak self] settings in
-            DispatchQueue.main.async {
+            Task { @MainActor [weak self] in
                 self?.authorizationStatus = settings.authorizationStatus
             }
         }

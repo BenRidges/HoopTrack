@@ -199,6 +199,18 @@ struct ProfileTabView: View {
                 }
                 .disabled(isExporting)
             }
+
+            // MARK: Delete Account (Phase 7 — GDPR right to delete)
+            Section {
+                Button(role: .destructive) {
+                    viewModel.isShowingDeleteConfirm = true
+                } label: {
+                    Label("Delete All My Data", systemImage: "trash")
+                }
+            } footer: {
+                Text("Permanently deletes all sessions, shots, goals, and profile data from this device. This cannot be undone. HealthKit workout records are not deleted — remove them in the Health app if desired.")
+                    .font(.caption)
+            }
         }
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.large)
@@ -214,6 +226,15 @@ struct ProfileTabView: View {
             Button("OK") {}
         } message: {
             Text(exportErrorMessage ?? "")
+        }
+        // Phase 7 — GDPR delete confirmation
+        .alert("Delete All Data?", isPresented: $viewModel.isShowingDeleteConfirm) {
+            Button("Delete Everything", role: .destructive) {
+                Task { await viewModel.deleteAllData() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently erase all your sessions, shots, goals, and profile data from this device. HealthKit workout records must be removed separately in the Health app.")
         }
     }
 

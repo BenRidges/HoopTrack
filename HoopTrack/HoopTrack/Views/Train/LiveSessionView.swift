@@ -130,7 +130,9 @@ struct LiveSessionView: View {
                 showMakeAnimation = result == .make
                 showMissAnimation = result == .miss
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            // Phase 7 — Security: @MainActor classes must not use DispatchQueue.main.async
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
                 showMakeAnimation = false
                 showMissAnimation = false
             }
