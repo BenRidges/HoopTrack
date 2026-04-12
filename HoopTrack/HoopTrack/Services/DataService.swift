@@ -49,6 +49,16 @@ final class DataService: ObservableObject {
         return try modelContext.fetch(descriptor)
     }
 
+    /// Total shots attempted across all sessions that started today.
+    /// Used by ShotsTodayIntent for the background spoken response.
+    func fetchShotsTodayCount() throws -> Int {
+        let startOfDay = Calendar.current.startOfDay(for: .now)
+        let predicate  = #Predicate<TrainingSession> { $0.startedAt >= startOfDay }
+        let descriptor = FetchDescriptor(predicate: predicate)
+        let todaySessions = try modelContext.fetch(descriptor)
+        return todaySessions.reduce(0) { $0 + $1.shotsAttempted }
+    }
+
     func startSession(drillType: DrillType,
                       namedDrill: NamedDrill? = nil,
                       courtType: CourtType = .nba,
