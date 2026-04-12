@@ -40,7 +40,7 @@ struct HoopTrackShortcuts: AppShortcutsProvider {
                 "How many shots have I taken in \(.applicationName)"
             ],
             shortTitle: "Shots Today",
-            systemImageName: "basketball"
+            systemImageName: "basketball.fill"
         )
     }
 }
