@@ -9,8 +9,6 @@ import Combine
         let rank: BadgeRank?   // nil = not yet earned
     }
 
-    @Published var isLoading: Bool = false
-
     private let profile: PlayerProfile
 
     init(profile: PlayerProfile) {
