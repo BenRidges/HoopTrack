@@ -11,6 +11,7 @@ final class ProgressViewModel: ObservableObject {
     // MARK: - Published
     @Published var sessions: [TrainingSession] = []
     @Published var goals: [GoalRecord] = []
+    @Published var profile: PlayerProfile?
     @Published var fgTrendData: [(date: Date, fg: Double)] = []
     @Published var weeklyVolume: [(date: Date, attempts: Int)] = []
     @Published var selectedTimeRange: TimeRange = .last30Days
@@ -39,8 +40,9 @@ final class ProgressViewModel: ObservableObject {
             weeklyVolume = try dataService.dailyVolume(lastDays: selectedTimeRange.days)
             fgTrendData  = computeFGTrend()
 
-            let profile  = try dataService.fetchOrCreateProfile()
-            goals        = profile.goals
+            let fetched  = try dataService.fetchOrCreateProfile()
+            profile      = fetched
+            goals        = fetched.goals
         } catch {
             errorMessage = error.localizedDescription
         }
