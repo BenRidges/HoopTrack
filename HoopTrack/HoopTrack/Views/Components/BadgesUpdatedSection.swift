@@ -6,6 +6,8 @@ import UIKit   // for UINotificationFeedbackGenerator
 
 struct BadgesUpdatedSection: View {
     let changes: [BadgeTierChange]
+    private let haptic = UINotificationFeedbackGenerator()
+    @State private var appeared = false
 
     var body: some View {
         if changes.isEmpty { EmptyView() } else { content }
@@ -18,22 +20,21 @@ struct BadgesUpdatedSection: View {
 
             ForEach(Array(changes.enumerated()), id: \.element.badgeID) { index, change in
                 BadgeTierChangeRow(change: change)
-                    .transition(
-                        .scale(scale: 0.8)
-                        .combined(with: .opacity)
-                    )
+                    .opacity(appeared ? 1 : 0)
+                    .scaleEffect(appeared ? 1 : 0.8, anchor: .leading)
                     .animation(
                         .spring(response: 0.4, dampingFraction: 0.6)
-                        .delay(Double(index) * 0.08),   // stagger rows
-                        value: changes.count
+                        .delay(Double(index) * 0.08),
+                        value: appeared
                     )
             }
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onAppear {
-            // Fire a single success haptic when badge changes appear
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            haptic.prepare()
+            haptic.notificationOccurred(.success)
+            appeared = true
         }
     }
 }
