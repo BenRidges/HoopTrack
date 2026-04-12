@@ -245,7 +245,10 @@ final class DataService: ObservableObject {
         let appDefaults: [String] = [
             "hasCompletedOnboarding",
             "preferredCameraPosition",
-            "selectedDrillType"
+            "selectedDrillType",
+            "onboardingPlayerName",
+            "trainingReminderEnabled",
+            "trainingReminderHour"
         ]
         appDefaults.forEach { UserDefaults.standard.removeObject(forKey: $0) }
     }
