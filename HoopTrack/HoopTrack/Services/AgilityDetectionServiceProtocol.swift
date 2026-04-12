@@ -25,12 +25,9 @@ import AVFoundation
         try? session.setCategory(.ambient)
         try? session.setActive(true)
 
-        observation = session.observe(\.outputVolume, options: [.new]) { [weak self] audioSession, _ in
+        observation = session.observe(\.outputVolume, options: [.new]) { [weak self] _, _ in
             guard let self else { return }
-            // Reset to 0.5 to prevent volume drift; fire trigger
-            MainActor.assumeIsolated {
-                try? audioSession.setActive(false)
-                try? audioSession.setActive(true)
+            Task { @MainActor in
                 self.onTrigger?()
             }
         }
