@@ -52,6 +52,34 @@ struct HoopTrackApp: App {
                 )) {
                     OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding)
                 }
+                .onAppear { configureSessionsDirectoryProtection() }
+        }
+    }
+
+    // Phase 7 — Security
+    private func configureSessionsDirectoryProtection() {
+        let sessions = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
+
+        // Create directory with protection if absent
+        try? FileManager.default.createDirectory(
+            at: sessions,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.complete]
+        )
+
+        // Re-apply protection to any pre-existing files
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: sessions,
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        for url in contents {
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: url.path
+            )
         }
     }
 }

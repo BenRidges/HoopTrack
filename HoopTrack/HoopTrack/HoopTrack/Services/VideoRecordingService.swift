@@ -49,6 +49,18 @@ final class VideoRecordingService: NSObject {
         guard isRecording else { return }
         movieOutput.stopRecording()
     }
+
+    // Phase 7 — Security
+    private func applyFileProtection(to url: URL) {
+        do {
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: url.path
+            )
+        } catch {
+            print("[VideoRecordingService] Failed to set file protection: \(error)")
+        }
+    }
 }
 
 // MARK: - AVCaptureFileOutputRecordingDelegate
@@ -65,6 +77,7 @@ extension VideoRecordingService: AVCaptureFileOutputRecordingDelegate {
                 self?.onRecordingFinished?(.failure(error))
             }
         } else {
+            applyFileProtection(to: outputFileURL)
             DispatchQueue.main.async { [weak self] in
                 self?.onRecordingFinished?(.success(outputFileURL))
             }
