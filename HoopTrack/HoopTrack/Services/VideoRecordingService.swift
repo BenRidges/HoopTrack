@@ -19,12 +19,13 @@ final class VideoRecordingService: NSObject {
     // MARK: - Setup
 
     /// Attach to a running AVCaptureSession before calling startRecording().
-    func configure(captureSession: AVCaptureSession) {
+    func configure(captureSession: AVCaptureSession, orientation: CameraOrientation = .portrait) {
         guard captureSession.canAddOutput(movieOutput) else { return }
         captureSession.addOutput(movieOutput)
+        let angle = orientation.videoRotationAngle
         if let connection = movieOutput.connection(with: .video),
-           connection.isVideoRotationAngleSupported(90) {
-            connection.videoRotationAngle = 90
+           connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
         }
     }
 

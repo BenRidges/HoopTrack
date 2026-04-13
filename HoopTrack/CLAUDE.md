@@ -80,7 +80,7 @@ When adding new pure logic (calculators, services that take value-type inputs), 
 - **Normalised court coordinates.** Shot positions are stored as 0–1 fractions of half-court space, not screen pixels.
 - **`AgilityAttempt` is in-session only** — not persisted. Aggregates (`bestShuttleRunSeconds`, `bestLaneAgilitySeconds`, `avgVerticalJumpCm`) go on `TrainingSession`.
 - **Phase gating in comments.** Code sections are annotated `// Phase N —` to indicate when they were introduced. Don't remove these.
-- **Portrait-only.** The app is locked to portrait; landscape breaks CV coordinate mapping.
+- **Portrait by default.** The app is portrait-locked except for `LiveSessionView`, which forces landscape via `LandscapeHostingController`. The `OrientationLock` flag in `HoopTrackApp.swift` gates which orientations the AppDelegate allows. CV coordinate mapping uses `CameraOrientation.landscape` (videoRotationAngle = 0°) during live sessions.
 - **Video storage.** Session videos go to `Documents/Sessions/<uuid>.mov`. Auto-deleted after `HoopTrack.Storage.defaultVideoRetainDays` (60) days unless `videoPinnedByUser = true`.
 - **Swift 6 async pattern.** Never use `DispatchQueue.main.async` inside `@MainActor` classes — use `Task { @MainActor in }` instead. The project targets strict concurrency compliance.
 - **Sensitive data in Keychain only.** Auth tokens, user IDs, and API keys go in `KeychainService`. `UserDefaults` and `@AppStorage` are for non-sensitive UI preferences only.

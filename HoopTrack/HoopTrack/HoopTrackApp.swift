@@ -8,6 +8,23 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Orientation Control
+// A global flag set by LandscapeHostingController to allow landscape
+// for the live session only. All other screens remain portrait.
+enum OrientationLock {
+    /// When `true`, landscape orientations are permitted.
+    @MainActor static var allowLandscape: Bool = false
+}
+
+final class HoopTrackAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        OrientationLock.allowLandscape ? .landscape : .portrait
+    }
+}
+
 @main
 struct HoopTrackApp: App {
 
@@ -15,16 +32,34 @@ struct HoopTrackApp: App {
     // SwiftData is used on iOS 17+. A Core Data fallback is documented in
     // DataService.swift for users still on iOS 16.
     let modelContainer: ModelContainer = {
+        let schema = Schema([
+            PlayerProfile.self, TrainingSession.self,
+            ShotRecord.self, GoalRecord.self, EarnedBadge.self,
+        ])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(
-                for: PlayerProfile.self, TrainingSession.self,
-                     ShotRecord.self, GoalRecord.self, EarnedBadge.self,
-                migrationPlan: HoopTrackMigrationPlan.self
-            )
+            return try ModelContainer(for: schema, configurations: [config])
         } catch {
+#if DEBUG
+            // Development fallback: wipe a corrupt/mismatched store rather than crashing.
+            // This will never run in Release builds — safe to keep.
+            print("⚠️ HoopTrack: ModelContainer load failed (\(error)). Wiping store for fresh start.")
+            let storeURL = config.url
+            try? FileManager.default.removeItem(at: storeURL)
+            try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("store-shm"))
+            try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("store-wal"))
+            do {
+                return try ModelContainer(for: schema, configurations: [config])
+            } catch let retryError {
+                fatalError("HoopTrack: ModelContainer still failed after wipe — \(retryError)")
+            }
+#else
             fatalError("HoopTrack: Failed to create ModelContainer — \(error)")
+#endif
         }
     }()
+
+    @UIApplicationDelegateAdaptor(HoopTrackAppDelegate.self) var appDelegate
 
     // MARK: - Shared Services (injected via environment)
     @StateObject private var hapticService       = HapticService()

@@ -49,13 +49,16 @@ struct TrainTabView: View {
                     drillToLaunch        = nil
                 }
             } else {
-                LiveSessionView(
-                    drillType: drillToLaunch?.drillType ?? .freeShoot,
-                    namedDrill: drillToLaunch
-                ) {
-                    isShowingLiveSession = false
-                    drillToLaunch        = nil
+                LandscapeContainer {
+                    LiveSessionView(
+                        drillType: drillToLaunch?.drillType ?? .freeShoot,
+                        namedDrill: drillToLaunch
+                    ) {
+                        isShowingLiveSession = false
+                        drillToLaunch        = nil
+                    }
                 }
+                .ignoresSafeArea()
             }
         }
     }
