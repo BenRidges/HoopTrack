@@ -13,9 +13,10 @@ struct CoordinatorHost: View {
     @StateObject private var box = CoordinatorBox()
 
     var body: some View {
-        if let coordinator = box.value {
+        if let coordinator = box.value, let dataService = box.dataService {
             ContentView()
                 .environmentObject(coordinator)
+                .environmentObject(dataService)
         } else {
             ContentView()
                 .task {
@@ -32,11 +33,14 @@ struct CoordinatorHost: View {
     private(set) var value: SessionFinalizationCoordinator? {
         willSet { objectWillChange.send() }
     }
+    private(set) var dataService: DataService?
 
     func build(modelContext: ModelContext, notificationService: NotificationService) {
-        guard value == nil else { return }
+        guard value == nil, dataService == nil else { return }
+        let ds = DataService(modelContext: modelContext)
+        dataService = ds
         value = SessionFinalizationCoordinator(
-            dataService:            DataService(modelContext: modelContext),
+            dataService:            ds,
             goalUpdateService:      GoalUpdateService(modelContext: modelContext),
             healthKitService:       HealthKitService(),
             skillRatingService:     SkillRatingService(modelContext: modelContext),

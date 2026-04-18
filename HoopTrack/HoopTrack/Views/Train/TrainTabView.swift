@@ -5,7 +5,11 @@ import SwiftUI
 
 struct TrainTabView: View {
 
-    @EnvironmentObject private var hapticService: HapticService
+    @EnvironmentObject private var hapticService:       HapticService
+    @EnvironmentObject private var cameraService:       CameraService
+    @EnvironmentObject private var notificationService: NotificationService
+    @EnvironmentObject private var coordinator:         SessionFinalizationCoordinator
+    @EnvironmentObject private var dataService:         DataService
     @StateObject private var viewModel = TrainViewModel()
     @State private var isShowingLiveSession = false
     @State private var drillToLaunch: NamedDrill? = nil
@@ -68,6 +72,11 @@ struct TrainTabView: View {
                         isShowingLiveSession = false
                         drillToLaunch        = nil
                     }
+                    .environmentObject(cameraService)
+                    .environmentObject(hapticService)
+                    .environmentObject(notificationService)
+                    .environmentObject(coordinator)
+                    .environmentObject(dataService)
                 }
                 .ignoresSafeArea()
                 .onAppear {
