@@ -11,13 +11,12 @@ struct HomeTabView: View {
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var hapticService: HapticService
+    @EnvironmentObject private var appState: AppState
 
     @StateObject private var viewModel: DashboardViewModel = {
         // ViewModel is constructed with modelContext in .task
         DashboardViewModel(dataService: DataService(modelContext: ModelContext(try! ModelContainer(for: PlayerProfile.self, TrainingSession.self, ShotRecord.self, GoalRecord.self))))
     }()
-
-    @State private var isShowingQuickStart = false
 
     var body: some View {
         ScrollView {
@@ -68,7 +67,7 @@ struct HomeTabView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     hapticService.tap()
-                    isShowingQuickStart = true
+                    appState.selectedTab = .train
                 } label: {
                     Label("Quick Start", systemImage: "play.fill")
                 }
