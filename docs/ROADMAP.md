@@ -18,8 +18,8 @@
 | 6A | Siri Shortcuts, Data Export & Performance | ✅ Complete |
 | 6B | UI Polish, Refactor & Extension Report | ✅ Complete |
 | 7 | Security & Privacy | ✅ Complete |
-| 8 | Authentication & Identity | 🔜 Next |
-| 9 | Backend & Database | 🔜 Planned |
+| 8 | Authentication & Identity | ✅ Complete |
+| 9 | Backend & Database | 🔜 Next |
 | 10 | File & Media Storage | 🔜 Planned |
 | 11 | Accessibility | 🔜 Planned |
 | 12 | Web Presence | 🔜 Planned |
@@ -83,6 +83,54 @@ Full security hardening before backend introduction. **Subagent-driven developme
 - `ExportService` — `FileProtectionType.complete` on exported JSON
 
 **Tests added:** `KeychainServiceTests` (5), `InputValidatorTests` (10), `DataServiceDeleteTests` (4), `CourtZoneClassifierTests` (4 new cases). Full suite: 151 tests, 0 failures.
+
+### Phase 8 — Authentication & Identity
+Supabase email + password auth with biometric re-lock. **Sign in with Apple deliberately skipped** — not required for App Store compliance when no other social providers are offered; can be added later as an additional `AuthProviding` implementation without touching the view model. No Apple Developer membership required for this phase.
+
+**New files:**
+- `HoopTrack/Auth/AuthState.swift` — state enum: `unauthenticated / authenticating / authenticated(user) / locked(user) / error(AuthError)`
+- `HoopTrack/Auth/AuthError.swift` — localized error enum with 12 cases
+- `HoopTrack/Auth/AuthUser.swift` — `Sendable, Codable, Equatable` identity value type
+- `HoopTrack/Auth/AuthProviding.swift` — protocol isolating the Supabase SDK from the view model + tests
+- `HoopTrack/Auth/AuthViewModel.swift` — `@MainActor` state machine (12 TDD tests)
+- `HoopTrack/Auth/SupabaseAuthProvider.swift` — production `AuthProviding` impl wrapping `supabase-swift`'s `Auth` product
+- `HoopTrack/Auth/SupabaseClient+Shared.swift` — `AuthClient` singleton + `KeychainAuthStorage` adapter (session tokens into the keychain)
+- `HoopTrack/Auth/BiometricService.swift` — `LAContext` wrapper for Face ID / Touch ID unlock
+- `HoopTrack/Auth/BackendSecrets.swift.example` — template for the gitignored `BackendSecrets.swift`
+- `HoopTrack/Views/Auth/AuthGate.swift` — top-level router reading `AuthState`
+- `HoopTrack/Views/Auth/SignInView.swift` — email + password sign-in form
+- `HoopTrack/Views/Auth/SignUpView.swift` — sign-up form with password-match validation
+- `HoopTrack/Views/Auth/VerifyEmailView.swift` — "check your inbox" screen with refresh/resend/sign-out
+- `HoopTrack/Views/Auth/LockedView.swift` — biometric unlock after background timeout
+- `HoopTrackTests/Mocks/MockAuthProvider.swift` — in-memory stub with scripted responses
+- `HoopTrackTests/AuthViewModelTests.swift` — 12 tests covering every state-machine transition
+- `HoopTrackTests/AuthErrorTests.swift` — 4 tests for error description / equatability
+
+**Modified files:**
+- `HoopTrack/HoopTrackApp.swift` — `WindowGroup` wraps `CoordinatorHost` in `AuthGate`; scene-phase observer triggers `authViewModel.lock()` after 60s of backgrounding
+- `HoopTrack/CoordinatorHost.swift` — watches `AuthViewModel.state` and calls `DataService.linkSupabaseUser(id:)` on authenticate
+- `HoopTrack/Services/DataService.swift` — new `linkSupabaseUser(id:)` method
+- `HoopTrack/Models/PlayerProfile.swift` — adds `supabaseUserID: String?` (Phase 9 RLS will key on this)
+- `HoopTrack/Models/Migrations/HoopTrackSchemaV1.swift` — adds `HoopTrackSchemaV3` for future explicit-migration use
+- `HoopTrack/Models/Migrations/HoopTrackMigrationPlan.swift` — adds V2→V3 lightweight stage
+- `HoopTrack/Utilities/Constants.swift` — `HoopTrack.Backend` (URL + anon key proxies) + `HoopTrack.Auth.backgroundLockTimeoutSec` + `HoopTrack.Auth.minPasswordLength`
+- `HoopTrack/Views/Profile/ProfileTabView.swift` — Account section with email + sign-out
+- `HoopTrack/Info.plist` — adds `NSFaceIDUsageDescription`
+- `.gitignore` — `**/BackendSecrets.swift`
+
+**External dependencies added:** `supabase-swift` (SPM) — products `Auth`, `Functions`, `PostgREST`, `Realtime`, `Storage`. Phase 8 only consumes `Auth`.
+
+**Tests added:** `AuthViewModelTests` (12), `AuthErrorTests` (4). Full suite: **184 tests**, 1 skipped, 0 failures, 0 warnings.
+
+**Deferred to a later phase:**
+- Sign in with Apple as an additional `AuthProviding` impl.
+- Sign in with Google (same pattern).
+- Formal lightweight SwiftData migration plan (V2→V3 is additive and handled automatically; `HoopTrackMigrationPlan` stays in place for the first non-additive change).
+
+**Notes for Phase 9:**
+- `PlayerProfile.supabaseUserID` is set on every successful sign-in and is the canonical key for RLS `auth.uid()` matching.
+- `SupabaseContainer.auth` is a standalone `AuthClient` — Phase 9 will compose it with `PostgREST` and `Storage` into a richer wrapper.
+- `PinningURLSessionDelegate.pinnedHashes` still holds a placeholder SPKI SHA-256; must be replaced with the real Supabase hash before Phase 9 ships.
 
 ---
 
