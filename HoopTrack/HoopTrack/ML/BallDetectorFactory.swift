@@ -30,8 +30,15 @@ enum BallDetectorFactory {
     //   .manual                                                  → buttons only
     // ─────────────────────────────────────────────────────────────────────────
     static var active: BallDetectorConfiguration {
-        .bundled(modelName: HoopTrack.MLModel.bundledModelName,
-                 targetLabel: HoopTrack.MLModel.customTargetLabel)
+        // CoreML inference on the iOS simulator uses a CPU-only path that
+        // crashes on some model ops. Use the synthetic stub in the simulator
+        // and the real bundled model on device.
+        #if targetEnvironment(simulator)
+        return .stub
+        #else
+        return .bundled(modelName: HoopTrack.MLModel.bundledModelName,
+                        targetLabel: HoopTrack.MLModel.customTargetLabel)
+        #endif
     }
     // ─────────────────────────────────────────────────────────────────────────
 
