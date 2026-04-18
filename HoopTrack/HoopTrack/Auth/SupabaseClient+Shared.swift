@@ -16,7 +16,9 @@ enum SupabaseContainer {
                 "apikey": HoopTrack.Backend.supabaseAnonKey,
                 "Authorization": "Bearer \(HoopTrack.Backend.supabaseAnonKey)"
             ],
-            localStorage: KeychainAuthStorage()
+            flowType: .pkce,
+            localStorage: KeychainAuthStorage(),
+            logger: nil
         )
     }()
 }
