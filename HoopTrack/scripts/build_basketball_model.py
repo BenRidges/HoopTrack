@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
 build_basketball_model.py
-Downloads the Roboflow basketball-detection dataset, fine-tunes YOLOv8n,
-and exports BallDetector.mlpackage straight into HoopTrack/ML/.
+Downloads the Roboflow basketball-detection dataset, fine-tunes YOLOv8s,
+and exports BallDetector.mlpackage straight into HoopTrack/ML/ with NMS
+embedded so Vision's VNRecognizedObjectObservation path parses it.
 
 Requirements (auto-installed if missing):
   pip install ultralytics roboflow coremltools
 
+Setup:
+  export ROBOFLOW_API_KEY=your_key_here   # required
+
 Usage:
   python3 scripts/build_basketball_model.py
 
-Takes ~20-30 min on Apple Silicon (M-series), longer on Intel.
+Takes ~60-90 min on Apple Silicon (M-series) at the current 40-epoch /
+yolov8s config. Adjust EPOCHS and BASE_MODEL in the config block below
+if training time is the main constraint.
 """
 
 import subprocess, sys, shutil, os
@@ -49,15 +55,23 @@ PROJECT_ROOT = SCRIPT_DIR.parent                  # HoopTrack project root
 DEST_DIR     = PROJECT_ROOT / "HoopTrack" / "ML"
 DEST_NAME    = "BallDetector"                     # final .mlpackage name (no ext)
 
-ROBOFLOW_API_KEY = "DOHghQ04L26avTrW7bjF"
+ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY")
+if not ROBOFLOW_API_KEY:
+    sys.exit(
+        "ROBOFLOW_API_KEY is not set.\n"
+        "Export it in your shell before running this script, e.g.:\n"
+        "  export ROBOFLOW_API_KEY=your_key_here\n"
+        "  python3 scripts/build_basketball_model.py"
+    )
 WORKSPACE        = "computer-vision-d5fjh"
 PROJECT_NAME     = "basketball-detection-dn6fg"
 VERSION          = 4
 
-# YOLOv8n is the lightest model — fast to fine-tune on a laptop.
-# Switch to "yolov8s.pt" for slightly higher accuracy at ~2× training time.
-BASE_MODEL = "yolov8n.pt"
-EPOCHS     = 10          # ≈20-30 min on M-series, 45-60 min on Intel
+# YOLOv8s — small model, noticeably better accuracy than nano at ~2× training
+# time. Swap to "yolov8n.pt" if training time is the bigger constraint.
+BASE_MODEL = "yolov8s.pt"
+EPOCHS     = 40          # 10 left the model underfit; 40 lands solid results
+                         # on Apple Silicon in ~60-90 min for yolov8s.
 IMG_SIZE   = 640
 BATCH      = 8           # conservative — increase to 16 if you have 16 GB RAM+
 
