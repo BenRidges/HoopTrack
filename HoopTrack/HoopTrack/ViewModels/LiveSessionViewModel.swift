@@ -8,6 +8,7 @@
 
 import Foundation
 import Combine
+import UIKit
 
 @MainActor
 final class LiveSessionViewModel: ObservableObject {
@@ -44,6 +45,9 @@ final class LiveSessionViewModel: ObservableObject {
     // MARK: - Timer
     private var timerCancellable: AnyCancellable?
     private var sessionStartDate: Date?
+
+    // MARK: - Accessibility
+    private var lastAnnouncementDate: Date = .distantPast
 
     // MARK: - Dependencies
     @Published var sessionResult: SessionResult?
@@ -138,6 +142,16 @@ final class LiveSessionViewModel: ObservableObject {
             recentShots = Array(session.shots.suffix(5))
             lastShotResult = result
             triggerHaptic(for: result)
+            let message: String
+            switch result {
+            case .make:
+                message = "Make. \(shotsMade) for \(shotsAttempted). \(fgPercentString)."
+            case .miss:
+                message = "Miss. \(shotsMade) for \(shotsAttempted). \(fgPercentString)."
+            default:
+                return
+            }
+            postShotAnnouncement(message)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -237,5 +251,14 @@ final class LiveSessionViewModel: ObservableObject {
         case .miss:    hapticService.missMade()
         case .pending: hapticService.shotDetected()
         }
+    }
+
+    // MARK: - Accessibility Announcements (private)
+
+    private func postShotAnnouncement(_ message: String) {
+        let now = Date()
+        guard now.timeIntervalSince(lastAnnouncementDate) >= 2.0 else { return }
+        lastAnnouncementDate = now
+        UIAccessibility.post(notification: .announcement, argument: message)
     }
 }

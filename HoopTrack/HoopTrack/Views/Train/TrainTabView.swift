@@ -123,6 +123,9 @@ struct TrainTabView: View {
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
             )
         }
+        .accessibilityLabel("Free Shoot — Quick Start")
+        .accessibilityHint("Open court session with automatic shot tracking. Double-tap to begin.")
+        .accessibilityInputLabels(["Quick Start", "Play", "Start session"])
     }
 
     // MARK: - Category Filter
@@ -192,6 +195,10 @@ private struct FilterChip: View {
                 )
                 .foregroundStyle(isSelected ? .white : .primary)
         }
+        .accessibilityLabel("\(label) filter")
+        .accessibilityValue(isSelected ? "selected" : "not selected")
+        .accessibilityHint(isSelected ? "Double-tap to remove filter" : "Double-tap to filter drills")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -234,6 +241,9 @@ private struct DrillCard: View {
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(drill.rawValue), drill. Double-tap to configure and start.")
+        .accessibilityHint("Double-tap to open session setup")
+        .accessibilityAddTraits(.isButton)
     }
 }
 

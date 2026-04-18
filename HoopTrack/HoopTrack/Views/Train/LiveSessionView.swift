@@ -80,6 +80,7 @@ struct LiveSessionView: View {
             // MARK: Shot glow overlay
             ShotGlowOverlay(shotResult: viewModel.lastShotResult,
                              sidebarWidth: sidebarWidth)
+                .accessibilityHidden(true)
         }
         .task {
             viewModel.configure(
@@ -191,7 +192,7 @@ struct LiveSessionView: View {
 
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Text(String(format: "%.0f", viewModel.fgPercent))
-                        .font(.system(size: 34, weight: .black))
+                        .font(.system(.largeTitle, design: .rounded).weight(.black))
                         .foregroundStyle(fgTintColor)
                     Text("%")
                         .font(.system(size: 16, weight: .black))
@@ -301,6 +302,8 @@ struct LiveSessionView: View {
                             .stroke(Color.orange.opacity(isStatsExpanded ? 0.25 : 0.15), lineWidth: 1)
                     )
             )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Field goal percentage \(viewModel.fgPercentString), \(viewModel.shotsMade) makes out of \(viewModel.shotsAttempted) attempts")
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     isStatsExpanded.toggle()
@@ -315,7 +318,7 @@ struct LiveSessionView: View {
                     .tracking(1.5)
 
                 Text(viewModel.elapsedFormatted)
-                    .font(.system(size: 22, weight: .heavy, design: .monospaced))
+                    .font(.system(.title2, design: .monospaced).weight(.heavy))
                     .foregroundStyle(.white)
                     .tracking(1)
 
@@ -336,6 +339,8 @@ struct LiveSessionView: View {
                             .stroke(.white.opacity(0.06), lineWidth: 1)
                     )
             )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(viewModel.isPaused ? "Session timer \(viewModel.elapsedFormatted), paused" : "Session timer \(viewModel.elapsedFormatted)")
 
             Spacer(minLength: 8)
 
@@ -475,6 +480,9 @@ struct LiveSessionView: View {
                     .background(.red.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
                     .foregroundStyle(.white)
             }
+            .accessibilityLabel("Miss")
+            .accessibilityHint("Log a missed shot")
+            .accessibilityInputLabels(["Miss", "Missed", "No good"])
 
             Button {
                 viewModel.logShot(result: .make)
@@ -485,6 +493,9 @@ struct LiveSessionView: View {
                     .background(.green.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
                     .foregroundStyle(.white)
             }
+            .accessibilityLabel("Make")
+            .accessibilityHint("Log a made shot")
+            .accessibilityInputLabels(["Make", "Score", "Good shot"])
         }
     }
 
