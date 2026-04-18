@@ -4,6 +4,8 @@ import PostgREST
 
 final class SupabaseDataService: SupabaseDataServiceProtocol, @unchecked Sendable {
 
+    nonisolated init() {}
+
     func upsertProfile(_ dto: PlayerProfileDTO) async throws {
         let client = try await SupabaseContainer.postgrest()
         try await client
