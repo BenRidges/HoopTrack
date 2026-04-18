@@ -156,6 +156,23 @@ nonisolated enum HoopTrack {
         static let biometricToken = "com.hooptrack.keychain.biometricToken"
     }
 
+    // MARK: - Backend (Phase 8+)
+    enum Backend {
+        /// Supabase project URL — read from gitignored BackendSecrets.
+        static var supabaseURL: URL { BackendSecrets.supabaseURL }
+        /// Supabase anon / public key.
+        static var supabaseAnonKey: String { BackendSecrets.supabaseAnonKey }
+    }
+
+    // MARK: - Auth (Phase 8)
+    enum Auth {
+        /// Re-lock after this many seconds of app backgrounding —
+        /// biometric prompt required on return.
+        static let backgroundLockTimeoutSec: TimeInterval = 60
+        /// Minimum password length enforced client-side. Supabase enforces ≥ 6 server-side.
+        static let minPasswordLength: Int = 8
+    }
+
     // MARK: - UI
     enum UI {
         static let cornerRadius: Double         = 16

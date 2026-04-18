@@ -19,3 +19,7 @@ DerivedData/
 # SPM
 .swiftpm/
 .superpowers/
+
+# Auth — gitignored because it contains backend URL + anon key.
+# Template committed as BackendSecrets.swift.example next to it.
+**/BackendSecrets.swift
