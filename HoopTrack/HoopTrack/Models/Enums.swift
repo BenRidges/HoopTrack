@@ -164,3 +164,19 @@ enum CameraMode {
     case rear    // Shot tracking (default)
     case front   // Dribble drills (front camera, phone on floor)
 }
+
+// MARK: - Camera Orientation
+
+/// Orientation mode for the camera output.
+/// Portrait = 90° rotation (device upright). Landscape = 0° (device sideways).
+enum CameraOrientation {
+    case portrait
+    case landscape
+
+    var videoRotationAngle: CGFloat {
+        switch self {
+        case .portrait:  return 90
+        case .landscape: return 0
+        }
+    }
+}

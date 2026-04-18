@@ -8,14 +8,14 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - Orientation Control
-// A global flag set by LandscapeHostingController to allow landscape
-// for the live session only. All other screens remain portrait.
+// MARK: - Orientation Lock
+/// App-wide flag that gates whether landscape orientations are permitted.
+/// Set to `true` before presenting the live session; reset on dismiss.
 enum OrientationLock {
-    /// When `true`, landscape orientations are permitted.
     @MainActor static var allowLandscape: Bool = false
 }
 
+// MARK: - App Delegate (Orientation Gate)
 final class HoopTrackAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
@@ -27,6 +27,7 @@ final class HoopTrackAppDelegate: NSObject, UIApplicationDelegate {
 
 @main
 struct HoopTrackApp: App {
+    @UIApplicationDelegateAdaptor(HoopTrackAppDelegate.self) var appDelegate
 
     // MARK: - SwiftData Container
     // SwiftData is used on iOS 17+. A Core Data fallback is documented in

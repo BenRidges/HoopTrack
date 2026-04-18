@@ -33,11 +33,22 @@ struct TrainTabView: View {
         .sheet(isPresented: $isShowingPreSessionSheet) {
             PreSessionSheetView(drill: drillToLaunch, viewModel: viewModel) {
                 isShowingPreSessionSheet = false
-                isShowingLiveSession     = true
+                // Determine if this is a shooting session (needs landscape)
+                let needsLandscape = drillToLaunch == nil
+                    || (drillToLaunch?.drillType != .dribble
+                        && drillToLaunch?.drillType != .agility)
+                if needsLandscape {
+                    OrientationLock.allowLandscape = true
+                }
+                isShowingLiveSession = true
             }
         }
         // Full-screen live session — routes by drill type
-        .fullScreenCover(isPresented: $isShowingLiveSession) {
+        .fullScreenCover(isPresented: $isShowingLiveSession, onDismiss: {
+            // Reset orientation to portrait when session ends
+            OrientationLock.allowLandscape = false
+            requestOrientationChange(to: .portrait)
+        }) {
             if let drill = drillToLaunch, drill.drillType == .dribble {
                 DribbleDrillView(namedDrill: drill) {
                     isShowingLiveSession = false
@@ -59,8 +70,20 @@ struct TrainTabView: View {
                     }
                 }
                 .ignoresSafeArea()
+                .onAppear {
+                    requestOrientationChange(to: .landscapeRight)
+                }
             }
         }
+    }
+
+    // MARK: - Orientation Helpers
+
+    private func requestOrientationChange(to orientation: UIInterfaceOrientation) {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first else { return }
+        let mask: UIInterfaceOrientationMask = orientation.isLandscape ? .landscapeRight : .portrait
+        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
     }
 
     // MARK: - Quick Start
