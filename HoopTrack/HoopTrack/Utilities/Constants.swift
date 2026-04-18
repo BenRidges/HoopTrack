@@ -137,7 +137,8 @@ nonisolated enum HoopTrack {
     enum Storage {
         static let sessionVideoDirectory  = "Sessions"
         static let maxSessionVideoMB      = 300       // per 30-min session
-        static let defaultVideoRetainDays = 60
+        static let defaultVideoRetainDays = 7
+        static let allowedVideoRetainDays = [7, 14, 30]
     }
 
     // MARK: - Performance Targets

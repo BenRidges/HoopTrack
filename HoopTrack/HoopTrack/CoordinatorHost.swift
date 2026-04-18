@@ -47,6 +47,11 @@ struct CoordinatorHost: View {
         guard value == nil, dataService == nil else { return }
         let ds = DataService(modelContext: modelContext)
         dataService = ds
+        let retention = (try? ds.fetchOrCreateProfile().videosAutoDeleteDays)
+            ?? HoopTrack.Storage.defaultVideoRetainDays
+        if retention > 0 {
+            try? ds.purgeOldVideos(olderThanDays: retention)
+        }
         value = SessionFinalizationCoordinator(
             dataService:            ds,
             goalUpdateService:      GoalUpdateService(modelContext: modelContext),

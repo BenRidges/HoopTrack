@@ -3,6 +3,7 @@
 // and Shot Science highlights (Phase 3 fields shown if available).
 
 import SwiftUI
+import SwiftData
 
 struct SessionSummaryView: View {
 
@@ -11,11 +12,14 @@ struct SessionSummaryView: View {
     var badgeSkipReason: String? = nil
     let onDone: () -> Void
 
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var hapticService: HapticService
+    @Query private var profiles: [PlayerProfile]
     @State private var showShareSheet = false
     @State private var selectedShotForReview: ShotRecord? = nil
     @State private var showReplay = false
     @State private var animatedFG: Double = 0
+    @State private var isPinned: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -24,6 +28,11 @@ struct SessionSummaryView: View {
 
                     // MARK: Hero stats
                     heroSection
+
+                    // MARK: Video retention (Phase 10)
+                    if session.videoFileName != nil {
+                        videoSection
+                    }
 
                     // MARK: Shot chart
                     shotChartSection
@@ -109,7 +118,47 @@ struct SessionSummaryView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.top, 8)
-        .onAppear { animatedFG = session.fgPercent }
+        .onAppear {
+            animatedFG = session.fgPercent
+            isPinned = session.videoPinnedByUser
+        }
+    }
+
+    private var retentionDays: Int {
+        profiles.first?.videosAutoDeleteDays ?? HoopTrack.Storage.defaultVideoRetainDays
+    }
+
+    private var expiryText: String {
+        retentionDays == 0 ? "Never auto-deletes." : "Auto-deletes in \(retentionDays) days."
+    }
+
+    private var videoSection: some View {
+        HStack(spacing: 12) {
+            Image(systemName: isPinned ? "bookmark.fill" : "bookmark")
+                .font(.title3)
+                .foregroundStyle(isPinned ? Color.orange : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Save video")
+                    .font(.subheadline.bold())
+                Text(isPinned ? "Kept on this device until you unpin." : expiryText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: $isPinned)
+                .labelsHidden()
+                .tint(.orange)
+                .onChange(of: isPinned) { _, newValue in
+                    session.videoPinnedByUser = newValue
+                    try? modelContext.save()
+                    hapticService.tap()
+                }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(isPinned ? "Video saved" : "Video \(expiryText.lowercased())")
+        .accessibilityHint("Toggle to keep or auto-delete this session's video")
     }
 
     private var shotChartSection: some View {

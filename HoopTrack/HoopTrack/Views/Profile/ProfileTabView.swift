@@ -128,10 +128,10 @@ struct ProfileTabView: View {
                         get: { profile.videosAutoDeleteDays },
                         set: { viewModel.setVideoRetentionDays($0) }
                     )) {
-                        Text("Never").tag(0)
+                        Text("7 days").tag(7)
+                        Text("14 days").tag(14)
                         Text("30 days").tag(30)
-                        Text("60 days").tag(60)
-                        Text("90 days").tag(90)
+                        Text("Never").tag(0)
                     } label: {
                         Label("Delete Videos After", systemImage: "film")
                     }

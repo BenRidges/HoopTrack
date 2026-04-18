@@ -20,8 +20,8 @@
 | 7 | Security & Privacy | ✅ Complete |
 | 8 | Authentication & Identity | ✅ Complete |
 | 9 | Backend & Database | ✅ Complete |
-| 10 | File & Media Storage | 🔜 Next |
-| 11 | Accessibility | 🔜 Planned |
+| 10 | File & Media Storage (local-only) | ✅ Complete |
+| 11 | Accessibility | ✅ Complete |
 | 12 | Web Presence | 🔜 Planned |
 | CV | CV Detection v2 (parallel track) | 🔜 Ready to start (Phase A) |
 | 13 | Multiplayer Sessions | 🔮 Future |
@@ -238,40 +238,36 @@ Cloud sync turned on. Every session, shot, goal, and badge mirrors into Supabase
 
 ---
 
-### Phase 10 — File & Media Storage
-**Prerequisite:** Phase 9 complete (Supabase Auth + Storage in same project).  
-**Reference:** `docs/upgrade-file-media-storage.md`
+### Phase 10 — File & Media Storage (local-only) ✅
+Scoped-down from the original cloud-upload plan. Videos stay on-device; the user decides what to keep.
 
-| Task | Detail |
-|---|---|
-| Supabase Storage bucket | `session-videos` private bucket; RLS policy keyed on `auth.uid()`; path: `{user_id}/{session_id}.mov` |
-| `VideoUploadService` | `@MainActor final class`; background `URLSession` (survives app suspension); `@Published var uploadProgress: [UUID: Double]` |
-| Session finalization hook | Step 9 in `SessionFinalizationCoordinator` — non-fatal; failure does not roll back session |
-| SwiftData migration | `SchemaV3` adds `cloudUploaded: Bool` + `cloudUploadedAt: Date?` to `TrainingSession` |
-| Local file cleanup | Delete local `.mov` only after `cloudUploaded == true` confirmed |
-| Signed URL playback | 1-hour expiry for `AVPlayer`; 7-day for coach share links; generated on-demand, not cached |
-| Highlight export | `AVMutableComposition` trim + `AVVideoCompositionCoreAnimationTool` stats overlay; output MP4 to `temporaryDirectory` |
-| **Migration path (future)** | Cloudflare R2 (zero egress) when Supabase Storage egress exceeds ~$20/month (~2,000 MAU) |
+**Changes:**
+- `PlayerProfile.videosAutoDeleteDays` default 60 → 7 (new accounts only; existing users keep their current setting)
+- Profile settings picker options: **7 / 14 / 30 days / Never** (was 30/60/90/Never)
+- `SessionSummaryView` — "Save video" toggle flips `session.videoPinnedByUser`; caption shows expiry ("Auto-deletes in N days" vs "Kept on this device until you unpin")
+- `CoordinatorHost.CoordinatorBox.build` — calls `DataService.purgeOldVideos(olderThanDays:)` on launch using the profile's retention value (skipped when set to Never)
+- `HoopTrack.Storage.defaultVideoRetainDays = 7`, new `allowedVideoRetainDays = [7, 14, 30]`
 
-**Key files to create:**
-- `HoopTrack/HoopTrack/Services/VideoUploadService.swift`
+**Deferred to a future phase (when cross-device playback is actually needed):**
+- Supabase Storage bucket + `VideoUploadService` background upload
+- Signed-URL playback + coach share links
+- `AVMutableComposition` highlight export with stats overlay
+- Cloudflare R2 egress migration path
+
+See original task breakdown in git history if the cloud track is revived. Flag in `docs/production-readiness.md` if App Store submission requires server-side video.
 
 ---
 
-### Phase 11 — Accessibility
-**Can be worked in parallel with Phases 8–10 (no infrastructure dependency).**  
-**Reference:** `docs/upgrade-accessibility.md`
+### Phase 11 — Accessibility ✅
+WCAG 2.1 AA pass across shipped views. Merged in commit `697fce0`.
 
-| Task | Detail |
-|---|---|
-| VoiceOver audit | Add `accessibilityLabel` / `accessibilityValue` / `accessibilityHint` to all custom views (currently zero labels exist) |
-| End-session button | Highest-priority: replace inaccessible `DragGesture` long-press with `HoldToEndButton` that has an accessible alternative activation |
-| Dynamic Type | Replace 27 hard-coded `font(.system(size: N))` calls with semantic styles; `scaledMetric` for spacing/icons |
-| WCAG contrast | `#FF6B35` on `ultraThinMaterial` dark fails 4.5:1 — adjust opacity or provide `accessibilityContrast` variant |
-| Reduced motion | Guard `ShimmerModifier`, badge animations, animated counters with `@Environment(\.accessibilityReduceMotion)` |
-| Canvas views | `CourtMapView` + `SkillRadarView` need single-element accessibility summary labels |
-| Switch Control | `accessibilityInputLabels` for voice control; logical focus order audit per tab |
-| Live announcements | `UIAccessibility.post(notification: .announcement, ...)` for shot detection; throttle to avoid spam |
+**Changes:**
+- `Color+Brand.swift` — `brandOrangeAccessible` (lightened for 4.5:1 on dark backgrounds); used across Home, Agility, Live session
+- VoiceOver labels + hints on `HomeTabView`, `ProgressTabView`, `TrainTabView`, `BadgeBrowserView`, `CourtMapView`, `LiveSessionView`, `AgilitySessionView`, `DribbleDrillView`
+- `ShimmerModifier` + agility pulse + dribble end-session press gated on `accessibilityReduceMotion`
+- Dynamic-type migration: 27 hard-coded `.system(size: N)` → semantic styles (`.title2`, `.largeTitle`, etc.) + `@ScaledMetric` for agility timer
+- `LiveSessionViewModel.postShotAnnouncement` — `UIAccessibility.post(.announcement, ...)` on make/miss, throttled to 2s
+- `accessibilityInputLabels` on make/miss buttons and quick-start for Voice Control
 
 ---
 
