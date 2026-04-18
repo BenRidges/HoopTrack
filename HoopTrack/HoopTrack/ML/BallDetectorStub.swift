@@ -1,9 +1,8 @@
 // HoopTrack/ML/BallDetectorStub.swift
 // Simulates a basketball shot arc so the CV pipeline can be built and tested
-// before the real Core ML model is trained.
-// Compiled only in DEBUG builds — not shipped.
+// before the real Core ML model is trained. Used in the simulator (where
+// CoreML inference is unreliable) and as a fallback during development.
 
-#if DEBUG
 import AVFoundation
 import CoreGraphics
 
@@ -28,4 +27,3 @@ nonisolated final class BallDetectorStub: BallDetectorProtocol {
         )
     }
 }
-#endif

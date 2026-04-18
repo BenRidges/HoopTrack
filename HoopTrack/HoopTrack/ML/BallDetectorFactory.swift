@@ -48,11 +48,7 @@ enum BallDetectorFactory {
     static func make(_ configuration: BallDetectorConfiguration) -> BallDetectorProtocol? {
         switch configuration {
         case .stub:
-            #if DEBUG
             return BallDetectorStub()
-            #else
-            return nil
-            #endif
 
         case .bundled(let modelName, let targetLabel):
             guard let url = Bundle.main.url(forResource: modelName,
