@@ -82,6 +82,13 @@ nonisolated final class CVPipeline {
         let now       = CMSampleBufferGetPresentationTimeStamp(buffer)
         let detection = detector.detect(buffer: buffer)
 
+        // Overlay: push every-frame ball detection to the view-model (main actor)
+        let overlayBox = detection?.boundingBox
+        let overlayConfidence = detection?.confidence
+        Task { @MainActor [weak viewModel] in
+            viewModel?.updateBallDetection(box: overlayBox, confidence: overlayConfidence)
+        }
+
         switch pipelineState {
 
         case .idle:

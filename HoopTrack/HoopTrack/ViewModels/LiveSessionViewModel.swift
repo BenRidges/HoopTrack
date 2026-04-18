@@ -28,6 +28,13 @@ final class LiveSessionViewModel: ObservableObject {
     @Published var calibrationIsActive: Bool = false
     @Published var isCalibrated: Bool = false
 
+    // MARK: - Detection Overlay State
+    // Vision-normalised rects (origin bottom-left, 0–1). The overlay view
+    // flips to SwiftUI's top-left origin when drawing.
+    @Published var detectedHoopRect: CGRect?
+    @Published var detectedBallBox: CGRect?
+    @Published var detectedBallConfidence: Float?
+
     // MARK: - Computed HUD Values
     var shotsAttempted: Int { session?.shotsAttempted ?? 0 }
     var shotsMade:      Int { session?.shotsMade ?? 0 }
@@ -192,9 +199,17 @@ final class LiveSessionViewModel: ObservableObject {
     }
 
     /// Called by LiveSessionView when CourtCalibrationService changes state.
-    func updateCalibrationState(isCalibrated: Bool) {
+    func updateCalibrationState(isCalibrated: Bool, hoopRect: CGRect? = nil) {
         self.isCalibrated        = isCalibrated
         self.calibrationIsActive = isCalibrated
+        self.detectedHoopRect    = hoopRect
+    }
+
+    /// Called per frame by CVPipeline so the debug overlay can follow the ball.
+    /// Pass `nil` when no detection in the current frame.
+    func updateBallDetection(box: CGRect?, confidence: Float?) {
+        self.detectedBallBox        = box
+        self.detectedBallConfidence = confidence
     }
 
     // MARK: - Timer (private)

@@ -46,6 +46,11 @@ struct LiveSessionView: View {
                                       isSessionRunning: cameraService.isSessionRunning)
                         .ignoresSafeArea()
 
+                    // Detection debug overlay — rim (green) and ball (orange)
+                    DetectionOverlay(hoopRect: viewModel.detectedHoopRect,
+                                     ballBox:  viewModel.detectedBallBox,
+                                     ballConfidence: viewModel.detectedBallConfidence)
+
                     // Camera permission overlay
                     if cameraService.permissionStatus != .authorized {
                         Color.black.ignoresSafeArea()
@@ -98,8 +103,10 @@ struct LiveSessionView: View {
                 let cal = CourtCalibrationService()
                 cal.onStateChange = { @Sendable [weak viewModel] state in
                     let calibrated = state.isCalibrated
+                    let hoopRect: CGRect?
+                    if case .calibrated(let rect) = state { hoopRect = rect } else { hoopRect = nil }
                     Task { @MainActor [weak viewModel] in
-                        viewModel?.updateCalibrationState(isCalibrated: calibrated)
+                        viewModel?.updateCalibrationState(isCalibrated: calibrated, hoopRect: hoopRect)
                     }
                 }
                 cal.startCalibration()
