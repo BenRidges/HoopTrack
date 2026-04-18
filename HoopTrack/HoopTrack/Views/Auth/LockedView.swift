@@ -8,30 +8,60 @@ struct LockedView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(.orange)
-            Text("Locked").font(.title.bold())
-            Text("Unlock to continue")
-                .foregroundStyle(.secondary)
+        ZStack {
+            AuthBackground()
 
-            if let errorMessage {
-                Text(errorMessage).font(.footnote).foregroundStyle(.red)
-            }
+            VStack(spacing: 28) {
+                Spacer()
 
-            Button("Unlock") {
-                Task { await unlock() }
-            }
-            .buttonStyle(.borderedProminent)
+                VStack(spacing: 16) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 64))
+                        .foregroundStyle(.orange)
+                        .shadow(color: .orange.opacity(0.5), radius: 18, y: 4)
 
-            Button("Sign Out") {
-                Task { await authViewModel.signOut() }
+                    Text("Locked")
+                        .font(.system(size: 32, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+
+                    Text("Unlock to continue")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 32)
+                        .multilineTextAlignment(.center)
+                }
+
+                VStack(spacing: 12) {
+                    AuthPrimaryButton(
+                        title: "Unlock",
+                        isLoading: false,
+                        isEnabled: true
+                    ) {
+                        Task { await unlock() }
+                    }
+
+                    Button {
+                        Task { await authViewModel.signOut() }
+                    } label: {
+                        Text("Sign Out")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.red.opacity(0.85))
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, 32)
+
+                Spacer()
             }
-            .foregroundStyle(.red)
         }
-        .padding()
-        .task { await unlock() }   // prompt biometrics on appear
+        .preferredColorScheme(.dark)
+        .task { await unlock() }
     }
 
     private func unlock() async {
