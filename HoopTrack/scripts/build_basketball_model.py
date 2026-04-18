@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 build_basketball_model.py
-Downloads the Roboflow basketball-detection dataset, fine-tunes YOLOv8s,
-and exports BallDetector.mlpackage straight into HoopTrack/ML/ with NMS
-embedded so Vision's VNRecognizedObjectObservation path parses it.
+Downloads a Roboflow basketball dataset, fine-tunes YOLO11m, and exports
+BallDetector.mlpackage straight into HoopTrack/ML/ with NMS embedded so
+Vision's VNRecognizedObjectObservation path parses it.
 
 Requirements (auto-installed if missing):
   pip install ultralytics roboflow coremltools
@@ -14,9 +14,9 @@ Setup:
 Usage:
   python3 scripts/build_basketball_model.py
 
-Takes ~60-90 min on Apple Silicon (M-series) at the current 40-epoch /
-yolov8s config. Adjust EPOCHS and BASE_MODEL in the config block below
-if training time is the main constraint.
+At 100 epochs / yolo11m / imgsz=1280, expect ~4-8 hrs on a 3080 depending
+on dataset size. Adjust EPOCHS, BASE_MODEL, or IMG_SIZE in the config
+block below to trade accuracy for training time.
 """
 
 import subprocess, sys, shutil, os
@@ -28,6 +28,11 @@ def pip_install(*packages):
 
 try:
     import ultralytics
+    # YOLO11 support landed in 8.3.0. Upgrade if an older build is cached.
+    from packaging.version import parse as _parse
+    if _parse(ultralytics.__version__) < _parse("8.3.0"):
+        print(f"Upgrading ultralytics from {ultralytics.__version__} (YOLO11 needs ≥8.3.0) …")
+        pip_install("-U", "ultralytics")
 except ImportError:
     print("Installing ultralytics …")
     pip_install("ultralytics")
@@ -65,17 +70,22 @@ def main():
             "  export ROBOFLOW_API_KEY=your_key_here\n"
             "  python3 scripts/build_basketball_model.py"
         )
-    WORKSPACE        = "computer-vision-d5fjh"
-    PROJECT_NAME     = "basketball-detection-dn6fg"
-    VERSION          = 4
+    WORKSPACE        = "cricket-qnb5l"
+    PROJECT_NAME     = "basketball-xil7x"
+    VERSION          = 1
 
-    # YOLOv8s — small model, noticeably better accuracy than nano at ~2× training
-    # time. Swap to "yolov8n.pt" if training time is the bigger constraint.
-    BASE_MODEL = "yolov8s.pt"
-    EPOCHS     = 40          # 10 left the model underfit; 40 lands solid results
-                             # on Apple Silicon in ~60-90 min for yolov8s.
-    IMG_SIZE   = 640
-    BATCH      = 8           # conservative — increase to 16 if you have 16 GB RAM+
+    # YOLO11m — current Ultralytics SOTA for real-time detection, ~2% mAP over
+    # yolov8 at same FLOPs. Medium size lands ~15-20ms on iPhone Neural Engine
+    # at imgsz=1280, still comfortably under a 30fps budget. Swap to
+    # "yolo11l.pt" for ~2 more mAP points and ~30ms inference.
+    BASE_MODEL = "yolo11m.pt"
+    EPOCHS     = 100         # training time no longer a constraint; diminishing
+                             # returns past ~100 epochs with early-stopping patience.
+    IMG_SIZE   = 1280        # 2x resolution — big gain on small-ball detection
+                             # in wide-angle court footage. Memory-heavy; if the
+                             # 3080 OOMs, drop to 960 before reducing batch.
+    BATCH      = 8           # yolo11m @ 1280 on a 10GB 3080. AMP is on by default
+                             # via ultralytics. Bump to 12-16 if VRAM allows.
 
     # ── 2. Auto-detect best device ────────────────────────────────────────────────
     if torch.backends.mps.is_available():
@@ -89,7 +99,10 @@ def main():
         print("⚠  No GPU detected — training on CPU. This will take a while.")
 
     # ── 3. Download dataset from Roboflow ─────────────────────────────────────────
-    DATASET_DIR = Path("/tmp/basketball_dataset")
+    # Path keyed on project+version so swapping datasets forces a fresh download
+    # (older cached dataset at /tmp/basketball_dataset from a prior run would
+    # otherwise be reused silently with overwrite=False).
+    DATASET_DIR = Path(f"/tmp/roboflow_{PROJECT_NAME}_v{VERSION}")
 
     print("\n📥  Downloading basketball dataset from Roboflow …")
     rf = roboflow.Roboflow(api_key=ROBOFLOW_API_KEY)

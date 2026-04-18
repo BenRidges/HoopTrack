@@ -43,8 +43,8 @@ nonisolated final class CoreMLBallDetector: BallDetectorProtocol {
         // NMS-enabled models return VNRecognizedObjectObservation. The current
         // shipped model (yolov8s + nms=True) takes this path.
         if let results = request.results as? [VNRecognizedObjectObservation], !results.isEmpty {
-            let ball   = bestObservation(results, labelContains: "ball",   timestamp: timestamp)
-            let basket = bestObservation(results, labelContains: "basket", timestamp: timestamp)
+            let ball   = bestObservation(results, labelContains: "ball", timestamp: timestamp)
+            let basket = bestObservation(results, labelContains: "rim",  timestamp: timestamp)
             return SceneDetection(ball: ball, basket: basket, frameTimestamp: timestamp)
         }
 
@@ -96,7 +96,8 @@ nonisolated final class CoreMLBallDetector: BallDetectorProtocol {
         let numClasses = features - 4
         guard numClasses >= 1 else { return nil }
 
-        // Class indices from the model metadata: 0=ball, 1=basket, 2=person.
+        // Class indices from the basketball-xil7x dataset (alphabetical):
+        // 0=ball, 1=human, 2=rim. Raw-tensor path decodes only the ball class.
         let targetClass = 0
 
         // Source frame dimensions — needed to unmap the Vision letterbox.

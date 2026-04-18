@@ -26,8 +26,9 @@ nonisolated enum HoopTrack {
         static let bundledModelName  = "BallDetector"
         /// Target label for COCO-trained models (YOLOv8n, YOLOv5n, etc.)
         static let cocoTargetLabel   = "sports ball"
-        /// Target label for basketball-specific models (Roboflow basketball-detection-dn6fg).
-        /// The Roboflow model uses "ball" — distinct from the COCO "sports ball" label.
+        /// Target label for basketball-specific models (Roboflow basketball-xil7x).
+        /// Classes: ball, human, rim. Pipeline filters by substring so "ball"
+        /// is the ball class and "rim" is queried separately in CoreMLBallDetector.
         static let customTargetLabel = "ball"
     }
 
