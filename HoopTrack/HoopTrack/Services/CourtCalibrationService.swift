@@ -6,7 +6,7 @@ import Vision
 import AVFoundation
 import CoreGraphics
 
-enum CalibrationState {
+nonisolated enum CalibrationState: Sendable {
     case uncalibrated
     case detecting
     case calibrated(hoopRect: CGRect)
@@ -18,13 +18,13 @@ enum CalibrationState {
     }
 }
 
-final class CourtCalibrationService {
+nonisolated final class CourtCalibrationService {
 
     // MARK: - State
     private(set) var state: CalibrationState = .uncalibrated
 
     // Callback fired on main thread when state changes — observed by LiveSessionViewModel.
-    var onStateChange: ((CalibrationState) -> Void)?
+    var onStateChange: (@Sendable (CalibrationState) -> Void)?
 
     // MARK: - Vision
     private let request: VNDetectRectanglesRequest = {
@@ -100,9 +100,9 @@ final class CourtCalibrationService {
 
     private func setState(_ newState: CalibrationState) {
         state = newState
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.onStateChange?(self.state)
+        let callback = onStateChange
+        Task { @MainActor in
+            callback?(newState)
         }
     }
 

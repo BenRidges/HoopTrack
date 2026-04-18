@@ -95,8 +95,11 @@ struct LiveSessionView: View {
             // Phase 2: start CV pipeline (or fall back to manual-only if no model available)
             if let detector = BallDetectorFactory.make(BallDetectorFactory.active) {
                 let cal = CourtCalibrationService()
-                cal.onStateChange = { [weak viewModel] state in
-                    viewModel?.updateCalibrationState(isCalibrated: state.isCalibrated)
+                cal.onStateChange = { @Sendable [weak viewModel] state in
+                    let calibrated = state.isCalibrated
+                    Task { @MainActor [weak viewModel] in
+                        viewModel?.updateCalibrationState(isCalibrated: calibrated)
+                    }
                 }
                 cal.startCalibration()
 

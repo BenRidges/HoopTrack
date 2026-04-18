@@ -7,7 +7,7 @@ import AVFoundation
 
 // MARK: - Double
 
-extension Double {
+nonisolated extension Double {
     /// Clamps the value between `min` and `max`.
     func clamped(to range: ClosedRange<Double>) -> Double {
         Swift.max(range.lowerBound, Swift.min(range.upperBound, self))
@@ -25,7 +25,7 @@ extension Double {
 
 // MARK: - Date
 
-extension Date {
+nonisolated extension Date {
     /// True if the date falls on the same calendar day as `other`.
     func isSameDay(as other: Date, calendar: Calendar = .current) -> Bool {
         calendar.isDate(self, inSameDayAs: other)
@@ -42,7 +42,7 @@ extension Date {
 
 // MARK: - Array
 
-extension Array {
+nonisolated extension Array {
     /// Returns the element at `index` if in bounds, otherwise nil.
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil
@@ -87,7 +87,7 @@ extension View {
 
 // MARK: - AVCaptureDevice
 
-extension AVCaptureDevice {
+nonisolated extension AVCaptureDevice {
     /// Checks whether the device supports a given frame rate.
     func supports(fps: Double) -> Bool {
         activeFormat.videoSupportedFrameRateRanges
@@ -97,7 +97,7 @@ extension AVCaptureDevice {
 
 // MARK: - CGPoint
 
-extension CGPoint {
+nonisolated extension CGPoint {
     /// Returns the Euclidean distance to another point.
     func distance(to other: CGPoint) -> CGFloat {
         sqrt(pow(x - other.x, 2) + pow(y - other.y, 2))
