@@ -103,7 +103,7 @@ Full security hardening before backend introduction. **Subagent-driven developme
 ### Phase 8 — Authentication & Identity ⭐ NEXT
 **Prerequisite:** Phase 7 ✅ (`KeychainService`, `PinningURLSessionDelegate`, `PrivacyInfo.xcprivacy` all in place).  
 **Note:** Replace `PinningURLSessionDelegate.pinnedHashes` placeholder with real Supabase SPKI SHA-256 before Phase 9 ships.  
-**Reference:** `docs/upgrade-authentication-identity.md`
+**Reference:** [upgrade-authentication-identity.md](upgrade-authentication-identity.md)
 
 | Task | Detail |
 |---|---|
@@ -309,17 +309,17 @@ Issues identified at end of Phase 6B. Address during relevant upcoming phases.
 
 | Document | Contents |
 |---|---|
-| `docs/upgrade-security.md` | Full security implementation plan (Phase 7) |
 | `docs/upgrade-authentication-identity.md` | Auth integration plan (Phase 8) |
 | `docs/upgrade-backend-api.md` | Hasura + GraphQL backend plan (Phase 9) |
 | `docs/upgrade-postgresql-supabase.md` | Postgres schema, RLS, sync (Phase 9) |
 | `docs/upgrade-file-media-storage.md` | VideoUploadService, Supabase Storage (Phase 10) |
 | `docs/upgrade-accessibility.md` | VoiceOver audit, Dynamic Type, WCAG (Phase 11) |
 | `docs/upgrade-web-presence.md` | Next.js marketing + dashboard (Phase 12) |
+| `docs/upgrade-cv-detection.md` | CV detection + make/miss roadmap (telemetry foundation, detector v2, tracking, make/miss v2, audio, re-ranker) |
 | `docs/extension-multiplayer-sessions.md` | Multiplayer architecture (Phase 13) |
 | `docs/extension-web-dashboard.md` | Extended dashboard + coach access (Phase 14) |
 | `docs/extension-coach-review-mode.md` | Async coach review system (Phase 15) |
 | `docs/extension-teams-organisations.md` | Teams + org hierarchy (Phase 16) |
-| `docs/refactor-report.md` | Phase 6B technical debt findings |
-| `docs/performance-report.md` | Phase 6A performance audit findings |
-| `docs/extension-report.md` | Original strategic vision + technical options brief |
+| `docs/refactor-report.md` | Phase 6B technical debt findings (8 items still open) |
+| `docs/backlog/upgrade-security.md` | ✅ Implemented — full security plan (Phase 7) |
+| `docs/backlog/performance-report.md` | ✅ Implemented — Phase 6A performance audit findings |

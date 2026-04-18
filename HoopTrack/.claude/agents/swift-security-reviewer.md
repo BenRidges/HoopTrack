@@ -37,7 +37,7 @@ Review code for these security concerns, in priority order:
 
 ## Reference document
 
-The full security plan is in `docs/upgrade-security.md`. Use it as the authoritative spec.
+The full security plan is in `docs/backlog/upgrade-security.md` (Phase 7 implementation reference). Use it as the authoritative spec.
 
 ## Output format
 
