@@ -4,7 +4,7 @@
 import Foundation
 import CoreGraphics
 
-enum HoopTrack {
+nonisolated enum HoopTrack {
 
     // MARK: - App Info
     static let appName    = "HoopTrack"
@@ -122,6 +122,10 @@ enum HoopTrack {
         // MARK: Consistency
         static let fgPctSessionStdDevMax:   Double = 30    // % — worst cross-session variance
         static let crossSessionMinCount:    Int    = 3     // min sessions for cross-session score
+
+        // MARK: Badge gating
+        /// Shooting sessions with fewer shots than this are excluded from badge evaluation entirely.
+        static let badgeMinShotsForShootingSession: Int = 20
 
         // MARK: Volume
         static let sessionsPerWeekCap:      Double = 5

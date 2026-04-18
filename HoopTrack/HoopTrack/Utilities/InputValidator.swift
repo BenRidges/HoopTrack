@@ -3,7 +3,7 @@ import Foundation
 
 /// Pure functions for validating sensor values and user-provided strings
 /// before they are persisted or sent to any API.
-enum InputValidator {
+nonisolated enum InputValidator {
 
     // MARK: - Sensor ranges
 

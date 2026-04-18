@@ -3,7 +3,7 @@ import Foundation
 
 /// Maps a normalised court position (0–1, origin bottom-left half-court)
 /// to a CourtZone using the geometry constants in HoopTrack.CourtGeometry.
-enum CourtZoneClassifier {
+nonisolated enum CourtZoneClassifier {
 
     static func classify(courtX: Double, courtY: Double) -> CourtZone {
         // Phase 7 — Security: guard against NaN, Inf, or out-of-range inputs from
