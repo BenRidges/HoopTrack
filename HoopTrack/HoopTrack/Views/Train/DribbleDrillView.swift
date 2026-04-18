@@ -17,6 +17,7 @@ struct DribbleDrillView: View {
     let onFinish: () -> Void
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
 
     @StateObject private var viewModel = DribbleSessionViewModel()
@@ -83,7 +84,7 @@ struct DribbleDrillView: View {
             // Dribble count
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(viewModel.totalDribbles)")
-                    .font(.system(size: 36, weight: .black, design: .rounded))
+                    .font(.system(.largeTitle, design: .rounded).weight(.black))
                     .foregroundStyle(.white)
                     .shadow(radius: 4)
                 Text("dribbles")
@@ -99,7 +100,7 @@ struct DribbleDrillView: View {
             // BPS + timer
             VStack(alignment: .trailing, spacing: 2) {
                 Text(viewModel.elapsedFormatted)
-                    .font(.system(size: 36, weight: .black, design: .monospaced))
+                    .font(.system(.largeTitle, design: .monospaced).weight(.black))
                     .foregroundStyle(.white)
                     .shadow(radius: 4)
                 Text(String(format: "%.1f BPS", viewModel.currentBPS))
@@ -152,8 +153,12 @@ struct DribbleDrillView: View {
                             guard !isLongPressingEnd else { return }
                             isLongPressingEnd = true
                             endLongPressProgress = 0
-                            withAnimation(.linear(duration: 1.5)) {
+                            if reduceMotion {
                                 endLongPressProgress = 1
+                            } else {
+                                withAnimation(.linear(duration: 1.5)) {
+                                    endLongPressProgress = 1
+                                }
                             }
                             endSessionTask = Task {
                                 try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -165,11 +170,21 @@ struct DribbleDrillView: View {
                             endSessionTask?.cancel()
                             endSessionTask = nil
                             isLongPressingEnd = false
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            if reduceMotion {
                                 endLongPressProgress = 0
+                            } else {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    endLongPressProgress = 0
+                                }
                             }
                         }
                 )
+                .accessibilityLabel("End Session")
+                .accessibilityHint("Double-tap to end this dribble session immediately")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction {
+                    Task { await viewModel.endSession() }
+                }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

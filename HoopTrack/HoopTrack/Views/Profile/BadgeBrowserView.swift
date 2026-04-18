@@ -36,6 +36,15 @@ struct BadgeBrowserView: View {
 private struct BadgeRowView: View {
     let item: BadgeBrowserViewModel.BadgeRowItem
 
+    // Phase 11 — VoiceOver label for the row.
+    private var rowAccessibilityLabel: String {
+        if let rank = item.rank {
+            return "\(item.id.displayName) badge. Earned. Rank: \(rank.displayName)."
+        } else {
+            return "\(item.id.displayName) badge. Locked."
+        }
+    }
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
@@ -52,6 +61,11 @@ private struct BadgeRowView: View {
                     .foregroundStyle(.tertiary)
             }
         }
+        // Phase 11 — single VoiceOver element for the row.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(rowAccessibilityLabel)
+        .accessibilityHint("Double-tap to see details")
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -99,11 +113,16 @@ private struct BadgeDetailSheet: View {
             VStack(spacing: 16) {
                 BadgeRankPill(rank: rank)
                     .scaleEffect(1.4)
+                    // Phase 11 — rank name already in sheet title; hide from VoiceOver.
+                    .accessibilityHidden(true)
 
                 VStack(spacing: 6) {
                     let bandProgress = (rank.mmr.truncatingRemainder(dividingBy: 100)) / 100
                     ProgressView(value: bandProgress)
                         .tint(rank.tier.color)
+                        // Phase 11 — describe progress bar to VoiceOver.
+                        .accessibilityLabel("Progress to next rank")
+                        .accessibilityValue(String(format: "%.0f percent", bandProgress * 100))
 
                     HStack {
                         Text("MMR: \(Int(rank.mmr))")

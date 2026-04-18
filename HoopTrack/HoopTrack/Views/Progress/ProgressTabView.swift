@@ -82,6 +82,8 @@ struct ProgressTabView: View {
                     )
                     .foregroundStyle(.orange)
                     .interpolationMethod(.catmullRom)
+                    .accessibilityLabel(item.date.formatted(date: .abbreviated, time: .omitted))
+                    .accessibilityValue(String(format: "%.0f percent field goals", item.fg))
 
                     AreaMark(
                         x: .value("Date", item.date, unit: .day),
@@ -89,6 +91,8 @@ struct ProgressTabView: View {
                     )
                     .foregroundStyle(.orange.opacity(0.15).gradient)
                     .interpolationMethod(.catmullRom)
+                    .accessibilityLabel(item.date.formatted(date: .abbreviated, time: .omitted))
+                    .accessibilityValue(String(format: "%.0f percent field goals", item.fg))
 
                     PointMark(
                         x: .value("Date", item.date, unit: .day),
@@ -96,6 +100,8 @@ struct ProgressTabView: View {
                     )
                     .foregroundStyle(.orange)
                     .symbolSize(30)
+                    .accessibilityLabel(item.date.formatted(date: .abbreviated, time: .omitted))
+                    .accessibilityValue(String(format: "%.0f percent field goals", item.fg))
                 }
                 .chartYScale(domain: 0...100)
                 .chartYAxis {
@@ -135,6 +141,8 @@ struct ProgressTabView: View {
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Shot heat map. \(viewModel.heatMapShots.count) total shots.")
     }
 
     // MARK: - Zone Efficiency
@@ -170,6 +178,8 @@ struct ProgressTabView: View {
                         }
                         .frame(height: 8)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(ze.zone.rawValue) zone: \(String(format: "%.0f", ze.fgPercent)) percent, \(ze.made) makes out of \(ze.attempted) attempts")
                 }
             }
         }

@@ -18,6 +18,14 @@ struct CourtMapView: View {
     // courtAspect = width / height = 47/50.
     private let courtAspect: CGFloat = 47.0 / 50.0
 
+    // Phase 11 — accessibility summary for VoiceOver users.
+    private var courtMapAccessibilitySummary: String {
+        guard !shots.isEmpty else { return "Shot chart. No shots recorded." }
+        let makes = shots.filter { $0.result == .make }.count
+        let misses = shots.count - makes
+        return "Shot chart. \(makes) makes, \(misses) misses out of \(shots.count) total shots."
+    }
+
     var body: some View {
         GeometryReader { geo in
             let size = courtSize(in: geo.size)
@@ -55,6 +63,9 @@ struct CourtMapView: View {
         .aspectRatio(courtAspect, contentMode: .fit)
         .background(Color(red: 0.84, green: 0.68, blue: 0.42))  // hardwood colour
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // Phase 11 — expose a single accessibility element so VoiceOver reads the summary.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(courtMapAccessibilitySummary)
     }
 
     // MARK: - Coordinate Helpers

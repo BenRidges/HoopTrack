@@ -15,6 +15,9 @@ struct AgilitySessionView: View {
 
     @StateObject private var viewModel = AgilitySessionViewModel()
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .largeTitle) private var timerFontSize: CGFloat = 72
+
     @State private var isLongPressingEnd      = false
     @State private var endLongPressProgress: Double = 0
     @State private var endSessionTask: Task<Void, Never>?
@@ -37,8 +40,8 @@ struct AgilitySessionView: View {
 
                 // MARK: Timer Display
                 Text(timerString)
-                    .font(.system(size: 72, weight: .black, design: .monospaced))
-                    .foregroundStyle(viewModel.timerState == .running ? Color.orange : .white)
+                    .font(.system(size: timerFontSize, weight: .black, design: .monospaced))
+                    .foregroundStyle(viewModel.timerState == .running ? Color.brandOrangeAccessible : .white)
                     .shadow(radius: 6)
                     .padding(.bottom, 8)
 
@@ -106,16 +109,16 @@ struct AgilitySessionView: View {
                 Circle()
                     .strokeBorder(isRunning ? Color.orange : Color.white.opacity(0.4), lineWidth: 3)
                     .frame(width: 80, height: 80)
-                    .scaleEffect(isRunning ? 1.1 : 1.0)
-                    .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true),
+                    .scaleEffect(isRunning ? (reduceMotion ? 1.0 : 1.1) : 1.0)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.6).repeatForever(autoreverses: true),
                                value: isRunning)
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.title2)
-                    .foregroundStyle(isRunning ? .orange : .white.opacity(0.7))
+                    .foregroundStyle(isRunning ? Color.brandOrangeAccessible : .white.opacity(0.7))
             }
             Text(isRunning ? "Vol+ to Stop" : "Vol+ to Start")
                 .font(.headline)
-                .foregroundStyle(isRunning ? .orange : .white.opacity(0.8))
+                .foregroundStyle(isRunning ? Color.brandOrangeAccessible : .white.opacity(0.8))
         }
     }
 
@@ -137,12 +140,12 @@ struct AgilitySessionView: View {
                     HStack {
                         if attempt == best {
                             Image(systemName: "trophy.fill")
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.brandOrangeAccessible)
                                 .font(.caption)
                         }
                         Text(String(format: "%.2fs", attempt))
                             .font(.subheadline.bold())
-                            .foregroundStyle(attempt == best ? .orange : .white)
+                            .foregroundStyle(attempt == best ? Color.brandOrangeAccessible : .white)
                         Spacer()
                     }
                 }
@@ -163,7 +166,7 @@ struct AgilitySessionView: View {
                         .foregroundStyle(.white.opacity(0.6))
                     Text(String(format: "%.2fs", shuttle))
                         .font(.subheadline.bold())
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.brandOrangeAccessible)
                 }
             }
             if let lane = viewModel.bestLaneSeconds {
@@ -173,7 +176,7 @@ struct AgilitySessionView: View {
                         .foregroundStyle(.white.opacity(0.6))
                     Text(String(format: "%.2fs", lane))
                         .font(.subheadline.bold())
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.brandOrangeAccessible)
                 }
             }
         }
@@ -222,5 +225,12 @@ struct AgilitySessionView: View {
                     endSessionTask = nil
                 }
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("End Session")
+        .accessibilityHint("Double-tap to end the agility session and save results")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            Task { await viewModel.endSession() }
+        }
     }
 }

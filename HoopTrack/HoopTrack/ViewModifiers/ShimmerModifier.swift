@@ -8,12 +8,21 @@ import SwiftUI
 struct ShimmerModifier: ViewModifier {
     let isActive: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func body(content: Content) -> some View {
         if isActive {
-            content
-                .redacted(reason: .placeholder)
-                .overlay(ShimmerOverlay())
-                .allowsHitTesting(false)
+            if reduceMotion {
+                content
+                    .redacted(reason: .placeholder)
+                    .overlay(Color.white.opacity(0.08))
+                    .allowsHitTesting(false)
+            } else {
+                content
+                    .redacted(reason: .placeholder)
+                    .overlay(ShimmerOverlay())
+                    .allowsHitTesting(false)
+            }
         } else {
             content
         }

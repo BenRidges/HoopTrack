@@ -103,8 +103,8 @@ struct HomeTabView: View {
     private var streakBadge: some View {
         VStack(spacing: 0) {
             Text("\(viewModel.currentStreak)")
-                .font(.system(size: 22, weight: .heavy, design: .rounded))
-                .foregroundStyle(.orange)
+                .font(.system(.title2, design: .rounded).weight(.heavy))
+                .foregroundStyle(Color.brandOrangeAccessible)
             Text("day streak")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -112,6 +112,8 @@ struct HomeTabView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.orange.opacity(0.12), in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(viewModel.currentStreak) day streak")
     }
 
     private var ratingSection: some View {
@@ -130,13 +132,15 @@ struct HomeTabView: View {
                         .rotationEffect(.degrees(-90))
                     VStack(spacing: 0) {
                         Text("\(Int(viewModel.overallRating))")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .font(.system(.title, design: .rounded).weight(.bold))
                         Text("Overall")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .frame(width: 90, height: 90)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Overall rating \(Int(viewModel.overallRating)) percent")
 
                 SkillRadarView(ratings: Dictionary(uniqueKeysWithValues:
                     viewModel.skillRatings.map { ($0.skill, $0.value) }
@@ -199,6 +203,8 @@ struct HomeTabView: View {
                 )
                 .foregroundStyle(.orange.gradient)
                 .cornerRadius(4)
+                .accessibilityLabel(item.date.formatted(.dateTime.weekday(.wide)))
+                .accessibilityValue("\(item.attempts) shots")
             }
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day)) {
