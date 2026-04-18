@@ -1,10 +1,11 @@
 // HoopTrack/Auth/SupabaseClient+Shared.swift
-// Phase 8: only the Auth product is needed. Phase 9 will add a richer wrapper
-// that composes Auth + PostgREST + Storage into a single SupabaseClient.
+// Phase 8: AuthClient for email/password + biometric re-lock.
+// Phase 9: PostgrestClient for row sync, RLS-gated via the current JWT.
 
 import Foundation
 import Security
 import Auth
+import PostgREST
 
 enum SupabaseContainer {
     /// Lazily-initialised AuthClient. Built from HoopTrack.Backend (which
@@ -12,15 +13,34 @@ enum SupabaseContainer {
     static let auth: AuthClient = {
         AuthClient(
             url: HoopTrack.Backend.supabaseURL.appendingPathComponent("auth/v1"),
-            headers: [
-                "apikey": HoopTrack.Backend.supabaseAnonKey,
-                "Authorization": "Bearer \(HoopTrack.Backend.supabaseAnonKey)"
-            ],
+            headers: anonHeaders,
             flowType: .pkce,
             localStorage: KeychainAuthStorage(),
             logger: nil
         )
     }()
+
+    /// Fresh PostgrestClient per call, built with the current session's
+    /// access token in the Authorization header so RLS resolves correctly.
+    /// The client is cheap; constructing it on demand avoids stale JWTs
+    /// after sign-out or token refresh.
+    static func postgrest() async throws -> PostgrestClient {
+        let accessToken = try await auth.session.accessToken
+        var headers = anonHeaders
+        headers["Authorization"] = "Bearer \(accessToken)"
+        return PostgrestClient(
+            url: HoopTrack.Backend.supabaseURL.appendingPathComponent("rest/v1"),
+            headers: headers,
+            logger: nil
+        )
+    }
+
+    private static var anonHeaders: [String: String] {
+        [
+            "apikey": HoopTrack.Backend.supabaseAnonKey,
+            "Authorization": "Bearer \(HoopTrack.Backend.supabaseAnonKey)"
+        ]
+    }
 }
 
 /// Plugs Supabase's session persistence into the keychain so tokens live
