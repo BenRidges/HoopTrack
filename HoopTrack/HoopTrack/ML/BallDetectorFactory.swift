@@ -30,12 +30,8 @@ enum BallDetectorFactory {
     //   .manual                                                  → buttons only
     // ─────────────────────────────────────────────────────────────────────────
     static var active: BallDetectorConfiguration {
-        #if DEBUG
-        return .stub
-        #else
-        return .bundled(modelName: HoopTrack.MLModel.bundledModelName,
-                        targetLabel: HoopTrack.MLModel.customTargetLabel)
-        #endif
+        .bundled(modelName: HoopTrack.MLModel.bundledModelName,
+                 targetLabel: HoopTrack.MLModel.customTargetLabel)
     }
     // ─────────────────────────────────────────────────────────────────────────
 
