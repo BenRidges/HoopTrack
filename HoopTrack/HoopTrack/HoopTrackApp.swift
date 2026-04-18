@@ -67,27 +67,54 @@ struct HoopTrackApp: App {
     @StateObject private var cameraService       = CameraService()
     @StateObject private var appState            = AppState()
     @StateObject private var metricsService      = MetricsService()
+    @StateObject private var authViewModel       = AuthViewModel(provider: SupabaseAuthProvider())
 
     // MARK: - Onboarding Gate
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
+    // MARK: - Scene-phase lock tracking (Phase 8)
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var backgroundedAt: Date?
+
     var body: some Scene {
         WindowGroup {
-            CoordinatorHost()
-                .modelContainer(modelContainer)
-                .environmentObject(hapticService)
-                .environmentObject(notificationService)
-                .environmentObject(cameraService)
-                .environmentObject(appState)
-                .onOpenURL { appState.handleDeepLink($0) }
-                .task { metricsService.register() }
-                .fullScreenCover(isPresented: .init(
-                    get: { !hasCompletedOnboarding },
-                    set: { if !$0 { hasCompletedOnboarding = true } }
-                )) {
-                    OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding)
-                }
-                .onAppear { configureSessionsDirectoryProtection() }
+            AuthGate {
+                CoordinatorHost()
+            }
+            .environmentObject(authViewModel)
+            .environmentObject(hapticService)
+            .environmentObject(notificationService)
+            .environmentObject(cameraService)
+            .environmentObject(appState)
+            .modelContainer(modelContainer)
+            .task { await authViewModel.restore() }
+            .onChange(of: scenePhase) { _, newPhase in
+                handleScenePhase(newPhase)
+            }
+            .onOpenURL { appState.handleDeepLink($0) }
+            .task { metricsService.register() }
+            .fullScreenCover(isPresented: .init(
+                get: { !hasCompletedOnboarding },
+                set: { if !$0 { hasCompletedOnboarding = true } }
+            )) {
+                OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding)
+            }
+            .onAppear { configureSessionsDirectoryProtection() }
+        }
+    }
+
+    private func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            backgroundedAt = Date()
+        case .active:
+            if let backgroundedAt,
+               Date().timeIntervalSince(backgroundedAt) > HoopTrack.Auth.backgroundLockTimeoutSec {
+                authViewModel.lock()
+            }
+            self.backgroundedAt = nil
+        default:
+            break
         }
     }
 
