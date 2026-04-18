@@ -25,6 +25,9 @@ final class GoalRecord {
     var isAchieved: Bool
     var achievedAt: Date?
 
+    // MARK: - Sync (Phase 9)
+    var cloudSyncedAt: Date?
+
     // MARK: - Relationship
     var profile: PlayerProfile?
     var lastMilestoneNotified: Int = 0   // 0, 50, 75, or 100 — tracks highest fired threshold
@@ -49,6 +52,8 @@ final class GoalRecord {
         self.currentValue   = baselineValue
         self.isAchieved     = false
         self.achievedAt     = nil
+
+        self.cloudSyncedAt  = nil
     }
 
     // MARK: - Computed

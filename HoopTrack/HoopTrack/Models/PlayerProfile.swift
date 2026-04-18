@@ -48,6 +48,11 @@ final class PlayerProfile {
     /// (switching accounts wipes the profile via DataService.deleteAllUserData()).
     var supabaseUserID: String?
 
+    // MARK: - Sync (Phase 9)
+    /// Timestamp of the last successful Supabase upload. nil means this
+    /// record has never synced or has been edited since the last sync.
+    var cloudSyncedAt: Date?
+
     // MARK: - Relationships
     @Relationship(deleteRule: .cascade) var sessions: [TrainingSession]
     @Relationship(deleteRule: .cascade) var goals: [GoalRecord]
@@ -83,6 +88,7 @@ final class PlayerProfile {
         self.videosAutoDeleteDays   = 60
 
         self.supabaseUserID         = nil
+        self.cloudSyncedAt          = nil
 
         self.sessions               = []
         self.goals                  = []

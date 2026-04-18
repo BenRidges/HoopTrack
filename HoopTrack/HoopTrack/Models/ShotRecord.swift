@@ -35,6 +35,9 @@ final class ShotRecord {
     var videoTimestampSeconds: Double?  // offset into session video for thumbnail
     var isUserCorrected: Bool           // true if user edited result/position
 
+    // MARK: - Sync (Phase 9)
+    var cloudSyncedAt: Date?
+
     // MARK: - Relationship
     var session: TrainingSession?
 
@@ -64,6 +67,8 @@ final class ShotRecord {
 
         self.videoTimestampSeconds = nil
         self.isUserCorrected       = false
+
+        self.cloudSyncedAt         = nil
     }
 
     // MARK: - Helpers

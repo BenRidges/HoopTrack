@@ -50,6 +50,9 @@ final class TrainingSession {
     var longestMakeStreak: Int           // longest consecutive makes; computed in recalculateStats()
     var shotSpeedStdDev: Double?         // std dev of shotSpeedMph; computed in recalculateStats()
 
+    // MARK: - Sync (Phase 9)
+    var cloudSyncedAt: Date?
+
     // MARK: - Relationships
     var profile: PlayerProfile?
     @Relationship(deleteRule: .cascade) var shots: [ShotRecord]
@@ -94,6 +97,8 @@ final class TrainingSession {
         self.bestLaneAgilitySeconds = nil
         self.longestMakeStreak      = 0
         self.shotSpeedStdDev        = nil
+
+        self.cloudSyncedAt      = nil
 
         self.shots              = []
     }

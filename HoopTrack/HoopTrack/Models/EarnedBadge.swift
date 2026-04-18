@@ -8,6 +8,10 @@ import SwiftData
     var mmr: Double          // 0–1800 continuous; tier derived via BadgeRank(mmr:)
     var earnedAt: Date       // set on first earn (cold-start)
     var lastUpdatedAt: Date  // updated each time MMR changes
+
+    // MARK: - Sync (Phase 9)
+    var cloudSyncedAt: Date?
+
     var profile: PlayerProfile?
 
     init(badgeID: BadgeID, initialMMR: Double, profile: PlayerProfile? = nil) {
@@ -16,6 +20,7 @@ import SwiftData
         self.mmr           = initialMMR
         self.earnedAt      = .now
         self.lastUpdatedAt = .now
+        self.cloudSyncedAt = nil
         self.profile       = profile
     }
 
