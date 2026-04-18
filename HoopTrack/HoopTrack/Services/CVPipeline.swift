@@ -124,7 +124,7 @@ final class CVPipeline {
                 if elapsed > trackingTimeoutSec { pipelineState = .idle }
             }
 
-        case .releaseDetected(let releaseBox, let trajectory):
+        case .releaseDetected(let releaseBox, _):
             let elapsed = CMTimeGetSeconds(CMTimeSubtract(now, releaseTimestamp))
 
             if let d = detection, case .calibrated(let hoopRect) = calibration.state {

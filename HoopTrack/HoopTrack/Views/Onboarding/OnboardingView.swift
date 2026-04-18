@@ -204,7 +204,7 @@ private struct NotificationsPage: View {
             VStack(spacing: 12) {
                 Button {
                     Task {
-                        try? await UNUserNotificationCenter.current()
+                        _ = try? await UNUserNotificationCenter.current()
                             .requestAuthorization(options: [.alert, .badge, .sound])
                         withAnimation { currentPage = 3 }
                     }

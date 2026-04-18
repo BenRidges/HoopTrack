@@ -122,12 +122,12 @@ final class LiveSessionViewModel: ObservableObject {
         let safeX = InputValidator.isValidCourtCoordinate(courtX) ? courtX : 0.5
         let safeY = InputValidator.isValidCourtCoordinate(courtY) ? courtY : 0.5
         do {
-            let shot = try dataService.addShot(to: session,
-                                               result: result,
-                                               zone: zone,
-                                               shotType: shotType,
-                                               courtX: safeX,
-                                               courtY: safeY)
+            _ = try dataService.addShot(to: session,
+                                        result: result,
+                                        zone: zone,
+                                        shotType: shotType,
+                                        courtX: safeX,
+                                        courtY: safeY)
             recentShots = Array(session.shots.suffix(5))
             lastShotResult = result
             triggerHaptic(for: result)
