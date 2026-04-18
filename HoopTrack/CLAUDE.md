@@ -7,12 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Build and run tests via Xcode (⌘B / ⌘U) or `xcodebuild`. The CLI tool requires full Xcode selected as the developer directory — not just Command Line Tools.
 
 ```bash
-# Run all tests
-xcodebuild test -project HoopTrack.xcodeproj -scheme HoopTrack -destination 'platform=iOS Simulator,name=iPhone 16'
+# Run all tests (iPhone 14 is known-present on this Mac; verify with `xcrun simctl list devices available | grep iPhone` if it fails)
+xcodebuild test -project HoopTrack.xcodeproj -scheme HoopTrack -destination 'platform=iOS Simulator,name=iPhone 14'
 
 # Run a single test class
 xcodebuild test -project HoopTrack.xcodeproj -scheme HoopTrack \
-  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -destination 'platform=iOS Simulator,name=iPhone 14' \
   -only-testing:HoopTrackTests/ShotScienceCalculatorTests
 ```
 
@@ -24,7 +24,7 @@ Minimum deployment target: **iOS 16.0**. SwiftData is iOS 17+; the app uses a Co
 
 ### Data layer
 
-- **`Models/`** — SwiftData `@Model` classes: `PlayerProfile`, `TrainingSession`, `ShotRecord`, `GoalRecord`. All enums live in `Models/Enums.swift`.
+- **`Models/`** — SwiftData `@Model` classes: `PlayerProfile`, `TrainingSession`, `ShotRecord`, `GoalRecord`, `EarnedBadge`. All enums live in `Models/Enums.swift`.
 - **`Services/DataService.swift`** — Single SwiftData abstraction. All persistence goes through here. Has `finaliseSession()` / `finaliseDribbleSession()` entry points; post-session work (goal updates, skill rating recalc) is delegated to `SessionFinalizationCoordinator` (Phase 5).
 - **`TrainingSession.recalculateStats()`** — Call after modifying `shots`; caches aggregate FG%, Shot Science averages, consistency score.
 
@@ -34,7 +34,7 @@ The computer vision stack runs on a background `sessionQueue`. Results are dispa
 
 - **`CameraService`** — AVCaptureSession lifecycle, `framePublisher: AnyPublisher<CMSampleBuffer, Never>`
 - **`CVPipeline`** — Shot detection state machine: `idle → tracking → release_detected → resolved`. Subscribes to `framePublisher`.
-- **`CourtCalibrationService`** — Hoop detection; court position normalisation to 0–1 half-court space. Shot detection is blocked until `isCalibrated`.
+- **`CourtCalibrationService`** — ML-based rim tracking via the detector's `basket` class, smoothed per-frame by `HoopRectSmoother` (EMA, 0.5s lost-timeout). Emits `looking / tracking(hoopRect) / lost(hoopRect)`. Court position normalised to 0–1 half-court space via `courtPosition(for:)`.
 - **`PoseEstimationService`** — Vision body pose for Shot Science metrics (Phase 3, rear camera)
 - **`DribblePipeline`** — Hand tracking for dribble drills (Phase 4, front camera)
 
@@ -64,9 +64,24 @@ The Train tab hosts the main live session flow:
 
 - **`Utilities/KeychainService.swift`** — `@MainActor final class`. All auth tokens and sensitive values go here — never `UserDefaults`. Key constants in `HoopTrack.KeychainKey`. Call `deleteAll()` during account deletion.
 - **`Utilities/InputValidator.swift`** — Pure `enum` with static validators. Call before persisting any sensor value or user string: `isValidReleaseAngle`, `isValidJumpHeight`, `isValidCourtCoordinate`, `sanitisedProfileName`.
-- **`Utilities/PinningURLSessionDelegate.swift`** — SPKI SHA-256 cert pinning for Phase 9. **Replace the placeholder hash with real Supabase SPKI before Phase 9 ships.**
+- **`Utilities/PinningURLSessionDelegate.swift`** — SPKI SHA-256 cert pinning (real Supabase hashes live since Phase 9). **Delegate is not yet wired into supabase-swift's URLSession — the pins are scenery until that happens.** Tracked P0 in `docs/production-readiness.md`.
 - **`PrivacyInfo.xcprivacy`** — App Store privacy manifest. Auto-discovered by Xcode 26. No pbxproj edits needed.
 - **`DataService.deleteAllUserData()`** — GDPR right-to-delete. Clears SwiftData records, `Documents/Sessions/` files, Keychain, and all known UserDefaults keys.
+
+### Auth layer (added Phase 8)
+
+- **`Auth/`** — Supabase email+password auth. `AuthViewModel` (state machine: `unauthenticated / authenticating / authenticated / locked / error`), `AuthProviding` protocol (real impl `SupabaseAuthProvider`, `MockAuthProvider` in tests), `SupabaseContainer` (lazy `AuthClient` + `postgrest()` builder), `BiometricService` (Face ID / Touch ID unlock after `HoopTrack.Auth.backgroundLockTimeoutSec` — default 60s), `BackendSecrets.swift` (gitignored; copy from `BackendSecrets.swift.example` and fill in Supabase URL + anon key).
+- **`Views/Auth/`** — `AuthGate` wraps `CoordinatorHost`, routing between `SignInView` / `SignUpView` / `VerifyEmailView` / `LockedView` based on `AuthState`.
+- **`PlayerProfile.supabaseUserID`** — set on every authenticated restore by `CoordinatorHost.onChange`; canonical key for RLS `auth.uid()` matching in Phase 9.
+- **Sign in with Apple is intentionally skipped.** Email-only is App Store compliant when no other social provider is offered. Can be added later as another `AuthProviding` impl without touching the view model.
+
+### Sync layer (added Phase 9)
+
+- **`Sync/`** — `SupabaseDataService` (PostgREST wrapper, `nonisolated init`), `SupabaseDataServiceProtocol`, `SyncCoordinator` (orchestrates uploads, stamps `cloudSyncedAt`), 5 Codable DTOs (`PlayerProfileDTO`, `TrainingSessionDTO`, `ShotRecordDTO`, `GoalRecordDTO`, `EarnedBadgeDTO`) with snake_case CodingKeys.
+- **`SessionFinalizationCoordinator` step 8** — `kickOffSync(session:profile:)` fires a fire-and-forget Supabase upload after every shooting / dribble / agility session. Skips if no coordinator injected, no signed-in user, `endedAt == nil`, or `durationSeconds < 30`.
+- **`cloudSyncedAt: Date?`** on the 5 syncable models — nil means never-synced or dirty. Stamped by `SyncCoordinator` after a successful upsert.
+- **Postgres schema + RLS** live on Supabase project `nfzhqcgofuohsjhtxvqa`. 5 tables, 16 RLS policies keyed on `auth.uid()`. `shot_records` is append-only by policy (select + insert only).
+- **Row-to-model mapping uses enum `rawValue`** — display strings ("Free Shoot", "Mid-Range", "Make"). Renaming a UI label would break existing Postgres rows until stable `exportKey`s are introduced on `DrillType` / `ShotResult` / `ShotType` / `SkillDimension` / `GoalMetric`. Flagged P0 in `docs/production-readiness.md`.
 
 ## Testing conventions
 
@@ -74,9 +89,16 @@ Tests live in `HoopTrackTests/`. All existing tests cover **pure functions only*
 
 When adding new pure logic (calculators, services that take value-type inputs), write a corresponding test file following the same pattern as `ShotScienceCalculatorTests.swift`.
 
+## Repository layout
+
+- **Git root:** `/Users/benridges/Documents/projects/` — contains `HoopTrack/`, `docs/`, sibling experiments (`dog-cam/`, `hooptrack-ball-detection/`), and a top-level `.gitignore`.
+- **Xcode project root:** `/Users/benridges/Documents/projects/HoopTrack/` — `.xcodeproj`, `Info.plist`, sources, tests, plus an **additional** `docs/` folder.
+- **Two `docs/` folders exist.** `docs/ROADMAP.md`, `docs/production-readiness.md`, and `docs/upgrade-*.md` live at the **repo root**. `HoopTrack/docs/` holds `backlog.md`, `config/`, and `superpowers/` (plans and specs).
+- **Filesystem-synchronized Xcode groups** — `.swift` files under `HoopTrack/` auto-compile on drop-in. Non-Swift resources (`.mlpackage`, `.mlmodel`, assets, `.xcconfig`) still need explicit Target Membership set via Xcode → File Inspector → Targets. Adding CoreML models via CLI is fragile; drag-and-drop in Xcode is reliable.
+
 ## Key conventions
 
-- **No third-party dependencies.** All CV, charts, AR, and data use Apple-native frameworks only.
+- **Apple-native for UI/CV/AR/data.** One SPM dependency: `supabase-swift` (added Phase 8; products `Auth`, `PostgREST`, `Storage`, `Realtime`, `Functions`). No other third-party packages.
 - **Normalised court coordinates.** Shot positions are stored as 0–1 fractions of half-court space, not screen pixels.
 - **`AgilityAttempt` is in-session only** — not persisted. Aggregates (`bestShuttleRunSeconds`, `bestLaneAgilitySeconds`, `avgVerticalJumpCm`) go on `TrainingSession`.
 - **Phase gating in comments.** Code sections are annotated `// Phase N —` to indicate when they were introduced. Don't remove these.
@@ -86,7 +108,8 @@ When adding new pure logic (calculators, services that take value-type inputs), 
 - **Sensitive data in Keychain only.** Auth tokens, user IDs, and API keys go in `KeychainService`. `UserDefaults` and `@AppStorage` are for non-sensitive UI preferences only.
 - **Validate before persisting.** All sensor values (release angle, jump height, court coordinates) and user-provided strings must pass `InputValidator` checks before writing to SwiftData or sending to any API.
 - **File protection on sensitive files.** Session videos (`Documents/Sessions/`) and exported JSON must have `FileProtectionType.complete`. `HoopTrackApp` re-applies this at launch.
-- **Phase plan.** See `docs/ROADMAP.md` for the full implementation roadmap and upcoming phases.
+- **`DetectionOverlay` is a temporary debug aid.** Shows green rim + orange ball boxes over the camera preview. Slated for removal once CV detection is verified end-to-end on device.
+- **Phase plan.** See `docs/ROADMAP.md` (at the **repo root**, not `HoopTrack/docs/`) for the full implementation roadmap. `docs/production-readiness.md` tracks what must land before App Store submission.
 
 ## Parallel Agent Dispatch
 
@@ -123,11 +146,15 @@ Copy the relevant block into agent prompts:
 ```
 # iOS app context
 SwiftUI + SwiftData + Combine, iOS 16+, MVVM, @MainActor final class ViewModels,
-SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor, no third-party dependencies.
-Key services: DataService, SessionFinalizationCoordinator, CameraService, CVPipeline.
-Models: PlayerProfile, TrainingSession, ShotRecord, GoalRecord.
-Upcoming stack: Supabase (Phase 9), Hasura GraphQL, Sign in with Apple.
-See docs/ROADMAP.md for full phase plan.
+SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor.
+Key services: DataService, SessionFinalizationCoordinator, CameraService, CVPipeline,
+SyncCoordinator, AuthViewModel.
+Models: PlayerProfile, TrainingSession, ShotRecord, GoalRecord, EarnedBadge.
+Auth: Supabase email+password (Phase 8, complete). Backend: Supabase Postgres + RLS
+(Phase 9, complete). SIWA and Hasura intentionally deferred.
+One SPM dep: supabase-swift. Repo root is one level above HoopTrack/ and hosts a
+second docs/ folder with ROADMAP.md + production-readiness.md.
+See docs/ROADMAP.md (repo root) for full phase plan.
 ```
 
 ### Collecting results
