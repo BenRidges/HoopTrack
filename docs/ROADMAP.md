@@ -1,7 +1,7 @@
 # HoopTrack — Implementation Roadmap
 
-**Last updated:** 2026-04-12  
-**Status:** End of Phase 7 (security & privacy hardened; ready for authentication work)
+**Last updated:** 2026-04-18  
+**Status:** End of Phase 7 (security & privacy hardened; ready for authentication work). BallDetector v1 shipped (yolov8s, mAP50 0.988) — CV Detection v2 parallel track opened; Phase CV-A ready to start.
 
 ---
 
@@ -23,6 +23,7 @@
 | 10 | File & Media Storage | 🔜 Planned |
 | 11 | Accessibility | 🔜 Planned |
 | 12 | Web Presence | 🔜 Planned |
+| CV | CV Detection v2 (parallel track) | 🔜 Ready to start (Phase A) |
 | 13 | Multiplayer Sessions | 🔮 Future |
 | 14 | Web Dashboard | 🔮 Future |
 | 15 | Coach Review Mode | 🔮 Future |
@@ -91,7 +92,6 @@ Full security hardening before backend introduction. **Subagent-driven developme
 |---|---|---|
 | **Haptics** | Small (1–2 days) | Shot make/miss, badge earn, agility trigger, dribble rhythm cues |
 | **Watch Companion** | Medium (1–2 weeks) | Glanceable today stats, session start/stop from wrist, `CLKComplication` |
-| **YOLOv8 Core ML** | Medium | Replace `BallDetectorStub`; train on Roboflow basketball dataset |
 | **OpenAI Vision post-session** | Small–Medium | Send key frames for shot form feedback |
 
 ---
@@ -182,6 +182,55 @@ Full security hardening before backend introduction. **Subagent-driven developme
 | Canvas views | `CourtMapView` + `SkillRadarView` need single-element accessibility summary labels |
 | Switch Control | `accessibilityInputLabels` for voice control; logical focus order audit per tab |
 | Live announcements | `UIAccessibility.post(notification: .announcement, ...)` for shot detection; throttle to avoid spam |
+
+---
+
+### Phase CV — CV Detection v2 (parallel track)
+**Can run in parallel with Phases 8–12 — no infrastructure dependency for Phase A. High priority: shipped v1 BallDetector.mlmodel (mAP50 0.988 on public data) is a baseline, not the ceiling. Real accuracy gains require real HoopTrack footage, which requires telemetry first.**  
+**Reference:** [upgrade-cv-detection.md](upgrade-cv-detection.md)
+
+Six sub-phases. Phase A is the only one with zero upstream dependency and gates everything downstream.
+
+| Sub-phase | Name | Depends on | Status |
+|---|---|---|---|
+| CV-A | Telemetry Foundation | none (uses existing `CVPipeline`, `DataService`) | 🔜 Ready to start |
+| CV-B | Detector v2 (multi-class retrain) | CV-A (≥ 2k labeled frames from real sessions) | Blocked on CV-A data |
+| CV-C | Tracking Layer (Kalman) | none — can run in parallel with CV-B | Independent |
+| CV-D | Make/Miss v2 (homography + net-motion) | CV-B + CV-C | Blocked on CV-B, CV-C |
+| CV-E | Audio Classifier | CV-A (audio data) | Parallel with CV-D |
+| CV-F | ML Re-ranker (ambiguous cases only) | CV-D + CV-E | Only if error rate still > 2% |
+
+#### Phase CV-A — Telemetry Foundation ⭐ START HERE
+
+Captures per-shot ball track, rim/backboard boxes, short video + audio clips, and pipeline confidence. Surfaces a user-review sheet in `SessionSummaryView` so users label ambiguous shots — double-duty as a UX win and a labeled-data generator.
+
+| Task | Detail |
+|---|---|
+| `ShotTelemetry` SwiftData model | One per `ShotRecord`, linked by `shotID`; includes ball track JSON, confidence, geometric verdict, audio/video clip paths |
+| `TelemetryService` | `@MainActor final class`; persist telemetry; enforce retention (`HoopTrack.Storage.telemetryRetainDays`); `FileProtectionType.complete` on clip files |
+| `CVPipeline` extension | Ring-buffer last ~150 frames of detections; emit `ShotTelemetry` on `resolved` transition |
+| `CameraService` audio | Synchronized mic capture for shot-window audio clips (3s) |
+| `ShotReviewSheet` | End-of-session review for shots with `predictedConfidence < 0.7`; user correction updates `ShotRecord.wasMade` and triggers `recalculateStats()` |
+| Privacy settings | "Help improve shot detection" toggle (default OFF); `PrivacyInfo.xcprivacy` telemetry category |
+| `TelemetryUploadService` stub | Queue interface only; wires to Supabase Storage in Phase 9 |
+| Eval fixture | `HoopTrackTests/Fixtures/ShotEvalSet/` + `BallDetectorEvalTests`, `MakeMissPipelineEvalTests` |
+| `DataService.deleteAllUserData()` | Extend to purge `ShotTelemetry` + `Documents/Telemetry/` |
+
+**Integrates with existing Phase 7 security layer:** `KeychainService` not needed (telemetry is not auth data), but `FileProtectionType.complete` on all clip files follows the same pattern as `Documents/Sessions/`. All validation uses `InputValidator`.
+
+**Dependency on Phase 9:** `TelemetryUploadService` only goes live once Supabase is in place. Everything else works offline from day one.
+
+#### Phase CV-B through CV-F
+
+See [upgrade-cv-detection.md](upgrade-cv-detection.md) for full task breakdowns. Summary:
+
+- **CV-B**: Retrain on 2–3k HoopTrack-native labeled frames; unify ball + rim + backboard into one model; swap `CourtCalibrationService` rim detection to consume it.
+- **CV-C**: `Services/BallTracker.swift` with constant-velocity Kalman filter; `CVPipeline` state machine becomes velocity-driven.
+- **CV-D**: `Services/MakeMissClassifier.swift` with rim-plane homography (45.7 cm rim as scale reference); net-motion confirmation via ROI pixel diff; 800 ms rebound window.
+- **CV-E**: `AudioShotClassifier.mlpackage`; MFCC + small CNN; fused with visual verdict in `MakeMissClassifier`.
+- **CV-F**: Only if CV-D + CV-E leave > 2% silent errors. Small 3D CNN re-ranker; runs only on ambiguous shots.
+
+**Success criteria:** see the success-criteria table in [upgrade-cv-detection.md](upgrade-cv-detection.md) — mAP50 ≥ 0.90 on real HoopTrack footage, make recall ≥ 97%, miss precision ≥ 95%, < 1 user correction per 50 shots.
 
 ---
 
