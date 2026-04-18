@@ -9,20 +9,28 @@ import Combine
 struct CoordinatorHost: View {
     @Environment(\.modelContext)    private var modelContext
     @EnvironmentObject private var notificationService: NotificationService
+    @EnvironmentObject private var authViewModel: AuthViewModel
 
     @StateObject private var box = CoordinatorBox()
 
     var body: some View {
-        if let coordinator = box.value, let dataService = box.dataService {
-            ContentView()
-                .environmentObject(coordinator)
-                .environmentObject(dataService)
-        } else {
-            ContentView()
-                .task {
-                    box.build(modelContext: modelContext,
-                              notificationService: notificationService)
-                }
+        Group {
+            if let coordinator = box.value, let dataService = box.dataService {
+                ContentView()
+                    .environmentObject(coordinator)
+                    .environmentObject(dataService)
+            } else {
+                ContentView()
+                    .task {
+                        box.build(modelContext: modelContext,
+                                  notificationService: notificationService)
+                    }
+            }
+        }
+        .onChange(of: authViewModel.state) { _, newState in
+            if case .authenticated(let user) = newState {
+                try? box.dataService?.linkSupabaseUser(id: user.id.uuidString)
+            }
         }
     }
 }

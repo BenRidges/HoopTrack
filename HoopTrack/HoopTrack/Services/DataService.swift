@@ -44,6 +44,17 @@ final class DataService: ObservableObject {
         return profile
     }
 
+    /// Associates the active PlayerProfile with a Supabase user id. Safe to
+    /// call with the same id repeatedly — no-ops if the value matches.
+    /// Phase 9 backend sync reads this field to key RLS on auth.uid().
+    func linkSupabaseUser(id: String) throws {
+        let profile = try fetchOrCreateProfile()
+        if profile.supabaseUserID != id {
+            profile.supabaseUserID = id
+            try modelContext.save()
+        }
+    }
+
     // MARK: - Sessions
 
     func fetchSessions(sortBy: SortDescriptor<TrainingSession> =
