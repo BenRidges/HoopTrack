@@ -22,7 +22,11 @@ final class SupabaseAuthProvider: AuthProviding, @unchecked Sendable {
 
     func signUp(email: String, password: String) async throws -> AuthUser {
         do {
-            let response = try await client.signUp(email: email, password: password)
+            let response = try await client.signUp(
+                email: email,
+                password: password,
+                redirectTo: HoopTrack.Auth.redirectURL
+            )
             return mapUser(response.user)
         } catch {
             throw mapError(error)
@@ -52,6 +56,15 @@ final class SupabaseAuthProvider: AuthProviding, @unchecked Sendable {
             return mapUser(user)
         } catch {
             return nil
+        }
+    }
+
+    func handleDeepLink(_ url: URL) async throws -> AuthUser {
+        do {
+            let session = try await client.session(from: url)
+            return mapUser(session.user)
+        } catch {
+            throw mapError(error)
         }
     }
 

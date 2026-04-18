@@ -27,4 +27,9 @@ protocol AuthProviding: Sendable {
     /// Polls the server for a fresh user state — used by VerifyEmailView after
     /// the user clicks the email link to check whether verification landed.
     func refreshUser() async throws -> AuthUser?
+
+    /// Exchanges the code/tokens in a `hooptrack://auth/callback?...` URL for
+    /// a Supabase session. Called from the app's deep-link handler when the
+    /// user taps the confirmation link in their email.
+    func handleDeepLink(_ url: URL) async throws -> AuthUser
 }

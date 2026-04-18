@@ -92,7 +92,16 @@ struct HoopTrackApp: App {
             .onChange(of: scenePhase) { _, newPhase in
                 handleScenePhase(newPhase)
             }
-            .onOpenURL { appState.handleDeepLink($0) }
+            .onOpenURL { url in
+                // Supabase auth callback lands here first; anything else is
+                // an in-app deep link (Siri, notification tap) for AppState.
+                if url.scheme?.lowercased() == "hooptrack",
+                   url.host?.lowercased() == "auth" {
+                    Task { await authViewModel.handleDeepLink(url) }
+                } else {
+                    appState.handleDeepLink(url)
+                }
+            }
             .task { metricsService.register() }
             .fullScreenCover(isPresented: .init(
                 get: { !hasCompletedOnboarding },

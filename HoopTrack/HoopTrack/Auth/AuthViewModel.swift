@@ -111,6 +111,21 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Deep link (email confirmation)
+
+    /// Handles the `hooptrack://auth/callback?...` URL Supabase sends users to
+    /// after they click the confirmation email link. Exchanges the embedded
+    /// code for a session and lands the user in the authenticated state.
+    func handleDeepLink(_ url: URL) async {
+        state = .authenticating
+        do {
+            let user = try await provider.handleDeepLink(url)
+            state = .authenticated(user)
+        } catch {
+            state = .error(mapError(error))
+        }
+    }
+
     // MARK: - Private
 
     private func isValidEmail(_ email: String) -> Bool {

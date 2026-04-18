@@ -171,6 +171,10 @@ nonisolated enum HoopTrack {
         static let backgroundLockTimeoutSec: TimeInterval = 60
         /// Minimum password length enforced client-side. Supabase enforces ≥ 6 server-side.
         static let minPasswordLength: Int = 8
+        /// URL that Supabase embeds in confirmation emails. Must be allow-listed
+        /// in the Supabase dashboard (Auth → URL Configuration → Redirect URLs).
+        /// iOS routes the scheme back to the app via Info.plist CFBundleURLTypes.
+        static let redirectURL = URL(string: "hooptrack://auth/callback")!
     }
 
     // MARK: - UI

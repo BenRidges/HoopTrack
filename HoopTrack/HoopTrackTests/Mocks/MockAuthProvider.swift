@@ -14,12 +14,14 @@ final class MockAuthProvider: AuthProviding, @unchecked Sendable {
     var scriptedSignOutResult: Result<Void, Error> = .success(())
     var scriptedResendResult:  Result<Void, Error> = .success(())
     var scriptedRefreshResult: Result<AuthUser?, Error> = .success(nil)
+    var scriptedDeepLinkResult: Result<AuthUser, Error>?
 
     // Call recorders — tests assert on these.
     private(set) var signUpCalls:  [(email: String, password: String)] = []
     private(set) var signInCalls:  [(email: String, password: String)] = []
     private(set) var signOutCount = 0
     private(set) var resendCalls: [String] = []
+    private(set) var deepLinkCalls: [URL] = []
 
     func restoreSession() async throws -> AuthUser? {
         try scriptedRestoreResult.get()
@@ -53,5 +55,14 @@ final class MockAuthProvider: AuthProviding, @unchecked Sendable {
 
     func refreshUser() async throws -> AuthUser? {
         try scriptedRefreshResult.get()
+    }
+
+    func handleDeepLink(_ url: URL) async throws -> AuthUser {
+        deepLinkCalls.append(url)
+        guard let scripted = scriptedDeepLinkResult else {
+            return AuthUser(id: UUID(), email: "deeplink@example.com",
+                             emailVerified: true, createdAt: Date())
+        }
+        return try scripted.get()
     }
 }
