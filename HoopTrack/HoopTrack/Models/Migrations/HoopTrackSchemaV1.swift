@@ -16,3 +16,12 @@ enum HoopTrackSchemaV2: VersionedSchema {
         [PlayerProfile.self, TrainingSession.self, ShotRecord.self, GoalRecord.self, EarnedBadge.self]
     }
 }
+
+/// V3 — Phase 8 — adds `supabaseUserID: String?` to PlayerProfile.
+/// Lightweight: optional field, no data rewrite needed.
+enum HoopTrackSchemaV3: VersionedSchema {
+    static let versionIdentifier = Schema.Version(3, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [PlayerProfile.self, TrainingSession.self, ShotRecord.self, GoalRecord.self, EarnedBadge.self]
+    }
+}

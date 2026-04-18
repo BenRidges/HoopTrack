@@ -33,13 +33,12 @@ struct HoopTrackApp: App {
     // SwiftData is used on iOS 17+. A Core Data fallback is documented in
     // DataService.swift for users still on iOS 16.
     let modelContainer: ModelContainer = {
-        let schema = Schema([
-            PlayerProfile.self, TrainingSession.self,
-            ShotRecord.self, GoalRecord.self, EarnedBadge.self,
-        ])
+        let schema = Schema(versionedSchema: HoopTrackSchemaV3.self)
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema, configurations: [config])
+            return try ModelContainer(for: schema,
+                                       migrationPlan: HoopTrackMigrationPlan.self,
+                                       configurations: [config])
         } catch {
 #if DEBUG
             // Development fallback: wipe a corrupt/mismatched store rather than crashing.
@@ -50,7 +49,9 @@ struct HoopTrackApp: App {
             try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("store-shm"))
             try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("store-wal"))
             do {
-                return try ModelContainer(for: schema, configurations: [config])
+                return try ModelContainer(for: schema,
+                                           migrationPlan: HoopTrackMigrationPlan.self,
+                                           configurations: [config])
             } catch let retryError {
                 fatalError("HoopTrack: ModelContainer still failed after wipe — \(retryError)")
             }

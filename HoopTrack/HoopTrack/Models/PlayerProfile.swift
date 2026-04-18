@@ -42,6 +42,12 @@ final class PlayerProfile {
     var iCloudSyncEnabled: Bool
     var videosAutoDeleteDays: Int           // 0 = never; default 60
 
+    // MARK: - Identity (Phase 8)
+    /// Supabase `auth.uid()` for the currently-signed-in user. nil until
+    /// Phase 8 auth is wired; once set, never rewritten on the same profile
+    /// (switching accounts wipes the profile via DataService.deleteAllUserData()).
+    var supabaseUserID: String?
+
     // MARK: - Relationships
     @Relationship(deleteRule: .cascade) var sessions: [TrainingSession]
     @Relationship(deleteRule: .cascade) var goals: [GoalRecord]
@@ -75,6 +81,8 @@ final class PlayerProfile {
         self.preferredCourtType     = .nba
         self.iCloudSyncEnabled      = false
         self.videosAutoDeleteDays   = 60
+
+        self.supabaseUserID         = nil
 
         self.sessions               = []
         self.goals                  = []
