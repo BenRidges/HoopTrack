@@ -6,11 +6,31 @@ import UIKit   // for UINotificationFeedbackGenerator
 
 struct BadgesUpdatedSection: View {
     let changes: [BadgeTierChange]
+    var skipReason: String? = nil
     private let haptic = UINotificationFeedbackGenerator()
     @State private var appeared = false
 
     var body: some View {
-        if changes.isEmpty { EmptyView() } else { content }
+        if let reason = skipReason, changes.isEmpty {
+            skipReasonContent(reason)
+        } else if changes.isEmpty {
+            EmptyView()
+        } else {
+            content
+        }
+    }
+
+    private func skipReasonContent(_ reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Badges Not Updated", systemImage: "shield.slash")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Text(reason)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var content: some View {

@@ -78,8 +78,9 @@ enum BadgeScoreCalculator {
         return (p + m + t) / 3.0
     }
 
-    static func hotHand(longestMakeStreak: Int) -> Double {
-        SkillRatingCalculator.normalize(Double(longestMakeStreak), min: 0, max: 15)
+    static func hotHand(longestMakeStreak: Int, shotsAttempted: Int) -> Double? {
+        guard shotsAttempted >= HoopTrack.SkillRating.badgeMinShotsForShootingSession else { return nil }
+        return SkillRatingCalculator.normalize(Double(longestMakeStreak), min: 0, max: 15)
     }
 
     // MARK: - Ball Handling Badge Internals
@@ -222,7 +223,8 @@ enum BadgeScoreCalculator {
                                     midFGPct:   pct(m), midAttempts:   m.count,
                                     threeFGPct: pct(t), threeAttempts: t.count)
         case .hotHand:
-            return hotHand(longestMakeStreak: session.longestMakeStreak)
+            return hotHand(longestMakeStreak: session.longestMakeStreak,
+                           shotsAttempted: session.shotsAttempted)
 
         // MARK: Ball Handling
         case .handles:

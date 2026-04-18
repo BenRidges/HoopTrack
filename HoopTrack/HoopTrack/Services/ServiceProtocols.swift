@@ -33,6 +33,14 @@ struct BadgeTierChange: Equatable {
 struct SessionResult {
     let session: TrainingSession
     let badgeChanges: [BadgeTierChange]
+    /// Non-nil when badge evaluation was skipped (e.g. too few shots). Shown in the summary UI.
+    let badgeSkipReason: String?
+
+    init(session: TrainingSession, badgeChanges: [BadgeTierChange], badgeSkipReason: String? = nil) {
+        self.session = session
+        self.badgeChanges = badgeChanges
+        self.badgeSkipReason = badgeSkipReason
+    }
 }
 
 struct AgilityAttempts {

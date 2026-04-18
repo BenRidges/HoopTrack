@@ -51,12 +51,29 @@ import Combine
         try? await healthKitService.writeWorkout(for: session)
         // 4. EMA-update all 5 skill dimension ratings
         try skillRatingService.recalculate(for: profile, session: session)
-        // 5. Badge MMR delta (non-fatal: coordinator swallows errors)
-        let badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
+        // 5. Badge MMR delta — skip for shooting sessions under the minimum shot threshold
+        let badgeSkipReason = Self.badgeSkipReason(drillType: session.drillType,
+                                                   shotsAttempted: session.shotsAttempted)
+        let badgeChanges: [BadgeTierChange]
+        if badgeSkipReason != nil {
+            badgeChanges = []
+        } else {
+            badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
+        }
         // 6. Fire milestone notifications for newly crossed thresholds
         notificationService.checkMilestones(for: profile.goals)
         // 7. Return result for ViewModel to display
-        return SessionResult(session: session, badgeChanges: badgeChanges)
+        return SessionResult(session: session, badgeChanges: badgeChanges, badgeSkipReason: badgeSkipReason)
+    }
+
+    /// Pure decision: returns a skip reason when badge evaluation should be bypassed for
+    /// this session, or nil when evaluation should run. Currently gates only shooting
+    /// sessions by shot count — dribble and agility drills always evaluate.
+    nonisolated static func badgeSkipReason(drillType: DrillType,
+                                             shotsAttempted: Int) -> String? {
+        let minShots = HoopTrack.SkillRating.badgeMinShotsForShootingSession
+        guard drillType == .freeShoot, shotsAttempted < minShots else { return nil }
+        return "Shoot at least \(minShots) shots to update badges."
     }
 
     /// Dribble drill session.

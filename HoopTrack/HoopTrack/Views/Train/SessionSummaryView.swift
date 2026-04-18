@@ -8,6 +8,7 @@ struct SessionSummaryView: View {
 
     let session: TrainingSession
     var badgeChanges: [BadgeTierChange] = []
+    var badgeSkipReason: String? = nil
     let onDone: () -> Void
 
     @EnvironmentObject private var hapticService: HapticService
@@ -39,7 +40,7 @@ struct SessionSummaryView: View {
                     shotListSection
 
                     // MARK: Badges Updated (Phase 5B)
-                    BadgesUpdatedSection(changes: badgeChanges)
+                    BadgesUpdatedSection(changes: badgeChanges, skipReason: badgeSkipReason)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)

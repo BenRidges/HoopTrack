@@ -80,10 +80,16 @@ final class BadgeScoreCalculatorTests: XCTestCase {
     }
 
     func test_hotHand_streak15_returns100() {
-        XCTAssertEqual(BadgeScoreCalculator.hotHand(longestMakeStreak: 15), 100, accuracy: 0.1)
+        XCTAssertEqual(BadgeScoreCalculator.hotHand(longestMakeStreak: 15, shotsAttempted: 20)!, 100, accuracy: 0.1)
     }
-    func test_hotHand_streak0_returns0() {
-        XCTAssertEqual(BadgeScoreCalculator.hotHand(longestMakeStreak: 0), 0, accuracy: 0.1)
+    func test_hotHand_streak0_withEnoughShots_returns0() {
+        XCTAssertEqual(BadgeScoreCalculator.hotHand(longestMakeStreak: 0, shotsAttempted: 20)!, 0, accuracy: 0.1)
+    }
+    func test_hotHand_tooFewShots_returnsNil() {
+        XCTAssertNil(BadgeScoreCalculator.hotHand(longestMakeStreak: 5, shotsAttempted: 19))
+    }
+    func test_hotHand_zeroShots_returnsNil() {
+        XCTAssertNil(BadgeScoreCalculator.hotHand(longestMakeStreak: 0, shotsAttempted: 0))
     }
 
     // MARK: - Ball Handling badges

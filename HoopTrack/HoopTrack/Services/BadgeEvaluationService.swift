@@ -38,7 +38,9 @@ import SwiftData
                                                    newRank: newRank))
                 }
             } else {
-                // Cold-start: first earn — set MMR directly, no blend
+                // Cold-start: first earn — set MMR directly, no blend.
+                // Skip creating a new badge at effectively 0 MMR (defense-in-depth).
+                guard targetMMR > 0 else { continue }
                 let badge = EarnedBadge(badgeID: badgeID,
                                         initialMMR: targetMMR,
                                         profile: profile)
