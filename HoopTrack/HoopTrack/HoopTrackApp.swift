@@ -60,8 +60,6 @@ struct HoopTrackApp: App {
         }
     }()
 
-    @UIApplicationDelegateAdaptor(HoopTrackAppDelegate.self) var appDelegate
-
     // MARK: - Shared Services (injected via environment)
     @StateObject private var hapticService       = HapticService()
     @StateObject private var notificationService = NotificationService()
