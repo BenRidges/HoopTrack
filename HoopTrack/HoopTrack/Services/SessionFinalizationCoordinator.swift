@@ -15,6 +15,7 @@ import Combine
     private let skillRatingService:     SkillRatingServiceProtocol
     private let badgeEvaluationService: BadgeEvaluationServiceProtocol
     private let notificationService:    NotificationService
+    private let syncCoordinator:        SyncCoordinator?
 
     init(
         dataService:            DataService,
@@ -22,7 +23,8 @@ import Combine
         healthKitService:       HealthKitServiceProtocol,
         skillRatingService:     SkillRatingServiceProtocol,
         badgeEvaluationService: BadgeEvaluationServiceProtocol,
-        notificationService:    NotificationService
+        notificationService:    NotificationService,
+        syncCoordinator:        SyncCoordinator? = nil
     ) {
         self.dataService            = dataService
         self.goalUpdateService      = goalUpdateService
@@ -30,6 +32,22 @@ import Combine
         self.skillRatingService     = skillRatingService
         self.badgeEvaluationService = badgeEvaluationService
         self.notificationService    = notificationService
+        self.syncCoordinator        = syncCoordinator
+    }
+
+    /// Fire-and-forget Supabase upload. Skips if:
+    /// - No coordinator wired (tests, uninjected contexts).
+    /// - No supabaseUserID on the profile (user is signed out).
+    /// - Session is too trivial to be interesting (< 30s or no endedAt).
+    /// Failure is silent — the local save already succeeded.
+    private func kickOffSync(session: TrainingSession, profile: PlayerProfile) {
+        guard let syncCoordinator else { return }
+        guard let uidString = profile.supabaseUserID,
+              let userID = UUID(uuidString: uidString) else { return }
+        guard session.endedAt != nil, session.durationSeconds >= 30 else { return }
+        Task { @MainActor [syncCoordinator] in
+            try? await syncCoordinator.syncSession(session, userID: userID)
+        }
     }
 
     // MARK: - HealthKit permission
@@ -62,7 +80,9 @@ import Combine
         }
         // 6. Fire milestone notifications for newly crossed thresholds
         notificationService.checkMilestones(for: profile.goals)
-        // 7. Return result for ViewModel to display
+        // 7. Fire-and-forget Supabase sync — non-fatal if offline
+        kickOffSync(session: session, profile: profile)
+        // 8. Return result for ViewModel to display
         return SessionResult(session: session, badgeChanges: badgeChanges, badgeSkipReason: badgeSkipReason)
     }
 
@@ -86,6 +106,7 @@ import Combine
         try skillRatingService.recalculate(for: profile, session: session)
         let badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
         notificationService.checkMilestones(for: profile.goals)
+        kickOffSync(session: session, profile: profile)
         return SessionResult(session: session, badgeChanges: badgeChanges)
     }
 
@@ -101,6 +122,7 @@ import Combine
         try skillRatingService.recalculate(for: profile, session: session)
         let badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
         notificationService.checkMilestones(for: profile.goals)
+        kickOffSync(session: session, profile: profile)
         return SessionResult(session: session, badgeChanges: badgeChanges)
     }
 }

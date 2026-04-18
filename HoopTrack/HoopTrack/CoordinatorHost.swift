@@ -53,7 +53,8 @@ struct CoordinatorHost: View {
             healthKitService:       HealthKitService(),
             skillRatingService:     SkillRatingService(modelContext: modelContext),
             badgeEvaluationService: BadgeEvaluationService(modelContext: modelContext),
-            notificationService:    notificationService
+            notificationService:    notificationService,
+            syncCoordinator:        SyncCoordinator()
         )
         Task { await value?.requestHealthKitPermission() }
     }
