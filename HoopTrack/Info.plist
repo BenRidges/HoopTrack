@@ -31,6 +31,8 @@
     </array>
     <key>NSCameraUsageDescription</key>
     <string>HoopTrack uses your camera to automatically detect makes and misses, map shot locations, and analyse your shooting form in real time. All video stays on your device.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>HoopTrack uses Face ID to unlock the app after it's been in the background.</string>
     <key>NSHealthUpdateUsageDescription</key>
     <string>HoopTrack logs your basketball sessions as workouts in the Health app, including active time and estimated calories.</string>
     <key>NSMicrophoneUsageDescription</key>
