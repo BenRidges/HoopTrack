@@ -9,6 +9,7 @@ struct ProfileTabView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var notificationService: NotificationService
     @EnvironmentObject private var hapticService: HapticService
+    @EnvironmentObject private var authViewModel: AuthViewModel
 
     @StateObject private var viewModel: ProfileViewModel = {
         ProfileViewModel(dataService: DataService(modelContext: ModelContext(try! ModelContainer(for: PlayerProfile.self, TrainingSession.self, ShotRecord.self, GoalRecord.self))))
@@ -198,6 +199,17 @@ struct ProfileTabView: View {
                     }
                 }
                 .disabled(isExporting)
+            }
+
+            // MARK: Account (Phase 8 — Auth)
+            Section("Account") {
+                if let email = authViewModel.state.user?.email {
+                    LabeledContent("Signed in as", value: email)
+                        .lineLimit(1)
+                }
+                Button("Sign Out", role: .destructive) {
+                    Task { await authViewModel.signOut() }
+                }
             }
 
             // MARK: Delete Account (Phase 7 — GDPR right to delete)
