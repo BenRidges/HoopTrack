@@ -33,25 +33,26 @@ struct HoopTrackApp: App {
     // SwiftData is used on iOS 17+. A Core Data fallback is documented in
     // DataService.swift for users still on iOS 16.
     let modelContainer: ModelContainer = {
-        let schema = Schema(versionedSchema: HoopTrackSchemaV3.self)
+        // Flat schema list — SwiftData auto-handles additive changes like the
+        // Phase 8 supabaseUserID: String? field. The explicit VersionedSchema
+        // + MigrationPlan path is available in HoopTrackSchemaV1.swift /
+        // HoopTrackMigrationPlan.swift if a future non-additive change needs it.
+        let schema = Schema([
+            PlayerProfile.self, TrainingSession.self,
+            ShotRecord.self, GoalRecord.self, EarnedBadge.self,
+        ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema,
-                                       migrationPlan: HoopTrackMigrationPlan.self,
-                                       configurations: [config])
+            return try ModelContainer(for: schema, configurations: [config])
         } catch {
 #if DEBUG
-            // Development fallback: wipe a corrupt/mismatched store rather than crashing.
-            // This will never run in Release builds — safe to keep.
             print("⚠️ HoopTrack: ModelContainer load failed (\(error)). Wiping store for fresh start.")
             let storeURL = config.url
             try? FileManager.default.removeItem(at: storeURL)
             try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("store-shm"))
             try? FileManager.default.removeItem(at: storeURL.deletingPathExtension().appendingPathExtension("store-wal"))
             do {
-                return try ModelContainer(for: schema,
-                                           migrationPlan: HoopTrackMigrationPlan.self,
-                                           configurations: [config])
+                return try ModelContainer(for: schema, configurations: [config])
             } catch let retryError {
                 fatalError("HoopTrack: ModelContainer still failed after wipe — \(retryError)")
             }
