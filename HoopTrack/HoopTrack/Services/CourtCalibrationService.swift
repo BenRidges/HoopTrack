@@ -1,86 +1,88 @@
 // HoopTrack/Services/CourtCalibrationService.swift
-// Detects the backboard/hoop rectangle via Vision and locks a reference CGRect
-// used by CVPipeline to map ball positions to normalised court coordinates.
+// Tracks the basketball rim on a per-frame basis using detections from the
+// ML ball detector's `basket` class. Replaces the earlier rectangle-heuristic
+// approach (VNDetectRectanglesRequest + 10-frame lock), which couldn't tell
+// a hoop from a poster and never recovered from camera movement.
 
-import Vision
 import AVFoundation
 import CoreGraphics
 
-nonisolated enum CalibrationState: Sendable {
-    case uncalibrated
-    case detecting
-    case calibrated(hoopRect: CGRect)
-    case failed(reason: String)
+nonisolated enum CalibrationState: Sendable, Equatable {
+    /// No basket has been seen yet.
+    case looking
+    /// Basket is currently in-frame and the smoother has a rect.
+    case tracking(hoopRect: CGRect)
+    /// Recently lost tracking — last-known rect is still available as a fallback.
+    case lost(lastKnownHoopRect: CGRect)
 
-    var isCalibrated: Bool {
-        if case .calibrated = self { return true }
+    var isTracking: Bool {
+        if case .tracking = self { return true }
         return false
+    }
+
+    /// Either the live tracked rect or the last-known one during a temporary drop-out.
+    var hoopRect: CGRect? {
+        switch self {
+        case .looking:                       return nil
+        case .tracking(let r):               return r
+        case .lost(let r):                   return r
+        }
     }
 }
 
 nonisolated final class CourtCalibrationService {
 
     // MARK: - State
-    private(set) var state: CalibrationState = .uncalibrated
+    private(set) var state: CalibrationState = .looking
+    private var smoother: HoopRectSmoother
 
-    // Callback fired on main thread when state changes — observed by LiveSessionViewModel.
+    /// Callback fired on main thread when state changes — observed by LiveSessionViewModel.
     var onStateChange: (@Sendable (CalibrationState) -> Void)?
 
-    // MARK: - Vision
-    private let request: VNDetectRectanglesRequest = {
-        let r = VNDetectRectanglesRequest()
-        r.minimumAspectRatio    = 1.5
-        r.maximumAspectRatio    = 5.0
-        r.minimumConfidence     = 0.6
-        r.maximumObservations   = 3
-        return r
-    }()
+    // MARK: - Init
 
-    // Accumulate candidate rects across frames before locking
-    private var candidates: [CGRect] = []
-    private let framesNeeded = 10
+    init(smoother: HoopRectSmoother = HoopRectSmoother()) {
+        self.smoother = smoother
+    }
 
     // MARK: - Lifecycle
 
-    func startCalibration() {
-        candidates = []
-        setState(.detecting)
-    }
-
     func reset() {
-        candidates = []
-        setState(.uncalibrated)
+        smoother.reset()
+        transition(to: .looking)
     }
 
-    // MARK: - Frame Processing
-    // Called on the camera's sessionQueue (background thread).
+    // MARK: - Per-Frame Input
+    // Called on the camera's sessionQueue with the basket detection for this frame
+    // (nil when no basket was detected).
 
-    func processFrame(_ buffer: CMSampleBuffer) {
-        guard case .detecting = state,
-              let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) else { return }
-
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
-                                            orientation: .up,
-                                            options: [:])
-        try? handler.perform([request])
-
-        guard let results = request.results,
-              let best    = results.max(by: { $0.boundingBox.width < $1.boundingBox.width })
-        else { return }
-
-        candidates.append(best.boundingBox)
-        if candidates.count >= framesNeeded {
-            let avgRect = averaged(candidates)
-            setState(.calibrated(hoopRect: avgRect))
+    func updateBasket(_ basket: BallDetection?, timestamp: CMTime) {
+        let ts = CMTimeGetSeconds(timestamp)
+        if let basket {
+            smoother.update(basketRect: basket.boundingBox, timestamp: ts)
+        } else {
+            smoother.updateNoDetection(timestamp: ts)
         }
+
+        let next: CalibrationState
+        switch smoother.state {
+        case .looking:
+            next = .looking
+        case .tracking:
+            next = .tracking(hoopRect: smoother.smoothedRect ?? .zero)
+        case .lost:
+            next = .lost(lastKnownHoopRect: smoother.smoothedRect ?? .zero)
+        }
+
+        if next != state { transition(to: next) }
     }
 
     // MARK: - Court Coordinate Mapping
 
     /// Maps a ball bounding box (Vision normalised coords) to normalised court position (0–1).
-    /// Returns nil if calibration is not complete.
+    /// Uses the current or last-known hoop rect. Returns nil only when no rim has ever been seen.
     func courtPosition(for ballBox: CGRect) -> (courtX: Double, courtY: Double)? {
-        guard case .calibrated(let hoopRect) = state else { return nil }
+        guard let hoopRect = state.hoopRect else { return nil }
 
         let ballCX = ballBox.midX
         let ballCY = ballBox.midY
@@ -98,21 +100,11 @@ nonisolated final class CourtCalibrationService {
 
     // MARK: - Private
 
-    private func setState(_ newState: CalibrationState) {
+    private func transition(to newState: CalibrationState) {
         state = newState
         let callback = onStateChange
         Task { @MainActor in
             callback?(newState)
         }
-    }
-
-    private func averaged(_ rects: [CGRect]) -> CGRect {
-        let n = Double(rects.count)
-        return CGRect(
-            x:      rects.map(\.minX).reduce(0, +) / n,
-            y:      rects.map(\.minY).reduce(0, +) / n,
-            width:  rects.map(\.width).reduce(0, +) / n,
-            height: rects.map(\.height).reduce(0, +) / n
-        )
     }
 }

@@ -73,21 +73,24 @@ nonisolated final class CVPipeline {
     // MARK: - Core Frame Processing
 
     private func processBuffer(_ buffer: CMSampleBuffer) {
-        // Feed calibration during detecting phase
-        calibration.processFrame(buffer)
+        guard let scene = detector.detectScene(buffer: buffer) else { return }
+        let now = scene.frameTimestamp
 
-        // Only run shot detection after hoop is locked
-        guard calibration.state.isCalibrated else { return }
+        // Feed the basket detection to calibration every frame — the
+        // smoother handles jitter and missed frames internally.
+        calibration.updateBasket(scene.basket, timestamp: now)
 
-        let now       = CMSampleBufferGetPresentationTimeStamp(buffer)
-        let detection = detector.detect(buffer: buffer)
-
-        // Overlay: push every-frame ball detection to the view-model (main actor)
-        let overlayBox = detection?.boundingBox
-        let overlayConfidence = detection?.confidence
+        // Push ball detection to the debug overlay.
+        let overlayBox = scene.ball?.boundingBox
+        let overlayConfidence = scene.ball?.confidence
         Task { @MainActor [weak viewModel] in
             viewModel?.updateBallDetection(box: overlayBox, confidence: overlayConfidence)
         }
+
+        // Shot detection requires a tracked (or recently-tracked) hoop rect.
+        guard let hoopRect = calibration.state.hoopRect else { return }
+
+        let detection = scene.ball
 
         switch pipelineState {
 
@@ -103,23 +106,16 @@ nonisolated final class CVPipeline {
                 lastDetectionTimestamp = now
 
                 if isAtPeak(trajectory: trajectory) {
-                    // Use first detection (player's shooting position) for court zone mapping.
                     let releaseBox = trajectory.first!.boundingBox
 
                     // Phase 3: compute Shot Science synchronously on the session queue
                     let science: ShotScienceMetrics?
                     if let ps = poseService {
                         let observation = ps.detectPose(buffer: buffer)
-                        let hoopWidth: CGFloat
-                        if case .calibrated(let hoopRect) = calibration.state {
-                            hoopWidth = hoopRect.width
-                        } else {
-                            hoopWidth = 0.1
-                        }
                         science = ShotScienceCalculator.compute(
                             trajectory: trajectory,
                             poseObservation: observation,
-                            hoopRectWidth: hoopWidth
+                            hoopRectWidth: hoopRect.width
                         )
                     } else {
                         science = nil
@@ -139,7 +135,7 @@ nonisolated final class CVPipeline {
         case .releaseDetected(let releaseBox, _):
             let elapsed = CMTimeGetSeconds(CMTimeSubtract(now, releaseTimestamp))
 
-            if let d = detection, case .calibrated(let hoopRect) = calibration.state {
+            if let d = detection {
                 if isEnteringHoop(ballBox: d.boundingBox, hoopRect: hoopRect) {
                     resolveShot(result: .make, releaseBox: releaseBox)
                     return

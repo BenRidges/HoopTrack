@@ -102,14 +102,15 @@ struct LiveSessionView: View {
             if let detector = BallDetectorFactory.make(BallDetectorFactory.active) {
                 let cal = CourtCalibrationService()
                 cal.onStateChange = { @Sendable [weak viewModel] state in
-                    let calibrated = state.isCalibrated
-                    let hoopRect: CGRect?
-                    if case .calibrated(let rect) = state { hoopRect = rect } else { hoopRect = nil }
+                    let tracking = state.isTracking
+                    let hoopRect = state.hoopRect
                     Task { @MainActor [weak viewModel] in
-                        viewModel?.updateCalibrationState(isCalibrated: calibrated, hoopRect: hoopRect)
+                        viewModel?.updateCalibrationState(isCalibrated: tracking, hoopRect: hoopRect)
                     }
                 }
-                cal.startCalibration()
+                // Calibration is now per-frame via CVPipeline → updateBasket —
+                // no explicit start step. The service is live as soon as it's
+                // constructed and the pipeline starts feeding it frames.
 
                 let poseService = PoseEstimationService()
                 let pipeline = CVPipeline(detector: detector,
@@ -434,10 +435,10 @@ struct LiveSessionView: View {
             Image(systemName: "viewfinder")
                 .font(.system(size: 48))
                 .foregroundStyle(.white)
-            Text("Aim at the hoop")
+            Text("Looking for hoop…")
                 .font(.title2.bold())
                 .foregroundStyle(.white)
-            Text("Keep the backboard in frame until the indicator turns green.")
+            Text("Point the camera at the rim. Tracking stays locked even if the view shifts.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.8))
                 .multilineTextAlignment(.center)

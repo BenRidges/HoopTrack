@@ -31,44 +31,54 @@ nonisolated final class CoreMLBallDetector: BallDetectorProtocol {
         self.request = req
     }
 
-    func detect(buffer: CMSampleBuffer) -> BallDetection? {
+    func detectScene(buffer: CMSampleBuffer) -> SceneDetection? {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) else { return nil }
+        let timestamp = CMSampleBufferGetPresentationTimeStamp(buffer)
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
                                             orientation: .up,
                                             options: [:])
         try? handler.perform([request])
 
-        // Path 1 — model has built-in NMS + object-detection metadata
-        // (Ultralytics export with `nms=True`). Vision returns VNRecognized-
-        // ObjectObservation and we filter by label + pick largest.
+        // NMS-enabled models return VNRecognizedObjectObservation. The current
+        // shipped model (yolov8s + nms=True) takes this path.
         if let results = request.results as? [VNRecognizedObjectObservation], !results.isEmpty {
-            let label = targetLabel.lowercased()
-            if let best = results
-                .filter({ obs in
-                    obs.confidence >= confidenceThreshold &&
-                    obs.labels.first?.identifier.lowercased().contains(label) == true
-                })
-                .max(by: { $0.boundingBox.area < $1.boundingBox.area }) {
-                return BallDetection(
-                    boundingBox: best.boundingBox,
-                    confidence: best.confidence,
-                    frameTimestamp: CMSampleBufferGetPresentationTimeStamp(buffer)
-                )
-            }
-            return nil
+            let ball   = bestObservation(results, labelContains: "ball",   timestamp: timestamp)
+            let basket = bestObservation(results, labelContains: "basket", timestamp: timestamp)
+            return SceneDetection(ball: ball, basket: basket, frameTimestamp: timestamp)
         }
 
-        // Path 2 — model exports a raw YOLO tensor (Ultralytics default:
-        // `nms=False end2end=False`). Shape [1, 4+C, 8400] where 4 bbox
-        // values come first, followed by per-class confidences. Decode
-        // the highest-scoring ball anchor directly.
+        // Raw-tensor fallback for non-NMS exports. Ball-only; basket decoding
+        // from raw YOLO output isn't worth the complexity — if the user
+        // needs basket support they should re-export with nms=True.
         if let feature = (request.results?.first as? VNCoreMLFeatureValueObservation)?.featureValue,
            let tensor = feature.multiArrayValue {
-            return decodeYOLO(tensor, buffer: buffer)
+            let ball = decodeYOLO(tensor, buffer: buffer)
+            return SceneDetection(ball: ball, basket: nil, frameTimestamp: timestamp)
         }
 
-        return nil
+        return SceneDetection(ball: nil, basket: nil, frameTimestamp: timestamp)
+    }
+
+    /// Returns the highest-confidence observation whose label contains the
+    /// given substring (case-insensitive) and whose confidence clears the
+    /// detector's threshold.
+    private func bestObservation(_ results: [VNRecognizedObjectObservation],
+                                  labelContains needle: String,
+                                  timestamp: CMTime) -> BallDetection? {
+        let needleLower = needle.lowercased()
+        let candidates = results.filter { obs in
+            obs.confidence >= confidenceThreshold &&
+            obs.labels.first?.identifier.lowercased().contains(needleLower) == true
+        }
+        guard let best = candidates.max(by: { $0.confidence < $1.confidence }) else {
+            return nil
+        }
+        return BallDetection(
+            boundingBox: best.boundingBox,
+            confidence: best.confidence,
+            frameTimestamp: timestamp
+        )
     }
 
     /// Single-best-box decoder for Ultralytics YOLO raw CoreML output.
