@@ -19,12 +19,13 @@ final class VideoRecordingService: NSObject {
     // MARK: - Setup
 
     /// Attach to a running AVCaptureSession before calling startRecording().
-    func configure(captureSession: AVCaptureSession) {
+    func configure(captureSession: AVCaptureSession, orientation: CameraOrientation = .portrait) {
         guard captureSession.canAddOutput(movieOutput) else { return }
         captureSession.addOutput(movieOutput)
+        let angle = orientation.videoRotationAngle
         if let connection = movieOutput.connection(with: .video),
-           connection.isVideoRotationAngleSupported(90) {
-            connection.videoRotationAngle = 90
+           connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
         }
     }
 
@@ -36,7 +37,7 @@ final class VideoRecordingService: NSObject {
 
         let docsURL = FileManager.default.urls(for: .documentDirectory,
                                                 in: .userDomainMask)[0]
-        let sessionsDir = docsURL.appendingPathComponent("Sessions", isDirectory: true)
+        let sessionsDir = docsURL.appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: sessionsDir,
                                                   withIntermediateDirectories: true)
         let outputURL = sessionsDir.appendingPathComponent("\(sessionID.uuidString).mov")
@@ -49,6 +50,18 @@ final class VideoRecordingService: NSObject {
         guard isRecording else { return }
         movieOutput.stopRecording()
     }
+
+    // Phase 7 — Security
+    private func applyFileProtection(to url: URL) {
+        do {
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: url.path
+            )
+        } catch {
+            print("[VideoRecordingService] Failed to set file protection: \(error)")
+        }
+    }
 }
 
 // MARK: - AVCaptureFileOutputRecordingDelegate
@@ -59,13 +72,15 @@ extension VideoRecordingService: AVCaptureFileOutputRecordingDelegate {
                     didFinishRecordingTo outputFileURL: URL,
                     from connections: [AVCaptureConnection],
                     error: Error?) {
-        isRecording = false
         if let error {
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.isRecording = false
                 self?.onRecordingFinished?(.failure(error))
             }
         } else {
-            DispatchQueue.main.async { [weak self] in
+            applyFileProtection(to: outputFileURL)
+            Task { @MainActor [weak self] in
+                self?.isRecording = false
                 self?.onRecordingFinished?(.success(outputFileURL))
             }
         }

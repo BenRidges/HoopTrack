@@ -3,14 +3,14 @@
 // Filters detections by a configurable target label so COCO ("sports ball")
 // and custom models ("basketball") both work without code changes.
 
-import Vision
+@preconcurrency import Vision
 import CoreML
 import AVFoundation
 import CoreGraphics
 
-final class CoreMLBallDetector: BallDetectorProtocol {
+nonisolated final class CoreMLBallDetector: BallDetectorProtocol {
 
-    private let request: VNCoreMLRequest
+    nonisolated(unsafe) private let request: VNCoreMLRequest
     private let targetLabel: String
     private let confidenceThreshold: Float
 
@@ -58,6 +58,6 @@ final class CoreMLBallDetector: BallDetectorProtocol {
     }
 }
 
-private extension CGRect {
+nonisolated private extension CGRect {
     var area: CGFloat { width * height }
 }

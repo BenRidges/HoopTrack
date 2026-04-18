@@ -16,15 +16,15 @@ import HealthKit
         guard store.authorizationStatus(for: HKObjectType.workoutType()) == .sharingAuthorized else { return }
         guard let endedAt = session.endedAt else { return }
 
-        let workout = HKWorkout(
-            activityType: .basketball,
-            start: session.startedAt,
-            end: endedAt,
-            duration: session.durationSeconds,
-            totalEnergyBurned: nil,
-            totalDistance: nil,
-            metadata: nil
-        )
-        try await store.save(workout)
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .basketball
+
+        let builder = HKWorkoutBuilder(healthStore: store,
+                                       configuration: configuration,
+                                       device: .local())
+
+        try await builder.beginCollection(at: session.startedAt)
+        try await builder.endCollection(at: endedAt)
+        _ = try await builder.finishWorkout()
     }
 }

@@ -10,7 +10,7 @@ import Foundation
 
 // MARK: - Internal State
 
-private enum PipelineState {
+private enum PipelineState: Sendable {
     case idle
     case tracking(trajectory: [BallDetection])
     case releaseDetected(releaseBox: CGRect, trajectory: [BallDetection])
@@ -18,24 +18,29 @@ private enum PipelineState {
 
 // MARK: - CVPipeline
 
-final class CVPipeline {
+/// Runs on the camera's sessionQueue. All mutable state is accessed only from
+/// the Combine sink closure, which Combine delivers synchronously on the same
+/// serial queue that calls `frameSubject.send(...)` in CameraService. The
+/// `nonisolated(unsafe)` annotations record that the compiler cannot prove
+/// this serialisation but it holds at runtime.
+nonisolated final class CVPipeline {
 
     // MARK: - Dependencies
     private let detector:    BallDetectorProtocol
     private let calibration: CourtCalibrationService
     private let poseService: PoseEstimationService?
-    private weak var viewModel: LiveSessionViewModel?
+    nonisolated(unsafe) private weak var viewModel: LiveSessionViewModel?
 
     // MARK: - State
-    private var pipelineState: PipelineState = .idle
-    private var frameCancellable: AnyCancellable?
+    nonisolated(unsafe) private var pipelineState: PipelineState = .idle
+    nonisolated(unsafe) private var frameCancellable: AnyCancellable?
 
     // Tracking: if no ball seen for 0.3s, return to IDLE
-    private var lastDetectionTimestamp: CMTime = .zero
+    nonisolated(unsafe) private var lastDetectionTimestamp: CMTime = .zero
     private let trackingTimeoutSec: Double = 0.3
 
     // Release resolved: 2s timeout → MISS
-    private var releaseTimestamp: CMTime = .zero
+    nonisolated(unsafe) private var releaseTimestamp: CMTime = .zero
     private let shotTimeoutSec: Double = 2.0
 
     // MARK: - Init
@@ -49,7 +54,7 @@ final class CVPipeline {
 
     // MARK: - Lifecycle
 
-    nonisolated func start(framePublisher: AnyPublisher<CMSampleBuffer, Never>,
+    func start(framePublisher: AnyPublisher<CMSampleBuffer, Never>,
                            viewModel: LiveSessionViewModel) {
         self.viewModel = viewModel
         // Frames arrive on sessionQueue — CV work stays there; UI calls dispatch to main.
@@ -59,7 +64,7 @@ final class CVPipeline {
             }
     }
 
-    nonisolated func stop() {
+    func stop() {
         frameCancellable?.cancel()
         frameCancellable = nil
         pipelineState = .idle
@@ -67,7 +72,7 @@ final class CVPipeline {
 
     // MARK: - Core Frame Processing
 
-    nonisolated private func processBuffer(_ buffer: CMSampleBuffer) {
+    private func processBuffer(_ buffer: CMSampleBuffer) {
         // Feed calibration during detecting phase
         calibration.processFrame(buffer)
 
@@ -124,7 +129,7 @@ final class CVPipeline {
                 if elapsed > trackingTimeoutSec { pipelineState = .idle }
             }
 
-        case .releaseDetected(let releaseBox, let trajectory):
+        case .releaseDetected(let releaseBox, _):
             let elapsed = CMTimeGetSeconds(CMTimeSubtract(now, releaseTimestamp))
 
             if let d = detection, case .calibrated(let hoopRect) = calibration.state {
@@ -148,7 +153,7 @@ final class CVPipeline {
 
     /// True when the ball has risen at least 5% of frame height and is now 3% below its peak.
     /// Vision Y coordinates: origin bottom-left, increasing upward.
-    nonisolated private func isAtPeak(trajectory: [BallDetection]) -> Bool {
+    private func isAtPeak(trajectory: [BallDetection]) -> Bool {
         guard trajectory.count >= 5 else { return false }
         let ys      = trajectory.suffix(5).map { $0.boundingBox.midY }
         let peak    = ys.max()!
@@ -160,7 +165,7 @@ final class CVPipeline {
     }
 
     /// Ball centre is within an expanded hoop rect — indicates a make.
-    nonisolated private func isEnteringHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
+    private func isEnteringHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
         let expanded   = hoopRect.insetBy(dx: -hoopRect.width  * 0.2,
                                           dy: -hoopRect.height * 0.5)
         let ballCentre = CGPoint(x: ballBox.midX, y: ballBox.midY)
@@ -168,16 +173,16 @@ final class CVPipeline {
     }
 
     /// Ball has fallen below the bottom edge of the hoop rect — indicates a miss.
-    nonisolated private func isBelowHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
+    private func isBelowHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
         return ballBox.midY < hoopRect.minY - 0.05
     }
 
     // MARK: - Shot Logging (dispatches to main actor)
 
-    nonisolated private func logPendingShot(releaseBox: CGRect, science: ShotScienceMetrics?) {
+    private func logPendingShot(releaseBox: CGRect, science: ShotScienceMetrics?) {
         let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
         let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.viewModel?.logPendingShot(zone: zone,
                                             courtX: pos.courtX,
                                             courtY: pos.courtY,
@@ -185,11 +190,11 @@ final class CVPipeline {
         }
     }
 
-    nonisolated private func resolveShot(result: ShotResult, releaseBox: CGRect) {
+    private func resolveShot(result: ShotResult, releaseBox: CGRect) {
         let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
         let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
         pipelineState = .idle
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.viewModel?.resolvePendingShot(result: result,
                                                  zone: zone,
                                                  courtX: pos.courtX,

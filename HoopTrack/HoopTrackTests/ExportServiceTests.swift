@@ -76,4 +76,26 @@ final class ExportServiceTests: XCTestCase {
         let sessions = json["sessions"] as? [[String: Any]]
         XCTAssertEqual(sessions?.count, 0)
     }
+
+    // Phase 7 — Security: exported JSON must have FileProtectionType.complete applied.
+    // Note: the iOS Simulator does not enforce file protection attributes; this test
+    // verifies the attribute is set correctly on a physical device.  On the simulator
+    // the setAttributes call succeeds but attributesOfItem returns nil for .protectionKey,
+    // so we skip the assertion there to keep CI green.
+    func test_exportJSON_fileHasCompleteFileProtection() async throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("File protection attributes are not enforced on the iOS Simulator")
+        #else
+        let profile = try dataService.fetchOrCreateProfile()
+        profile.name = "Protected Player"
+        let sut = ExportService()
+
+        let url = try await sut.exportJSON(for: profile)
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        let protection = attrs[.protectionKey] as? FileProtectionType
+        XCTAssertEqual(protection, .complete,
+                       "Exported JSON must be protected with FileProtectionType.complete")
+        #endif
+    }
 }

@@ -4,7 +4,7 @@
 import Foundation
 import CoreGraphics
 
-enum HoopTrack {
+nonisolated enum HoopTrack {
 
     // MARK: - App Info
     static let appName    = "HoopTrack"
@@ -123,6 +123,10 @@ enum HoopTrack {
         static let fgPctSessionStdDevMax:   Double = 30    // % — worst cross-session variance
         static let crossSessionMinCount:    Int    = 3     // min sessions for cross-session score
 
+        // MARK: Badge gating
+        /// Shooting sessions with fewer shots than this are excluded from badge evaluation entirely.
+        static let badgeMinShotsForShootingSession: Int = 20
+
         // MARK: Volume
         static let sessionsPerWeekCap:      Double = 5
         static let shotsPerSessionMax:      Double = 200
@@ -142,6 +146,14 @@ enum HoopTrack {
         static let poseEstimationErrorDeg:   Double = 3.0   // degrees
         static let maxMemoryFootprintMB:     Double = 300
         static let maxBatteryPerHourPercent: Double = 20
+    }
+
+    // Phase 7 — Security
+    enum KeychainKey {
+        static let accessToken    = "com.hooptrack.keychain.accessToken"
+        static let refreshToken   = "com.hooptrack.keychain.refreshToken"
+        static let userID         = "com.hooptrack.keychain.userID"
+        static let biometricToken = "com.hooptrack.keychain.biometricToken"
     }
 
     // MARK: - UI

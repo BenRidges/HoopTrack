@@ -5,7 +5,7 @@
 
 import Foundation
 
-struct ShotScienceMetrics {
+struct ShotScienceMetrics: Sendable {
     /// Ball launch angle from horizontal at release (degrees). Optimal 43–57°.
     var releaseAngleDeg: Double?
     /// Time from first ball detection to release peak (milliseconds).

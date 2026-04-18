@@ -1,7 +1,7 @@
 # HoopTrack — Implementation Roadmap
 
 **Last updated:** 2026-04-12  
-**Status:** End of Phase 6B (app shipped locally; preparing for backend introduction)
+**Status:** End of Phase 7 (security & privacy hardened; ready for authentication work)
 
 ---
 
@@ -17,8 +17,8 @@
 | 5B | Badge UI & Agility Drills | ✅ Complete |
 | 6A | Siri Shortcuts, Data Export & Performance | ✅ Complete |
 | 6B | UI Polish, Refactor & Extension Report | ✅ Complete |
-| 7 | Security & Privacy ⭐ HIGH PRIORITY | 🔜 Next |
-| 8 | Authentication & Identity | 🔜 Planned |
+| 7 | Security & Privacy | ✅ Complete |
+| 8 | Authentication & Identity | 🔜 Next |
 | 9 | Backend & Database | 🔜 Planned |
 | 10 | File & Media Storage | 🔜 Planned |
 | 11 | Accessibility | 🔜 Planned |
@@ -58,6 +58,31 @@ Core app scaffolding: SwiftUI + SwiftData MVVM architecture, `PlayerProfile` / `
 ### Phase 6B — UI Polish, Refactor & Extension Report
 Onboarding flow (`OnboardingView`), loading/empty states, animations. Refactor analysis report identifying 10 issues (2 critical: duplicate `ModelContainer` in `ProfileTabView`, `DispatchQueue.main.async` in `@MainActor` class). Extension report capturing strategic vision and technical options brief for future growth.
 
+### Phase 7 — Security & Privacy
+Full security hardening before backend introduction. **Subagent-driven development** (7 tasks) followed by a **4-domain parallel security review** across the full codebase.
+
+**New files:**
+- `Utilities/KeychainService.swift` — `@MainActor final class`; `Security.framework` wrapper; `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`; biometric-protected storage; `deleteAll()` for GDPR wipe
+- `Utilities/InputValidator.swift` — pure `enum`; validates release angle (0–90°), jump height (0–120 cm), court coordinates (0–1), profile name sanitisation
+- `Utilities/PinningURLSessionDelegate.swift` — SPKI SHA-256 cert pinning; EC P-256 header prepend; placeholder hash for Phase 9
+- `PrivacyInfo.xcprivacy` — App Store privacy manifest; FileTimestamp (C617.1), UserDefaults (CA92.1) reason codes; Health + VideoAndSoundData declared
+- `HoopTrack.KeychainKey` constants added to `Constants.swift`
+
+**Modified files:**
+- `DataService` — `deleteAllUserData()` (GDPR: SwiftData, files, Keychain, UserDefaults); input validation in `addShot/updateShot/resolveShot`; `locationTag` sanitisation; `ExportService` file protection gap fixed
+- `VideoRecordingService` — `FileProtectionType.complete` on session videos; `Task { @MainActor }` pattern
+- `HoopTrackApp` — `configureSessionsDirectoryProtection()` applies protection at launch
+- `CameraService`, `CVPipeline`, `CourtCalibrationService`, `DribblePipeline` — all `DispatchQueue.main.async` → `Task { @MainActor [weak self] in }`
+- `LiveSessionViewModel` — court coordinate validation before `ShotRecord` write
+- `ProfileViewModel` — `sanitisedProfileName()` before persisting; `deleteAllData()` entry point
+- `OnboardingView` — name sanitised before UserDefaults write
+- `ProfileTabView` — "Delete All My Data" destructive button + HealthKit disclosure
+- `NotificationService` — `DispatchQueue.main.async` → `Task { @MainActor }`
+- `CourtZoneClassifier` — defence-in-depth NaN/Inf guard via `InputValidator`
+- `ExportService` — `FileProtectionType.complete` on exported JSON
+
+**Tests added:** `KeychainServiceTests` (5), `InputValidatorTests` (10), `DataServiceDeleteTests` (4), `CourtZoneClassifierTests` (4 new cases). Full suite: 151 tests, 0 failures.
+
 ---
 
 ## Deferred Items (Not Yet Scheduled)
@@ -75,31 +100,9 @@ Onboarding flow (`OnboardingView`), loading/empty states, animations. Refactor a
 
 ---
 
-### Phase 7 — Security & Privacy ⭐ HIGH PRIORITY
-**Must complete before any backend work begins.**  
-**Reference:** `docs/upgrade-security.md`
-
-| Task | Detail |
-|---|---|
-| `KeychainService` | `Security` framework wrapper; store all auth tokens + sensitive prefs; biometric-protected items; never `UserDefaults` |
-| App Transport Security | Enforce HTTPS for all domains in `Info.plist`; zero `NSAllowsArbitraryLoads` exceptions in production |
-| File protection | Apply `FileProtectionType.complete` to `Documents/Sessions/` directory and exported files |
-| `PrivacyInfo.xcprivacy` | Declare camera usage, Vision body pose, file timestamp APIs, `UserDefaults` reasons — **required for App Store submission** |
-| Privacy nutrition labels | App Store Connect data practice declarations (health/fitness data, usage data, identifiers) |
-| Certificate pinning | `URLSessionDelegate` SPKI hash pinning for Supabase endpoints; pin rotation process |
-| Input validators | `InputValidator` utility for names/emails + sensor-range validators for angles/distances |
-| GDPR — right to delete | Cascade delete `PlayerProfile` + all related local records + Keychain wipe on account deletion |
-
-**Key files to create:**
-- `HoopTrack/HoopTrack/Services/KeychainService.swift`
-- `HoopTrack/HoopTrack/Services/InputValidator.swift`
-- `HoopTrack/HoopTrack/Utilities/PinningURLSessionDelegate.swift`
-- `HoopTrack/PrivacyInfo.xcprivacy`
-
----
-
-### Phase 8 — Authentication & Identity
-**Prerequisite:** Phase 7 complete (Keychain storage must be in place).  
+### Phase 8 — Authentication & Identity ⭐ NEXT
+**Prerequisite:** Phase 7 ✅ (`KeychainService`, `PinningURLSessionDelegate`, `PrivacyInfo.xcprivacy` all in place).  
+**Note:** Replace `PinningURLSessionDelegate.pinnedHashes` placeholder with real Supabase SPKI SHA-256 before Phase 9 ships.  
 **Reference:** `docs/upgrade-authentication-identity.md`
 
 | Task | Detail |
@@ -289,16 +292,16 @@ Issues identified at end of Phase 6B. Address during relevant upcoming phases.
 
 | # | Severity | Finding | Phase to fix |
 |---|---|---|---|
-| 1 | Critical | `ProfileTabView` constructs a second `ModelContainer` in `@StateObject` initialiser | Phase 7 (prep work) |
-| 2 | Critical | `DispatchQueue.main.async` in `@MainActor` `CameraService` (Swift 6 data race) | Phase 7 (prep work) |
+| 1 | Critical | `ProfileTabView` constructs a second `ModelContainer` in `@StateObject` initialiser | Phase 9 (Backend) |
+| 2 | Critical | `DispatchQueue.main.async` in `@MainActor` `CameraService` (Swift 6 data race) | ✅ Fixed Phase 7 |
 | 3 | Important | Long-press end-session button duplicated across 3 views (~40 lines each) | Phase 11 (Accessibility) |
 | 4 | Important | Views construct `DataService` directly from `modelContext` in `.task` | Phase 9 (Backend) |
 | 5 | Important | `ProgressViewModel.load()` is synchronous; blocks main thread on large datasets | Phase 9 (Backend) |
-| 6 | Important | `LiveSessionViewModel` uses implicitly-unwrapped optionals for injected deps | Phase 7 (prep work) |
-| 7 | Minor | `DispatchQueue.main.async` in `DribbleARViewContainer.makeUIView` | Phase 7 (prep work) |
+| 6 | Important | `LiveSessionViewModel` uses implicitly-unwrapped optionals for injected deps | Phase 8 (Auth refactor) |
+| 7 | Minor | `DispatchQueue.main.async` in `DribblePipeline` and `NotificationService` | ✅ Fixed Phase 7 |
 | 8 | Minor | `NotificationSettingsView` toggles are hardcoded `.constant(true)` | Phase 8 (Auth/profile) |
-| 9 | Minor | Redundant `calibrationIsActive` published property in `LiveSessionViewModel` | Phase 7 (prep work) |
-| 10 | Minor | Commented-out code in `CameraService` | Phase 7 (prep work) |
+| 9 | Minor | Redundant `calibrationIsActive` published property in `LiveSessionViewModel` | Phase 8 (Auth refactor) |
+| 10 | Minor | Commented-out code in `CameraService` | Phase 8 (cleanup) |
 
 ---
 

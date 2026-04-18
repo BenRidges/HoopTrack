@@ -5,12 +5,12 @@
 import Vision
 import AVFoundation
 
-final class PoseEstimationService {
+nonisolated final class PoseEstimationService {
 
     /// Runs VNDetectHumanBodyPoseRequest on a single frame.
     /// Returns the first body pose observation, or nil if none detected or Vision fails.
     /// Synchronous — blocks the calling queue for < 5ms on A15.
-    nonisolated func detectPose(buffer: CMSampleBuffer) -> VNHumanBodyPoseObservation? {
+    func detectPose(buffer: CMSampleBuffer) -> VNHumanBodyPoseObservation? {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) else { return nil }
         let request = VNDetectHumanBodyPoseRequest()
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,

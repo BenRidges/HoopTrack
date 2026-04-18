@@ -3,9 +3,16 @@ import Foundation
 
 /// Maps a normalised court position (0–1, origin bottom-left half-court)
 /// to a CourtZone using the geometry constants in HoopTrack.CourtGeometry.
-enum CourtZoneClassifier {
+nonisolated enum CourtZoneClassifier {
 
     static func classify(courtX: Double, courtY: Double) -> CourtZone {
+        // Phase 7 — Security: guard against NaN, Inf, or out-of-range inputs from
+        // uncalibrated frames or future callers that skip the DataService validation layer.
+        guard InputValidator.isValidCourtCoordinate(courtX),
+              InputValidator.isValidCourtCoordinate(courtY) else {
+            return .midRange
+        }
+
         let paintHalfWidth     = HoopTrack.CourtGeometry.paintWidthFraction / 2.0    // 0.16
         let inPaintX           = abs(courtX - 0.5) <= paintHalfWidth
         let freeThrowTolerance = 0.05

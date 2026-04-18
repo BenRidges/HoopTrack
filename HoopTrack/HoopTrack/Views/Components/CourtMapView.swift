@@ -14,7 +14,9 @@ struct CourtMapView: View {
     var highlightedShot: ShotRecord? = nil
     var showHeatMap: Bool = false         // Phase 5: toggle density gradient
 
-    private let courtAspect: CGFloat = 0.55   // half-court is ~47x50 ft ≈ 0.94 ratio; map is portrait
+    // NBA half-court: 50 ft wide × 47 ft deep (portrait — baseline at bottom).
+    // courtAspect = width / height = 47/50.
+    private let courtAspect: CGFloat = 47.0 / 50.0
 
     var body: some View {
         GeometryReader { geo in
@@ -50,7 +52,7 @@ struct CourtMapView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .aspectRatio(1 / courtAspect, contentMode: .fit)
+        .aspectRatio(courtAspect, contentMode: .fit)
         .background(Color(red: 0.84, green: 0.68, blue: 0.42))  // hardwood colour
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -75,64 +77,93 @@ struct CourtMapView: View {
     // MARK: - Canvas Drawing
 
     private func drawCourt(ctx: GraphicsContext, origin: CGPoint, size: CGSize) {
-        let w = size.width
-        let h = size.height
-        let x = origin.x
-        let y = origin.y
-
-        var stroke = ctx
-        stroke.stroke(
-            courtPath(x: x, y: y, w: w, h: h),
+        ctx.stroke(
+            courtPath(x: origin.x, y: origin.y, w: size.width, h: size.height),
             with: .color(.white.opacity(0.9)),
             lineWidth: 2
         )
     }
 
     private func courtPath(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat) -> Path {
-        Path { p in
-            // Outer boundary
+        // All fractions derived from NBA half-court: 50 ft wide × 47 ft deep.
+        // Scale: 1 ft = w/50 = h/47 (equal because courtAspect = 47/50).
+
+        let cx = x + w / 2                          // horizontal centre
+
+        // Basket: front rim 5.25 ft from baseline
+        let basketY = y + h * (1 - 5.25 / 47)
+
+        // Paint: 16 ft wide (8 ft each side), FT line 19 ft from baseline
+        let paintHalf: CGFloat = w * (8.0 / 50)
+        let ftLineY   = y + h * (1 - 19.0 / 47)
+
+        // Free throw circle: 6 ft radius
+        let ftRadius: CGFloat = w * (6.0 / 50)
+
+        // Restricted area arc: 4 ft radius, open toward half-court
+        let raRadius: CGFloat = w * (4.0 / 50)
+
+        // Three-point line: arc radius 23.75 ft; corner lines 3 ft from sideline
+        let tpRadius:     CGFloat = w * (23.75 / 50)
+        let cornerXLeft   = x + w * (3.0  / 50)
+        let cornerXRight  = x + w * (47.0 / 50)   // = sideline - 3 ft
+        // canvas-y where corner line meets the arc (above basket)
+        let cornerDX: CGFloat = cx - cornerXLeft   // horizontal arm: 22 ft = 0.44 w
+        let cornerDY: CGFloat = (tpRadius * tpRadius - cornerDX * cornerDX).squareRoot()
+        let cornerEndY    = basketY - cornerDY
+
+        // Backboard: 6 ft wide, 4 ft from baseline
+        let backboardHalf: CGFloat = w * (3.0 / 50)
+        let backboardY    = y + h * (1 - 4.0 / 47)
+
+        // Basket circle: symbolic size (~0.75 ft radius on court)
+        let basketRadius: CGFloat = w * 0.025
+
+        return Path { p in
+
+            // 1. Outer boundary
             p.addRect(CGRect(x: x, y: y, width: w, height: h))
 
-            // Paint / key (roughly 16ft wide, 19ft tall on NBA court)
-            let paintW: CGFloat = w * 0.32
-            let paintH: CGFloat = h * 0.38
-            let paintX = x + (w - paintW) / 2
-            p.addRect(CGRect(x: paintX, y: y + h - paintH, width: paintW, height: paintH))
+            // 2. Paint / key
+            p.addRect(CGRect(x: cx - paintHalf, y: ftLineY,
+                             width: paintHalf * 2, height: y + h - ftLineY))
 
-            // Free throw circle (radius ~6ft)
-            let ftRadius: CGFloat = w * 0.12
-            let ftCX = x + w / 2
-            let ftCY = y + h - paintH
-            p.addEllipse(in: CGRect(x: ftCX - ftRadius, y: ftCY - ftRadius,
+            // 3. Free throw circle (full)
+            p.addEllipse(in: CGRect(x: cx - ftRadius, y: ftLineY - ftRadius,
                                     width: ftRadius * 2, height: ftRadius * 2))
 
-            // Restricted area arc (4ft radius from basket)
-            let raRadius: CGFloat = w * 0.08
-            let basketY = y + h - h * 0.08
-            p.addArc(center: CGPoint(x: x + w / 2, y: basketY),
+            // 4. Restricted area arc (upper semicircle, open toward half-court)
+            p.move(to: CGPoint(x: cx - raRadius, y: basketY))
+            p.addArc(center: CGPoint(x: cx, y: basketY),
                      radius: raRadius,
-                     startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+                     startAngle: .degrees(180), endAngle: .degrees(0),
+                     clockwise: false)
 
-            // Three-point arc (approximate — actual shape requires Bézier)
-            let tpRadius: CGFloat = w * 0.47
-            let tpCY = basketY
-            p.addArc(center: CGPoint(x: x + w / 2, y: tpCY),
+            // 5. Three-point corner lines (baseline → corner meeting point)
+            p.move(to: CGPoint(x: cornerXLeft,  y: y + h))
+            p.addLine(to: CGPoint(x: cornerXLeft,  y: cornerEndY))
+            p.move(to: CGPoint(x: cornerXRight, y: y + h))
+            p.addLine(to: CGPoint(x: cornerXRight, y: cornerEndY))
+
+            // 6. Three-point arc: angles computed from actual corner positions so the
+            //    arc meets the corner lines exactly. clockwise: false draws the arc
+            //    bowing away from the basket toward half-court.
+            let startAngle = Angle(radians: Double(atan2(cornerEndY - basketY, cornerXLeft  - cx)))
+            let endAngle   = Angle(radians: Double(atan2(cornerEndY - basketY, cornerXRight - cx)))
+            p.move(to: CGPoint(x: cornerXLeft, y: cornerEndY))
+            p.addArc(center: CGPoint(x: cx, y: basketY),
                      radius: tpRadius,
-                     startAngle: .degrees(210), endAngle: .degrees(330), clockwise: false)
+                     startAngle: startAngle,
+                     endAngle: endAngle,
+                     clockwise: false)
 
-            // Three-point corner lines
-            let cornerY = y + h - h * 0.28
-            p.move(to: CGPoint(x: x + w * 0.03, y: y + h))
-            p.addLine(to: CGPoint(x: x + w * 0.03, y: cornerY))
-            p.move(to: CGPoint(x: x + w * 0.97, y: y + h))
-            p.addLine(to: CGPoint(x: x + w * 0.97, y: cornerY))
+            // 7. Backboard
+            p.move(to: CGPoint(x: cx - backboardHalf, y: backboardY))
+            p.addLine(to: CGPoint(x: cx + backboardHalf, y: backboardY))
 
-            // Basket (small circle)
-            let basketRadius: CGFloat = w * 0.025
-            p.addEllipse(in: CGRect(x: x + w / 2 - basketRadius,
-                                    y: basketY - basketRadius,
-                                    width: basketRadius * 2,
-                                    height: basketRadius * 2))
+            // 8. Basket circle
+            p.addEllipse(in: CGRect(x: cx - basketRadius, y: basketY - basketRadius,
+                                    width: basketRadius * 2, height: basketRadius * 2))
         }
     }
 

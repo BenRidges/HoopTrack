@@ -1,9 +1,10 @@
 // LiveSessionView.swift
-// Full-screen camera view shown during an active training session.
+// Full-screen landscape camera view shown during an active training session.
 //
 // Phase 1: Camera preview + manual shot logging buttons + HUD.
 // Phase 2: CV pipeline makes/misses auto-populate via LiveSessionViewModel.logShot().
 // Phase 3: Shot Science overlay during replay.
+// Landscape: Always-landscape with right sidebar layout and border glow animations.
 
 import SwiftUI
 import AVFoundation
@@ -20,15 +21,13 @@ struct LiveSessionView: View {
     @EnvironmentObject private var hapticService: HapticService
     @EnvironmentObject private var notificationService: NotificationService
     @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
+    @EnvironmentObject private var dataService: DataService
 
     @StateObject private var viewModel = LiveSessionViewModel()
 
     @State private var showMidSessionBreakdown = false
-    @State private var isLongPressingEnd = false
-    @State private var endLongPressProgress: Double = 0
-    @State private var endSessionTask: Task<Void, Never>?
-    @State private var showMakeAnimation = false
-    @State private var showMissAnimation = false
+    @State private var isStatsExpanded = false
+    private let sidebarWidth: CGFloat = 140
 
     // Phase 2: CV pipeline
     @State private var cvPipeline:  CVPipeline?
@@ -39,38 +38,46 @@ struct LiveSessionView: View {
 
     var body: some View {
         ZStack {
-            // MARK: Camera Preview
-            CameraPreviewView(captureSession: cameraService.captureSession)
-                .ignoresSafeArea()
+            HStack(spacing: 0) {
+                // MARK: Camera Area (~80%)
+                ZStack {
+                    CameraPreviewView(captureSession: cameraService.captureSession,
+                                      orientation: .landscape)
+                        .ignoresSafeArea()
 
-            // Camera permission overlay
-            if cameraService.permissionStatus != .authorized {
-                Color.black.ignoresSafeArea()
-                CameraPermissionView()
-            }
+                    // Camera permission overlay
+                    if cameraService.permissionStatus != .authorized {
+                        Color.black.ignoresSafeArea()
+                        CameraPermissionView()
+                    }
 
-            // MARK: HUD Overlay
-            VStack {
-                topHUD
-                Spacer()
-                if showMakeAnimation { makeAnimation }
-                if showMissAnimation { missAnimation }
-                Spacer()
-                recentShotsStrip
-                bottomControls
+                    // Manual make/miss fallback — shown only when CV pipeline is not active
+                    if cvPipeline == nil {
+                        VStack {
+                            Spacer()
+                            manualShotButtons
+                                .padding(.bottom, 20)
+                                .padding(.horizontal, 20)
+                        }
+                    }
+                }
+
+                // MARK: Right Sidebar (~20%)
+                sidebar
             }
-            .ignoresSafeArea(edges: .bottom)
 
             // Phase 2: calibration prompt — shown until hoop is locked
             if !viewModel.isCalibrated {
                 calibrationOverlay
             }
 
-            // MARK: Mid-session breakdown sheet
+            // MARK: Shot glow overlay
+            ShotGlowOverlay(shotResult: viewModel.lastShotResult,
+                             sidebarWidth: sidebarWidth)
         }
         .task {
             viewModel.configure(
-                dataService:  DataService(modelContext: modelContext),
+                dataService:  dataService,
                 hapticService: hapticService,
                 coordinator:  coordinator
             )
@@ -79,7 +86,7 @@ struct LiveSessionView: View {
                 await cameraService.requestPermission()
             }
             if cameraService.permissionStatus == .authorized {
-                cameraService.configureSession(mode: .rear)
+                cameraService.configureSession(mode: .rear, orientation: .landscape)
                 cameraService.startSession()
             }
 
@@ -88,8 +95,11 @@ struct LiveSessionView: View {
             // Phase 2: start CV pipeline (or fall back to manual-only if no model available)
             if let detector = BallDetectorFactory.make(BallDetectorFactory.active) {
                 let cal = CourtCalibrationService()
-                cal.onStateChange = { [weak viewModel] state in
-                    viewModel?.updateCalibrationState(isCalibrated: state.isCalibrated)
+                cal.onStateChange = { @Sendable [weak viewModel] state in
+                    let calibrated = state.isCalibrated
+                    Task { @MainActor [weak viewModel] in
+                        viewModel?.updateCalibrationState(isCalibrated: calibrated)
+                    }
                 }
                 cal.startCalibration()
 
@@ -107,7 +117,8 @@ struct LiveSessionView: View {
 
             // Phase 3: record session video for replay
             let recorder = VideoRecordingService()
-            recorder.configure(captureSession: cameraService.captureSession)
+            recorder.configure(captureSession: cameraService.captureSession,
+                               orientation: .landscape)
             if let sessionID = viewModel.session?.id {
                 recorder.startRecording(sessionID: sessionID)
                 recorder.onRecordingFinished = { result in
@@ -124,17 +135,6 @@ struct LiveSessionView: View {
             videoRecorder?.stopRecording()
             cameraService.stopSession()
         }
-        .onChange(of: viewModel.lastShotResult) { _, result in
-            guard let result else { return }
-            withAnimation(.easeOut(duration: 0.3)) {
-                showMakeAnimation = result == .make
-                showMissAnimation = result == .miss
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                showMakeAnimation = false
-                showMissAnimation = false
-            }
-        }
         .sheet(isPresented: $showMidSessionBreakdown) {
             MidSessionBreakdownView(viewModel: viewModel)
                 .presentationDetents([.medium, .large])
@@ -143,7 +143,8 @@ struct LiveSessionView: View {
             if let session = viewModel.session {
                 SessionSummaryView(
                     session:      session,
-                    badgeChanges: viewModel.sessionResult?.badgeChanges ?? []
+                    badgeChanges: viewModel.sessionResult?.badgeChanges ?? [],
+                    badgeSkipReason: viewModel.sessionResult?.badgeSkipReason
                 ) {
                     viewModel.isFinished = false
                     onFinish()
@@ -153,44 +154,269 @@ struct LiveSessionView: View {
         .statusBarHidden(true)
     }
 
-    // MARK: - Top HUD
+    // MARK: - Right Sidebar (Sport Broadcast Style)
 
-    private var topHUD: some View {
-        HStack(alignment: .top) {
-            // FG% counter
-            VStack(alignment: .leading, spacing: 2) {
-                Text(viewModel.fgPercentString)
-                    .font(.system(size: 36, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 4)
-                Text("\(viewModel.shotsMade) / \(viewModel.shotsAttempted)")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.8))
+    /// Reusable card background for sidebar sections.
+    private func sidebarCard(orangeBorder: Bool = false) -> some ShapeStyle {
+        LinearGradient(colors: [Color(red: 0.10, green: 0.10, blue: 0.18),
+                                Color(red: 0.07, green: 0.07, blue: 0.12)],
+                       startPoint: .top, endPoint: .bottom)
+    }
+
+    private var sidebar: some View {
+        VStack(spacing: 6) {
+
+            // MARK: FG% Card (tappable, expandable)
+            VStack(spacing: 4) {
+                // Header row with expand chevron
+                HStack {
+                    Text("FIELD GOAL")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color.orange.opacity(0.6))
+                        .tracking(1.5)
+                    Spacer()
+                    Image(systemName: isStatsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text(String(format: "%.0f", viewModel.fgPercent))
+                        .font(.system(size: 34, weight: .black))
+                        .foregroundStyle(fgTintColor)
+                    Text("%")
+                        .font(.system(size: 16, weight: .black))
+                        .foregroundStyle(fgTintColor)
+                        .baselineOffset(10)
+                }
+                .monospacedDigit()
+
+                // Made / Miss split row
+                HStack(spacing: 0) {
+                    VStack(spacing: 1) {
+                        Text("\(viewModel.shotsMade)")
+                            .font(.system(size: 14, weight: .heavy))
+                            .foregroundStyle(.green)
+                        Text("MADE")
+                            .font(.system(size: 7, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.3))
+                            .tracking(0.5)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Rectangle()
+                        .fill(.white.opacity(0.08))
+                        .frame(width: 1, height: 24)
+
+                    VStack(spacing: 1) {
+                        Text("\(viewModel.shotsAttempted - viewModel.shotsMade)")
+                            .font(.system(size: 14, weight: .heavy))
+                            .foregroundStyle(.red)
+                        Text("MISS")
+                            .font(.system(size: 7, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.3))
+                            .tracking(0.5)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(.white.opacity(0.04))
+                )
+                .padding(.top, 2)
+
+                // Expanded zone breakdown
+                if isStatsExpanded {
+                    VStack(spacing: 0) {
+                        Rectangle()
+                            .fill(.white.opacity(0.06))
+                            .frame(height: 1)
+                            .padding(.vertical, 6)
+
+                        if let session = viewModel.session {
+                            ForEach(zoneBreakdown(for: session), id: \.zone) { row in
+                                HStack(spacing: 0) {
+                                    Text(row.label)
+                                        .font(.system(size: 7, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.5))
+                                        .tracking(0.5)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    Text(row.fraction)
+                                        .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.4))
+                                        .frame(width: 28, alignment: .trailing)
+
+                                    Text(row.pct)
+                                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                                        .foregroundStyle(row.pctColor)
+                                        .frame(width: 32, alignment: .trailing)
+                                }
+                                .padding(.vertical, 3)
+                            }
+
+                            // Streak
+                            if session.longestMakeStreak > 0 {
+                                Rectangle()
+                                    .fill(.white.opacity(0.06))
+                                    .frame(height: 1)
+                                    .padding(.vertical, 4)
+
+                                HStack {
+                                    Text("BEST RUN")
+                                        .font(.system(size: 7, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.4))
+                                        .tracking(0.5)
+                                    Spacer()
+                                    Text("\(session.longestMakeStreak)")
+                                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                                        .foregroundStyle(.orange)
+                                    + Text(" IN A ROW")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .foregroundStyle(.orange.opacity(0.6))
+                                }
+                            }
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
-            .padding(16)
-            .background(.ultraThinMaterial.opacity(0.7),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.vertical, 10)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(sidebarCard())
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.orange.opacity(isStatsExpanded ? 0.25 : 0.15), lineWidth: 1)
+                    )
+            )
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isStatsExpanded.toggle()
+                }
+            }
 
-            Spacer()
+            // MARK: Timer Card
+            VStack(spacing: 2) {
+                Text("TIME")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .tracking(1.5)
 
-            // Session timer
-            VStack(alignment: .trailing, spacing: 2) {
                 Text(viewModel.elapsedFormatted)
-                    .font(.system(size: 36, weight: .black, design: .monospaced))
+                    .font(.system(size: 22, weight: .heavy, design: .monospaced))
                     .foregroundStyle(.white)
-                    .shadow(radius: 4)
+                    .tracking(1)
+
                 if viewModel.isPaused {
                     Text("PAUSED")
-                        .font(.caption.bold())
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.yellow)
                 }
             }
-            .padding(16)
-            .background(.ultraThinMaterial.opacity(0.7),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.vertical, 8)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(sidebarCard())
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(.white.opacity(0.06), lineWidth: 1)
+                    )
+            )
+
+            Spacer(minLength: 8)
+
+            // MARK: Recent Shots Card
+            VStack(spacing: 6) {
+                Text("RECENT")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.25))
+                    .tracking(1.5)
+
+                HStack(spacing: 3) {
+                    ForEach(Array(viewModel.recentShots.enumerated()), id: \.element.id) { index, shot in
+                        let isLatest = index == viewModel.recentShots.count - 1
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(dotColor(for: shot.result))
+                            .frame(width: 16, height: 5)
+                            .shadow(color: isLatest ? dotColor(for: shot.result).opacity(0.5) : .clear,
+                                    radius: isLatest ? 4 : 0)
+                    }
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(sidebarCard())
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(.white.opacity(0.06), lineWidth: 1)
+                    )
+            )
+
+            Spacer(minLength: 8)
+
+            // MARK: Controls
+            VStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    // Pause / Resume
+                    Button {
+                        viewModel.isPaused ? viewModel.resume() : viewModel.pause()
+                        hapticService.tap()
+                    } label: {
+                        Image(systemName: viewModel.isPaused ? "play.fill" : "pause.fill")
+                            .font(.system(size: 14))
+                            .frame(width: 36, height: 36)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(.white.opacity(0.06))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            )
+                    }
+
+                    // Mid-session breakdown
+                    Button {
+                        hapticService.tap()
+                        showMidSessionBreakdown = true
+                    } label: {
+                        Image(systemName: "chart.bar.fill")
+                            .font(.system(size: 14))
+                            .frame(width: 36, height: 36)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(.white.opacity(0.06))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            )
+                    }
+                }
+                .foregroundStyle(.white.opacity(0.5))
+
+                // End Session
+                HoldToEndButton {
+                    await viewModel.endSession()
+                }
+            }
         }
-        .padding(.horizontal)
-        .padding(.top, 12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .frame(width: sidebarWidth)
+        .background(
+            LinearGradient(colors: [Color(red: 0.067, green: 0.067, blue: 0.094),
+                                    Color(red: 0.031, green: 0.031, blue: 0.051)],
+                           startPoint: .top, endPoint: .bottom)
+        )
     }
 
     // MARK: - Calibration Overlay
@@ -216,45 +442,41 @@ struct LiveSessionView: View {
         .background(.black.opacity(0.55))
     }
 
-    // MARK: - Make / Miss Animations
+    // MARK: - FG% Tint Colour
 
-    private var makeAnimation: some View {
-        VStack {
-            Text("MAKE")
-                .font(.system(size: 48, weight: .black, design: .rounded))
-                .foregroundStyle(.green)
-                .shadow(color: .green.opacity(0.6), radius: 16)
-                .transition(.scale.combined(with: .opacity))
+    /// Briefly tints the FG% text green or red to match the last shot result.
+    private var fgTintColor: Color {
+        switch viewModel.lastShotResult {
+        case .make:    return .green
+        case .miss:    return .red
+        case .pending, .none: return .orange
         }
     }
 
-    private var missAnimation: some View {
-        VStack {
-            Text("MISS")
-                .font(.system(size: 48, weight: .black, design: .rounded))
-                .foregroundStyle(.red)
-                .shadow(color: .red.opacity(0.6), radius: 16)
-                .transition(.scale.combined(with: .opacity))
-        }
-    }
+    // MARK: - Manual Shot Buttons
 
-    // MARK: - Recent Shots Strip (last 5)
+    private var manualShotButtons: some View {
+        HStack(spacing: 20) {
+            Button {
+                viewModel.logShot(result: .miss)
+            } label: {
+                Label("Miss", systemImage: "xmark")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(.red.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(.white)
+            }
 
-    private var recentShotsStrip: some View {
-        HStack(spacing: 8) {
-            ForEach(viewModel.recentShots) { shot in
-                Circle()
-                    .fill(dotColor(for: shot.result))
-                    .frame(width: 18, height: 18)
-                    .overlay(
-                        Circle().stroke(.white.opacity(0.4), lineWidth: 1)
-                    )
+            Button {
+                viewModel.logShot(result: .make)
+            } label: {
+                Label("Make", systemImage: "checkmark")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(.green.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(.white)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial.opacity(0.7),
-                    in: Capsule())
     }
 
     private func dotColor(for result: ShotResult) -> Color {
@@ -265,107 +487,33 @@ struct LiveSessionView: View {
         }
     }
 
-    // MARK: - Bottom Controls
+    // MARK: - Zone Breakdown Rows
 
-    private var bottomControls: some View {
-        VStack(spacing: 12) {
-            // Phase 1: Manual make/miss buttons (replaced by CV in Phase 2)
-            HStack(spacing: 20) {
-                // Miss button
-                Button {
-                    viewModel.logShot(result: .miss)
-                } label: {
-                    Label("Miss", systemImage: "xmark")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(.red.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
-                        .foregroundStyle(.white)
-                }
+    private struct ZoneBreakdownRow {
+        let zone: CourtZone
+        let label: String
+        let fraction: String
+        let pct: String
+        let pctColor: Color
+    }
 
-                // Make button
-                Button {
-                    viewModel.logShot(result: .make)
-                } label: {
-                    Label("Make", systemImage: "checkmark")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(.green.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
-                        .foregroundStyle(.white)
-                }
+    private func zoneBreakdown(for session: TrainingSession) -> [ZoneBreakdownRow] {
+        session.zoneStats.map { stat in
+            let pctValue = stat.fgPercent
+            let color: Color
+            switch pctValue {
+            case 60...:  color = .green
+            case 40..<60: color = .orange
+            default:      color = .red
             }
-
-            HStack(spacing: 16) {
-                // Pause / Resume
-                Button {
-                    viewModel.isPaused ? viewModel.resume() : viewModel.pause()
-                    hapticService.tap()
-                } label: {
-                    Image(systemName: viewModel.isPaused ? "play.fill" : "pause.fill")
-                        .font(.title3)
-                        .frame(width: 52, height: 52)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-
-                // Mid-session breakdown
-                Button {
-                    hapticService.tap()
-                    showMidSessionBreakdown = true
-                } label: {
-                    Image(systemName: "chart.bar.fill")
-                        .font(.title3)
-                        .frame(width: 52, height: 52)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-
-                Spacer()
-
-                // End Session (long press – hold to confirm)
-                Text(isLongPressingEnd ? "Hold…" : "End Session")
-                    .font(.subheadline.bold())
-                    .padding(.horizontal, 20)
-                    .frame(height: 52)
-                    .background(
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 26).fill(Color.red)
-                            RoundedRectangle(cornerRadius: 26)
-                                .fill(Color.white.opacity(0.25))
-                                .frame(width: max(0, endLongPressProgress) * 160)
-                                .animation(.linear(duration: 0.05), value: endLongPressProgress)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 26))
-                    )
-                    .foregroundStyle(.white)
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { _ in
-                                guard !isLongPressingEnd else { return }
-                                isLongPressingEnd = true
-                                endLongPressProgress = 0
-                                withAnimation(.linear(duration: 1.5)) {
-                                    endLongPressProgress = 1
-                                }
-                                endSessionTask = Task {
-                                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                                    guard !Task.isCancelled else { return }
-                                    hapticService.longPress()
-                                    await viewModel.endSession()
-                                }
-                            }
-                            .onEnded { _ in
-                                endSessionTask?.cancel()
-                                endSessionTask = nil
-                                isLongPressingEnd = false
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    endLongPressProgress = 0
-                                }
-                            }
-                    )
-            }
-            .foregroundStyle(.white)
+            return ZoneBreakdownRow(
+                zone: stat.zone,
+                label: stat.zone.rawValue.uppercased(),
+                fraction: "\(stat.made)/\(stat.attempted)",
+                pct: String(format: "%.0f%%", pctValue),
+                pctColor: color
+            )
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(.black.opacity(0.4))
     }
 }
 
@@ -409,15 +557,28 @@ private struct MidSessionBreakdownView: View {
 struct CameraPreviewView: UIViewRepresentable {
 
     let captureSession: AVCaptureSession
+    var orientation: CameraOrientation = .landscape
 
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView()
-        view.previewLayer.session     = captureSession
-        view.previewLayer.videoGravity = .resizeAspectFill
+        view.previewLayer.session      = captureSession
+        view.previewLayer.videoGravity  = .resizeAspectFill
+        applyRotation(to: view.previewLayer)
         return view
     }
 
-    func updateUIView(_ uiView: PreviewUIView, context: Context) {}
+    func updateUIView(_ uiView: PreviewUIView, context: Context) {
+        applyRotation(to: uiView.previewLayer)
+    }
+
+    private func applyRotation(to layer: AVCaptureVideoPreviewLayer) {
+        if let connection = layer.connection {
+            let angle = orientation.videoRotationAngle
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+        }
+    }
 
     final class PreviewUIView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }

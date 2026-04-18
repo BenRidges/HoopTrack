@@ -6,6 +6,16 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		AA0000082F7BA90500540240 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 08AAC62E2F7BA90500540240 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 08AAC6352F7BA90500540240;
+			remoteInfo = HoopTrack;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		08AAC6362F7BA90500540240 /* HoopTrack.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HoopTrack.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000012F7BA90500540240 /* HoopTrackTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HoopTrackTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -189,16 +199,6 @@
 		};
 /* End PBXTargetDependency section */
 
-/* Begin PBXContainerItemProxy section */
-		AA0000082F7BA90500540240 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 08AAC62E2F7BA90500540240 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 08AAC6352F7BA90500540240;
-			remoteInfo = HoopTrack;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin XCBuildConfiguration section */
 		08AAC6412F7BA90800540240 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -331,7 +331,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2W79D59953;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = "Info.plist";
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -359,7 +359,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2W79D59953;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = "Info.plist";
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

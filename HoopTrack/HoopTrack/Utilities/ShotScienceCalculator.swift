@@ -6,7 +6,7 @@ import CoreGraphics
 import AVFoundation
 import Vision
 
-enum ShotScienceCalculator {
+nonisolated enum ShotScienceCalculator {
 
     // MARK: - Release Angle
 

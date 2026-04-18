@@ -7,9 +7,9 @@
 import AVFoundation
 import CoreGraphics
 
-final class BallDetectorStub: BallDetectorProtocol {
+nonisolated final class BallDetectorStub: BallDetectorProtocol {
 
-    private var frameCount = 0
+    nonisolated(unsafe) private var frameCount = 0
 
     // One shot arc every 180 frames (3 seconds at 60fps).
     // Ball appears at frame 30, peaks at frame 90, leaves at frame 150.

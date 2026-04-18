@@ -63,4 +63,24 @@ final class CourtZoneClassifierTests: XCTestCase {
     func testJustOutsidePaintX() {
         XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.33, courtY: 0.20), .midRange)
     }
+
+    // Phase 7 — Security: out-of-range inputs must return .midRange (safe default), not crash
+    func testOutOfRange_NaN_returnsMidRange() {
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: Double.nan, courtY: 0.5), .midRange)
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: Double.nan), .midRange)
+    }
+
+    func testOutOfRange_negative_returnsMidRange() {
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: -0.1, courtY: 0.5), .midRange)
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: -0.1), .midRange)
+    }
+
+    func testOutOfRange_greaterThanOne_returnsMidRange() {
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 1.1, courtY: 0.5), .midRange)
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: 1.1), .midRange)
+    }
+
+    func testOutOfRange_infinity_returnsMidRange() {
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: Double.infinity, courtY: 0.5), .midRange)
+    }
 }

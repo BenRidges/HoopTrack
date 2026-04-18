@@ -118,13 +118,16 @@ final class LiveSessionViewModel: ObservableObject {
                  courtX: Double = 0.5,
                  courtY: Double = 0.5) {
         guard let session else { return }
+        // Phase 7 — Security: clamp coordinates to valid half-court range
+        let safeX = InputValidator.isValidCourtCoordinate(courtX) ? courtX : 0.5
+        let safeY = InputValidator.isValidCourtCoordinate(courtY) ? courtY : 0.5
         do {
-            let shot = try dataService.addShot(to: session,
-                                               result: result,
-                                               zone: zone,
-                                               shotType: shotType,
-                                               courtX: courtX,
-                                               courtY: courtY)
+            _ = try dataService.addShot(to: session,
+                                        result: result,
+                                        zone: zone,
+                                        shotType: shotType,
+                                        courtX: safeX,
+                                        courtY: safeY)
             recentShots = Array(session.shots.suffix(5))
             lastShotResult = result
             triggerHaptic(for: result)
@@ -142,13 +145,16 @@ final class LiveSessionViewModel: ObservableObject {
                         courtY: Double,
                         science: ShotScienceMetrics? = nil) {
         guard let session else { return }
+        // Phase 7 — Security: clamp coordinates to valid half-court range
+        let safeX = InputValidator.isValidCourtCoordinate(courtX) ? courtX : 0.5
+        let safeY = InputValidator.isValidCourtCoordinate(courtY) ? courtY : 0.5
         do {
             let shot = try dataService.addShot(to: session,
                                                result: .pending,
                                                zone: zone,
                                                shotType: .unknown,
-                                               courtX: courtX,
-                                               courtY: courtY,
+                                               courtX: safeX,
+                                               courtY: safeY,
                                                science: science)
             pendingShotRecord = shot
             recentShots       = Array(session.shots.suffix(5))
@@ -163,16 +169,19 @@ final class LiveSessionViewModel: ObservableObject {
     /// Updates the pending ShotRecord in place; falls back to a fresh logShot if
     /// no pending record exists (guards against edge-case timing).
     func resolvePendingShot(result: ShotResult, zone: CourtZone, courtX: Double, courtY: Double) {
+        // Phase 7 — Security: clamp coordinates to valid half-court range
+        let safeX = InputValidator.isValidCourtCoordinate(courtX) ? courtX : 0.5
+        let safeY = InputValidator.isValidCourtCoordinate(courtY) ? courtY : 0.5
         guard let pending = pendingShotRecord else {
-            logShot(result: result, zone: zone, courtX: courtX, courtY: courtY)
+            logShot(result: result, zone: zone, courtX: safeX, courtY: safeY)
             return
         }
         do {
             try dataService.resolveShot(pending,
                                         result: result,
                                         zone: zone,
-                                        courtX: courtX,
-                                        courtY: courtY)
+                                        courtX: safeX,
+                                        courtY: safeY)
             pendingShotRecord = nil
             recentShots       = Array(session?.shots.suffix(5) ?? [])
             lastShotResult    = result
