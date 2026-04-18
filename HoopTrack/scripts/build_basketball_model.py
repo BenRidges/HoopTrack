@@ -134,9 +134,18 @@ def main():
     # ── 6. Copy into HoopTrack/ML/ ────────────────────────────────────────────────
     dest = DEST_DIR / f"{DEST_NAME}.mlpackage"
 
-    if dest.exists():
-        print(f"\n♻️  Removing existing model at {dest}")
-        shutil.rmtree(dest)
+    # Remove both possible artifact forms before installing the new one.
+    # Xcode compiles .mlpackage and .mlmodel into the same
+    # BallDetector.mlmodelc — having both in the source tree produces a
+    # 'duplicate output file' build error.
+    for stale in (DEST_DIR / f"{DEST_NAME}.mlpackage",
+                  DEST_DIR / f"{DEST_NAME}.mlmodel"):
+        if stale.exists():
+            print(f"\n♻️  Removing existing model at {stale}")
+            if stale.is_dir():
+                shutil.rmtree(stale)
+            else:
+                stale.unlink()
 
     DEST_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copytree(str(mlpackage_src), str(dest))

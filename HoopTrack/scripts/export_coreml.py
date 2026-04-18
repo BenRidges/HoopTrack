@@ -72,14 +72,20 @@ def main():
 
     print(f"    Exported to: {src}")
 
-    dest = DEST_DIR / f"{DEST_NAME}.{ext}"
-    if dest.exists():
-        print(f"♻️  Removing existing model at {dest}")
-        if dest.is_dir():
-            shutil.rmtree(dest)
-        else:
-            dest.unlink()
+    # Remove both possible artifact forms before installing the new one.
+    # Xcode compiles .mlpackage and .mlmodel into the same
+    # BallDetector.mlmodelc — having both in the source tree produces a
+    # 'duplicate output file' build error.
+    for stale in (DEST_DIR / f"{DEST_NAME}.mlpackage",
+                  DEST_DIR / f"{DEST_NAME}.mlmodel"):
+        if stale.exists():
+            print(f"♻️  Removing existing model at {stale}")
+            if stale.is_dir():
+                shutil.rmtree(stale)
+            else:
+                stale.unlink()
 
+    dest = DEST_DIR / f"{DEST_NAME}.{ext}"
     DEST_DIR.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
         shutil.copytree(str(src), str(dest))
