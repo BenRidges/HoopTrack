@@ -1,25 +1,47 @@
-// Phase 7 — Security (wired to URLSession in Phase 9)
+// Phase 7 — Security (Phase 9: real hashes in place; see note on wiring below)
 import Foundation
 import CryptoKit
 import Security
 
-/// URLSessionDelegate that performs SPKI SHA-256 certificate pinning.
-/// Pin the Supabase/Cloudflare root CA public key, not the leaf cert.
+/// URLSessionDelegate that performs SPKI SHA-256 certificate pinning
+/// against a chain served by `<project>.supabase.co`.
 ///
-/// How to obtain the SPKI hash for a host:
-///   openssl s_client -connect <host>:443 | openssl x509 -pubkey -noout \
-///     | openssl pkey -pubin -outform DER \
-///     | openssl dgst -sha256 -binary | base64
+/// Pin values below are for Google Trust Services certs (ECDSA P-256)
+/// serving the Supabase edge. The primary pin is the **WE1 intermediate**
+/// which rotates ~every 5 years. The leaf is included as a backup.
+/// Both are P-256, so the algorithm-identifier prepend below is valid.
 ///
-/// The placeholder value below MUST be replaced with the real hash before Phase 9 ships.
+/// **Not yet wired into supabase-swift.** The SDK uses its own URLSession
+/// under the hood; routing through this delegate requires constructing a
+/// custom `URLSessionConfiguration` and passing it into AuthClient /
+/// PostgrestClient. Tracked as a P0 in `docs/production-readiness.md`.
+///
+/// Refresh pins via:
+///   echo | openssl s_client -servername <project>.supabase.co \
+///     -connect <project>.supabase.co:443 -showcerts 2>/dev/null \
+///     | awk 'BEGIN{n=0} /BEGIN/{n++; f="/tmp/c"n".pem"} n{print > f}'
+///   for f in /tmp/c*.pem; do
+///     openssl x509 -in "$f" -pubkey -noout \
+///       | openssl pkey -pubin -outform der \
+///       | openssl dgst -sha256 -binary | openssl enc -base64
+///   done
 final class PinningURLSessionDelegate: NSObject, URLSessionDelegate {
 
     // MARK: - Configuration
 
-    /// Base64-encoded SHA-256 hashes of acceptable SPKI DER public keys.
-    /// Replace with real hashes before Phase 9.
+    /// Base64 SHA-256 hashes of the DER-encoded Subject Public Key Info
+    /// (SPKI) structures acceptable for `*.supabase.co` traffic.
+    ///
+    /// Rotation policy: replace before the WE1 intermediate expires
+    /// (check: https://pki.goog). Failing to rotate produces TLS-pinning
+    /// failures on every authenticated request.
     static let pinnedHashes: Set<String> = [
-        "PLACEHOLDER_REPLACE_BEFORE_PHASE9_supabase_spki_sha256"
+        // Primary — GTS WE1 intermediate (ECDSA P-256, stable ~years)
+        "kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4=",
+        // Backup — supabase.co leaf cert (rotates every ~90 days; caller
+        // must refresh this slot with the openssl command above whenever
+        // TLS errors start firing on valid network conditions)
+        "GU2W4j1P24T3sqlI+o6YTnidzz0PI8fB/Gvd2ITfSZE="
     ]
 
     // MARK: - URLSessionDelegate
