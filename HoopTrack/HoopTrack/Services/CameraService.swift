@@ -10,20 +10,6 @@
 import Combine
 import UIKit
 
-/// Orientation mode for the camera output.
-/// Portrait = 90° rotation (device upright). Landscape = 0° (device sideways).
-enum CameraOrientation {
-    case portrait
-    case landscape
-
-    var videoRotationAngle: CGFloat {
-        switch self {
-        case .portrait:  return 90
-        case .landscape: return 0
-        }
-    }
-}
-
 @MainActor
 final class CameraService: NSObject, ObservableObject {
 
@@ -67,14 +53,14 @@ final class CameraService: NSObject, ObservableObject {
 
     // MARK: - Session Configuration
 
-    func configureSession(mode: CameraMode, orientation: CameraOrientation = .portrait) {
+    func configureSession(mode: CameraMode, orientation: CameraOrientation = .landscape) {
         currentMode = mode
         sessionQueue.async { [weak self] in
             self?.buildSession(mode: mode, orientation: orientation)
         }
     }
 
-    nonisolated private func buildSession(mode: CameraMode, orientation: CameraOrientation = .portrait) {
+    nonisolated private func buildSession(mode: CameraMode, orientation: CameraOrientation = .landscape) {
         captureSession.beginConfiguration()
         defer { captureSession.commitConfiguration() }
 
@@ -112,11 +98,14 @@ final class CameraService: NSObject, ObservableObject {
         }
         captureSession.addOutput(videoOutput)
 
-        // Set video rotation for the requested orientation
-        if let connection = videoOutput.connection(with: .video) {
-            let angle = orientation.videoRotationAngle
-            if connection.isVideoRotationAngleSupported(angle) {
-                connection.videoRotationAngle = angle
+        // Rotation must be applied on the main actor (SDK isolation). Safe to
+        // schedule post-commit: frame delivery is still paused until capture
+        // resumes, and the rotation applies to all subsequent frames.
+        let targetAngle = orientation.videoRotationAngle
+        let connection = videoOutput.connection(with: .video)
+        Task { @MainActor in
+            if let connection, connection.isVideoRotationAngleSupported(targetAngle) {
+                connection.videoRotationAngle = targetAngle
             }
         }
     }

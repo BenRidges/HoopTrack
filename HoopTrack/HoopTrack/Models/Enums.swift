@@ -169,7 +169,7 @@ nonisolated enum CameraMode: Sendable {
 
 /// Orientation mode for the camera output.
 /// Portrait = 90° rotation (device upright). Landscape = 0° (device sideways).
-enum CameraOrientation {
+nonisolated enum CameraOrientation: Sendable {
     case portrait
     case landscape
 
