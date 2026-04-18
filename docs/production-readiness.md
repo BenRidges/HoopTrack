@@ -88,10 +88,8 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 
 ### P0 — Blocking
 
-- ⏳ **Real Supabase SPKI SHA-256 hash in `PinningURLSessionDelegate`**
-  - *Current:* `PinningURLSessionDelegate.pinnedHashes` holds a placeholder hash.
-  - *Required:* Fetch the real Supabase TLS cert SPKI SHA-256 (`openssl s_client -connect <project>.supabase.co:443 </dev/null | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64`). Update the array. Include at least one **backup pin** in case Supabase rotates certificates — pin the intermediate CA's SPKI as well.
-  - *Pre-Phase-9 gate* — cert pinning must be live before the backend sync layer ships real user data over the wire.
+- ✅ **Real Supabase SPKI SHA-256 hash in `PinningURLSessionDelegate`** — shipped in Phase 9 (commit `4cbd258`). Primary pin is the GTS WE1 intermediate; backup pin is the supabase.co leaf. Both EC P-256.
+- ⏳ **Wire `PinningURLSessionDelegate` into the supabase-swift URLSession** — NEW. The delegate has real hashes but is not yet routed to; supabase-swift uses its own default `URLSession`. Construct a custom `URLSessionConfiguration` and pass it into `AuthClient.Configuration` + `PostgrestClient` init. Without this, the pin hashes are scenery — TLS still validates via system trust only.
 
 - ⏳ **Privacy manifest audit for all SPM dependencies**
   - *Current:* `PrivacyInfo.xcprivacy` declares our first-party data categories from Phase 7.
@@ -142,19 +140,14 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 
 ### P0 — Blocking (once Phase 9 begins)
 
-- ⏳ **Postgres schema + RLS policies**
-  - DDL for `player_profiles`, `training_sessions`, `shot_records`, `goal_records`, `earned_badges`.
-  - Per-table RLS keyed on `auth.uid()` (matches `PlayerProfile.supabaseUserID` which Phase 8 already persists).
-  - `shot_records` append-only at the DB level (no DELETE policy).
-
-- ⏳ **`cloudSyncedAt: Date?` on synced models**
-  - SwiftData `HoopTrackSchemaV4` lightweight migration. Used for last-write-wins conflict resolution.
-
-- ⏳ **Conflict resolution logic tested**
-  - Scalar fields: LWW by `updatedAt`. `shot_records`: set-union (no shots ever dropped). Documented behaviour + tests for each collision case.
-
+- ✅ **Postgres schema + RLS policies** — shipped in Phase 9. Five tables, 16 RLS policies keyed on `auth.uid()`, `shot_records` is append-only.
+- ✅ **`cloudSyncedAt: Date?` on synced models** — shipped in Phase 9 as additive nullable field. No migration plan required.
+- ⏳ **Conflict resolution logic tested** — NOT YET. Current Phase 9 is upload-only. Scalar LWW by `updated_at` (server-set via trigger) and set-union on `shot_records` happen automatically in the DB, but the *client* doesn't yet read back / reconcile. Lands with Phase 9.5 when cross-device restore ships.
+- ⏳ **`InitialSyncCoordinator`** — NEW. Users upgrading from pre-Phase-9 builds have local-only history. Needs a one-shot batch-upload pass on first authenticated launch.
 - ⏳ **Config.xcconfig or similar for separate dev / staging / prod projects**
+  - *Current:* Single project (`nfzhqcgofuohsjhtxvqa`), shared between dev testing and any future prod traffic.
   - *Recommended:* Three Supabase projects. Xcode build configuration selects which URL + anon key baked in. Avoids a dev-only database with prod data.
+- ⏳ **Stable enum export keys** — NEW. DTOs today serialize enum `rawValue` (display strings like "Free Shoot", "Mid-Range", "Make"). A UI relabel would create schema mismatch with existing Postgres rows. Introduce stable codes on `DrillType`, `ShotResult`, `ShotType`, `SkillDimension`, `GoalMetric` analogous to the existing `CourtZone.exportKey` pattern, then use those in DTOs.
 
 ### P1 — High
 

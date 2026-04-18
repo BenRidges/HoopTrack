@@ -19,8 +19,8 @@
 | 6B | UI Polish, Refactor & Extension Report | ✅ Complete |
 | 7 | Security & Privacy | ✅ Complete |
 | 8 | Authentication & Identity | ✅ Complete |
-| 9 | Backend & Database | 🔜 Next |
-| 10 | File & Media Storage | 🔜 Planned |
+| 9 | Backend & Database | ✅ Complete |
+| 10 | File & Media Storage | 🔜 Next |
 | 11 | Accessibility | 🔜 Planned |
 | 12 | Web Presence | 🔜 Planned |
 | CV | CV Detection v2 (parallel track) | 🔜 Ready to start (Phase A) |
@@ -131,6 +131,48 @@ Supabase email + password auth with biometric re-lock. **Sign in with Apple deli
 - `PlayerProfile.supabaseUserID` is set on every successful sign-in and is the canonical key for RLS `auth.uid()` matching.
 - `SupabaseContainer.auth` is a standalone `AuthClient` — Phase 9 will compose it with `PostgREST` and `Storage` into a richer wrapper.
 - `PinningURLSessionDelegate.pinnedHashes` still holds a placeholder SPKI SHA-256; must be replaced with the real Supabase hash before Phase 9 ships.
+
+### Phase 9 — Backend & Database
+Cloud sync turned on. Every session, shot, goal, and badge mirrors into Supabase Postgres after local save. Row Level Security per-table on `auth.uid()`. Fire-and-forget pattern so network failure never blocks local UX.
+
+**Schema + RLS shipped to main Supabase project (`nfzhqcgofuohsjhtxvqa`):**
+- `player_profiles` — 22 cols, PK on `user_id`. R/W own row.
+- `training_sessions` — 28 cols, R/W/D own rows. `video_file_name` deliberately omitted (device-local path, meaningless server-side).
+- `shot_records` — **append-only** (RLS has select + insert policies only; no update/delete). Indexed on `(user_id, timestamp)` and `(session_id)`.
+- `goal_records` — full CRUD on own rows.
+- `earned_badges` — unique constraint `(user_id, badge_id)`; full CRUD except delete.
+- 16 RLS policies total, all keyed on `auth.uid()`.
+- Shared `handle_updated_at` trigger maintains `updated_at` on the 4 mutable tables.
+
+**New files:**
+- `HoopTrack/Models/` — added `cloudSyncedAt: Date?` to PlayerProfile, TrainingSession, ShotRecord, GoalRecord, EarnedBadge
+- `HoopTrack/Sync/SupabaseDataServiceProtocol.swift` — write-only CRUD protocol
+- `HoopTrack/Sync/SupabaseDataService.swift` — PostgREST implementation
+- `HoopTrack/Sync/SyncCoordinator.swift` — orchestrates uploads, stamps `cloudSyncedAt` on success
+- `HoopTrack/Sync/DTOs/` — 5 Codable row mirrors (PlayerProfileDTO, TrainingSessionDTO, ShotRecordDTO, GoalRecordDTO, EarnedBadgeDTO) with snake_case CodingKeys
+- `HoopTrackTests/Mocks/MockSupabaseDataService.swift` — in-memory stub with call recorders
+- `HoopTrackTests/Sync/SupabaseDataServiceDTOTests.swift` — 7 DTO round-trip tests
+- `HoopTrackTests/Sync/SyncCoordinatorTests.swift` — 8 orchestration tests
+
+**Modified files:**
+- `HoopTrack/Auth/SupabaseClient+Shared.swift` — added `SupabaseContainer.postgrest()` that builds a fresh PostgrestClient per call with the current JWT
+- `HoopTrack/Services/SessionFinalizationCoordinator.swift` — step 8 `kickOffSync(session:profile:)` fires after every shooting/dribble/agility finalize. Skips if no coordinator injected, no signed-in user, `endedAt == nil`, or `durationSeconds < 30`.
+- `HoopTrack/CoordinatorHost.swift` — builds and injects `SyncCoordinator` into the finalization coordinator
+- `HoopTrack/Utilities/PinningURLSessionDelegate.swift` — replaced placeholder SPKI hash with live Supabase values (Google Trust Services WE1 intermediate + supabase.co leaf, both EC P-256)
+
+**External dependencies:** `supabase-swift` `PostgREST` product (added in Phase 8, consumed here for the first time).
+
+**Tests added:** 7 DTO + 8 SyncCoordinator = 15 new. Full suite: **199 tests**, 1 skipped, 0 failures, 0 warnings.
+
+**Deferred to Phase 9.5:**
+- `InitialSyncCoordinator` — batch-upload existing local history for users upgrading from pre-Phase-9 builds (current sync starts from the NEXT session).
+- Cross-device restore path — fetch rows back down from Supabase on a fresh device.
+- Hasura GraphQL, Supabase Edge Functions, Realtime.
+- Wiring `PinningURLSessionDelegate` into the supabase-swift URLSession (currently the delegate has real hashes but isn't routed to; flagged P0 in production-readiness).
+- Stable enum export keys — DTOs today use display-string `rawValue`s (e.g. "Free Shoot"); a renumber of those labels would break old rows.
+
+**Notes for Phase 10:**
+- Video file columns are intentionally absent from `training_sessions` — Phase 10 will introduce Supabase Storage URLs for pinned sessions only.
 
 ---
 
