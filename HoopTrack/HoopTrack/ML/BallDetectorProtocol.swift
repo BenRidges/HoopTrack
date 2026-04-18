@@ -3,7 +3,7 @@ import AVFoundation
 import CoreGraphics
 
 /// A single ball detection result from one camera frame.
-struct BallDetection: Sendable {
+nonisolated struct BallDetection: Sendable {
     /// Bounding box in Vision normalised coordinates: origin bottom-left, 0–1 range.
     let boundingBox: CGRect
     /// Model confidence score 0–1.
@@ -14,6 +14,6 @@ struct BallDetection: Sendable {
 
 /// Protocol that both the real Core ML wrapper and the debug stub conform to.
 /// Kept on the background session queue — must NOT touch the main actor.
-protocol BallDetectorProtocol: Sendable {
+nonisolated protocol BallDetectorProtocol: Sendable {
     func detect(buffer: CMSampleBuffer) -> BallDetection?
 }

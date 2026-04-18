@@ -160,7 +160,7 @@ enum SkillDimension: String, Codable, CaseIterable, Identifiable {
 
 // MARK: - Camera Mode
 
-enum CameraMode: Sendable {
+nonisolated enum CameraMode: Sendable {
     case rear    // Shot tracking (default)
     case front   // Dribble drills (front camera, phone on floor)
 }
