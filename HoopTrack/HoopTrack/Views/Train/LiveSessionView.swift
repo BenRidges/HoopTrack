@@ -42,7 +42,8 @@ struct LiveSessionView: View {
                 // MARK: Camera Area (~80%)
                 ZStack {
                     CameraPreviewView(captureSession: cameraService.captureSession,
-                                      orientation: .landscape)
+                                      orientation: .landscape,
+                                      isSessionRunning: cameraService.isSessionRunning)
                         .ignoresSafeArea()
 
                     // Camera permission overlay
@@ -558,6 +559,10 @@ struct CameraPreviewView: UIViewRepresentable {
 
     let captureSession: AVCaptureSession
     var orientation: CameraOrientation = .landscape
+    /// Observed so updateUIView re-fires when the session actually starts
+    /// running. The preview layer's connection is nil until then, so rotation
+    /// applied in makeUIView is a no-op.
+    var isSessionRunning: Bool = false
 
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView()

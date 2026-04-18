@@ -57,7 +57,19 @@ final class CameraService: NSObject, ObservableObject {
         currentMode = mode
         sessionQueue.async { [weak self] in
             self?.buildSession(mode: mode, orientation: orientation)
+            Task { @MainActor [weak self] in
+                self?.applyVideoOutputRotation(orientation: orientation)
+            }
         }
+    }
+
+    /// Rotation setters on AVCaptureConnection are declared @MainActor in the SDK.
+    /// Called after buildSession completes on sessionQueue so the connection exists.
+    private func applyVideoOutputRotation(orientation: CameraOrientation) {
+        let angle = orientation.videoRotationAngle
+        guard let connection = videoOutput.connection(with: .video),
+              connection.isVideoRotationAngleSupported(angle) else { return }
+        connection.videoRotationAngle = angle
     }
 
     nonisolated private func buildSession(mode: CameraMode, orientation: CameraOrientation = .landscape) {
@@ -98,16 +110,8 @@ final class CameraService: NSObject, ObservableObject {
         }
         captureSession.addOutput(videoOutput)
 
-        // Rotation must be applied on the main actor (SDK isolation). Safe to
-        // schedule post-commit: frame delivery is still paused until capture
-        // resumes, and the rotation applies to all subsequent frames.
-        let targetAngle = orientation.videoRotationAngle
-        let connection = videoOutput.connection(with: .video)
-        Task { @MainActor in
-            if let connection, connection.isVideoRotationAngleSupported(targetAngle) {
-                connection.videoRotationAngle = targetAngle
-            }
-        }
+        // Rotation is applied from configureSession after the sessionQueue
+        // build completes, on the main actor — see applyVideoOutputRotation.
     }
 
     nonisolated private func configureFPS(device: AVCaptureDevice, fps: Double) {
