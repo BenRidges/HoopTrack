@@ -439,6 +439,13 @@ enum Telemetry {
     // Paths
     static let telemetryDirectoryName = "Telemetry"
     static let supabaseBucketName = "telemetry-sessions"
+
+    // Dataset targets — informational, used by future dev tooling to
+    // display progress ("you're at X / 2000 frames"). Not enforced at
+    // runtime. Tune here rather than editing the spec prose when your
+    // sense of what's enough shifts.
+    static let retrainTargetFrames: Int = 2000
+    static let retrainTargetSessions: Int = 10
 }
 ```
 
@@ -476,10 +483,10 @@ Intentionally deferred to implementation or follow-up work:
 
 1. **Audio capture**. Reference spec §A2 mentions a synchronized mic recording. CV-E (audio classifier) is multiple hops away. Design accommodates adding `audio_clip.m4a` per session later without schema changes.
 2. **Remote dataset puller + labeling dashboard**. How uploaded telemetry gets pulled, triaged, and handed to the Grounding DINO autolabel pipeline at `hooptrack-ball-detection/autolabel/`. Likely a Python script using Supabase service-role credentials. Not CV-A's job.
-3. **When to trigger the next CV-B retrain**. Reference spec gates CV-B on ≥ 2k frames × ≥ 20 sessions. We'll eyeball via Supabase Studio; no code path needed.
+3. **When to trigger the next CV-B retrain.** Target is ~10 diverse sessions producing ≥ `HoopTrack.Telemetry.retrainTargetFrames` (2000) usable frames. "Diverse" = variance across lighting (indoor vs outdoor vs evening), court, phone position (distance / angle / height), and shot selection (baseline 3s vs layups vs free throws). 10 same-gym same-lighting sessions is not 10 scenarios for training purposes. Eyeball the Supabase bucket when you've covered 3+ scenarios on each axis. Both target numbers live in `HoopTrack.Telemetry` so they can be tuned without spec edits.
 4. **Game-mode privacy**. SP1 game sessions include other players' torsos in the recorded video (and therefore in uploaded frames). Dev-only scope means this is acceptable for now — flagged in `docs/production-readiness.md`. Resolution before App Store: per-player consent + face blurring, or opt-in.
 5. **CV-C integration detail**. When CV-C merges, `detections.jsonl` should add smoothed-track samples in addition to raw detection. Additive change to the JSONL schema; doesn't break CV-A first cut.
-6. **Retention-bucket TTL in Supabase**. No lifecycle policy defined in this spec — uploaded objects stay indefinitely. Revisit once the bucket starts costing real money.
+6. **Retention strategy — staging-area pattern.** The Supabase `telemetry-sessions` bucket is a **transit layer, not an archive**. Uploaded sessions stay until pulled down by a manual/scheduled Python puller in `hooptrack-ball-detection/` (see `TELEMETRY_PULLER.md`), which saves frames locally for offline autolabeling + retraining, then deletes from the bucket. With this pattern the bucket stays near-empty and the free-tier 1 GB ceiling is a non-issue. The puller script itself is CV-A-adjacent but lives outside this spec — tracked as a production-readiness item for when actual dataset assembly kicks off.
 
 ---
 

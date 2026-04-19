@@ -216,6 +216,30 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 
 ---
 
+## CV-A Telemetry (unreleased, dev-only today)
+
+### P0 — Blocking
+
+- ⏳ **Gate or remove CV-A telemetry before App Store submission**
+  - *Current:* CV-A captures sampled frames + detection metadata from every session and uploads to Supabase Storage with no consent, no runtime gate, no UI. Acceptable for a single-dev pre-release project.
+  - *Required for submission:* Either (a) compile CV-A out entirely behind a build flag for Release builds, (b) convert to opt-in with an explicit consent screen under Profile → Privacy ("Help improve shot detection" toggle, default OFF), or (c) add a Supabase user-ID allowlist that disables telemetry for non-dev accounts. Option (b) matches Apple's telemetry-opt-in norms; (c) is lowest-friction if dev-testing is still ongoing at submission time.
+
+- ⏳ **Game-mode privacy for telemetry-captured frames**
+  - *Current:* SP1 game sessions record 2v2/3v3 play to the local `.mov`, from which CV-A samples frames that include other players' torsos/faces. Uploaded to Supabase under the owner's user ID with no consent from the other participants.
+  - *Required for submission:* Either per-participant consent during `GameRegistrationView` that covers "your likeness may be uploaded to improve shot detection", or face-blurring applied to sampled frames before upload (Vision face detection + CIFilter Gaussian blur), or CV-A simply disabled during game-mode sessions.
+
+### P1 — High
+
+- ⏳ **Telemetry dataset puller**
+  - *Current:* `hooptrack-ball-detection/TELEMETRY_PULLER.md` describes the intended Python script. Not implemented.
+  - *Required before regular dog-fooding:* Build the puller so uploaded sessions drain to local disk and the Supabase bucket stays near-empty. Without it the bucket hits the free-tier 1 GB ceiling at ~33 sessions.
+
+- ⏳ **Supabase Storage cost revisit**
+  - *Current:* Free tier is fine at dev volumes with the staging-area pattern (bucket is transit-only, puller empties it).
+  - *Revisit trigger:* If the app ever ships with CV-A active for multiple users, re-evaluate bucket size + egress against Supabase Pro pricing. At that point the staging pattern may need to become a push-then-process pipeline instead of push-then-pull.
+
+---
+
 ## Open Questions
 
 Decisions to make before or during each phase:
