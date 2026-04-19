@@ -1,7 +1,7 @@
 # HoopTrack — Implementation Roadmap
 
 **Last updated:** 2026-04-19  
-**Status:** Phases 1–12 complete. Game Mode parallel track opened — SP1 Foundation shipped (data models, appearance capture, registration flow, manual-scoring live game). CV Detection v2 parallel track still open; Phase CV-A ready to start.
+**Status:** Phases 1–12 complete. Game Mode parallel track: SP1 Foundation shipped. CV Detection v2 parallel track: CV-A Telemetry Foundation code-complete (pending device QA); CV-C Tracking Layer spec + plan ready for execution.
 
 ---
 
@@ -280,7 +280,7 @@ Six sub-phases. Phase A is the only one with zero upstream dependency and gates 
 
 | Sub-phase | Name | Depends on | Status |
 |---|---|---|---|
-| CV-A | Telemetry Foundation | none (uses existing `CVPipeline`, `DataService`) | 🔜 Ready to start |
+| CV-A | Telemetry Foundation | none (uses existing `CVPipeline`, `DataService`) | 🟡 Code-complete, device QA pending |
 | CV-B | Detector v2 (multi-class retrain) | CV-A (≥ 2k labeled frames from real sessions) | Blocked on CV-A data |
 | CV-C | Tracking Layer (Kalman) | none — can run in parallel with CV-B | Independent |
 | CV-D | Make/Miss v2 (homography + net-motion) | CV-B + CV-C | Blocked on CV-B, CV-C |
