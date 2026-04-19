@@ -1,7 +1,7 @@
 # HoopTrack — Implementation Roadmap
 
-**Last updated:** 2026-04-18  
-**Status:** End of Phase 7 (security & privacy hardened; ready for authentication work). BallDetector v1 shipped (yolov8s, mAP50 0.988) — CV Detection v2 parallel track opened; Phase CV-A ready to start.
+**Last updated:** 2026-04-19  
+**Status:** Phases 1–12 complete. Game Mode parallel track opened — SP1 Foundation shipped (data models, appearance capture, registration flow, manual-scoring live game). CV Detection v2 parallel track still open; Phase CV-A ready to start.
 
 ---
 
@@ -24,7 +24,8 @@
 | 11 | Accessibility | ✅ Complete |
 | 12 | Web Presence | ✅ Complete |
 | CV | CV Detection v2 (parallel track) | 🔜 Ready to start (Phase A) |
-| 13 | Multiplayer Sessions | 🔮 Future |
+| Game | Game Mode Features (parallel track — 4 sub-phases) | 🟡 In progress (SP1 ✅, SP2–SP4 planned) |
+| 13 | Multiplayer Sessions (superseded by Game track) | 🗄️ Deprecated |
 | 14 | Web Dashboard | 🔮 Future |
 | 15 | Coach Review Mode | 🔮 Future |
 | 16 | Teams & Organisations | 🔮 Future |
@@ -346,11 +347,75 @@ See [upgrade-cv-detection.md](upgrade-cv-detection.md) for full task breakdowns.
 
 ---
 
+## Game Mode Track (parallel)
+
+### Game Track — Overview
+
+A 4-sub-phase track replacing the original Phase 13 "Multiplayer Sessions" placeholder. Scope and sequencing defined in:
+
+- [Master Plan](../HoopTrack/docs/superpowers/specs/2026-04-19-game-mode-master-plan.md) — cross-cutting concerns, dependency graph, risk register
+- [SP1 Foundation Design](../HoopTrack/docs/superpowers/specs/2026-04-19-game-foundation-design.md)
+- [SP2 Scoring & Box Score Design](../HoopTrack/docs/superpowers/specs/2026-04-19-game-scoring-design.md)
+- [SP3 BO7 Playoff Design](../HoopTrack/docs/superpowers/specs/2026-04-19-game-playoff-design.md)
+- [SP4 Live Commentary Design](../HoopTrack/docs/superpowers/specs/2026-04-19-game-commentary-design.md)
+
+Recommended sequence: **SP1 → (SP2 ∥ SP4) → SP3**. SP4 has no hard dep on SP1 and can ship "lite" mode for solo training sessions.
+
+### Game — SP1 Foundation ✅
+Data-model layer + registration flow + manual-scoring live game. Landed 2026-04-19.
+
+**New models (SwiftData, all local-only, no Supabase sync):**
+- `GamePlayer` — session-scoped; carries a JSON-encoded `AppearanceDescriptor`; cascade-deleted with parent
+- `GameSession` — sibling to `TrainingSession`; stores team scores, player roster, shot list, optional video
+- `GameShotRecord` — sibling to `ShotRecord`; carries `shooter: GamePlayer?` + `attributionConfidence`
+
+**New services / VMs:**
+- `AppearanceExtraction` — pure helpers (chi-squared histogram, upper-body box, height ratio). TDD'd.
+- `AppearanceCaptureService` — ingests camera frames via Vision `VNDetectHumanBodyPoseRequest`, emits `AppearanceDescriptor` after 3s high-confidence body lock
+- `GameRegistrationViewModel` — `nonisolated` state machine tracking registration progress (avoids a Swift `__deallocating_deinit` back-deploy crash that hits `@MainActor` VMs under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`)
+- `GameSessionViewModel` — SP1 shell; exposes `logShot()` + `endSession()`. SP2 replaces manual path with CV attribution.
+
+**New views (`HoopTrack/Views/Game/`):**
+- `GameConsentView` — plain-language consent before camera activates (biometric-adjacent data notice)
+- `GameRegistrationView` — landscape camera + lock-progress ring + name-entry sheet
+- `TeamAssignmentView` — tap-toggle chips, auto-alternates on entry
+- `LiveGameView` — SP1 shell with scoreboard + player picker + manual Miss/2PT/3PT buttons
+- `GameSummaryView` — SP1 stub: final scores, player list, duration (full box score in SP2)
+- `GameFlowContainer` — orchestrates consent → registration → team → live → summary steps
+- `GameEntryCard` — top-of-Train-tab entry point with 2v2/3v3 picker
+
+**Modified:**
+- `Models/Enums.swift` — added `GameType`, `GameState`, `TeamAssignment`, `GameShotType`, `GameFormat`
+- `HoopTrackApp.swift` — 3 new `@Model` types registered with the `ModelContainer`
+- `Services/DataService.swift` — `addGameShot()` with team-score credit; `purgeOldVideos` extended to `GameSession`; `modelContext` exposed internally
+- `Views/Train/TrainTabView.swift` — new `GameEntryCard` above drill grid + `fullScreenCover` for the game flow
+- `Views/Progress/ProgressTabView.swift` — new `RecentGamesSection` at the bottom showing last 5 games
+- `Utilities/Constants.swift` — added `HoopTrack.Game` block (lock duration, body-confidence threshold, histogram bins, etc.)
+- `PrivacyInfo.xcprivacy` — declared appearance-descriptor capture as `OtherDiagnosticData` (session-scoped, on-device only, never transmitted)
+
+**Tests added:** `AppearanceDescriptorTests` (4), `AppearanceExtractionTests` (4), `GameRegistrationViewModelTests` (5), `GameModelTests` (3 — SwiftData insert / cascade / descriptor round-trip). Full suite: 209 tests, 0 failures.
+
+**Notable deviations from original spec:**
+- No `AppRoute` enum added — codebase routes via local `fullScreenCover` + state, not a centralised enum
+- `ProgressTabView` got a dedicated `RecentGamesSection` at the bottom instead of inline merging with training history (the file is an analytics dashboard, not a history list)
+- Renamed `ShotType` → `GameShotType` to avoid colliding with the existing `ShotType` enum (catch-and-shoot / pull-up / etc)
+
+### Game — SP2 Scoring & Box Score 🔜 Planned
+See [SP2 design spec](../HoopTrack/docs/superpowers/specs/2026-04-19-game-scoring-design.md). Builds `PlayerTracker` (appearance-matching re-ID), `GameScoringCoordinator`, full `LiveGameView` with killfeed + player overlays, post-game box score + unresolved-shots flow.
+
+### Game — SP3 BO7 Playoff 🔜 Planned (after SP2)
+See [SP3 design spec](../HoopTrack/docs/superpowers/specs/2026-04-19-game-playoff-design.md). `PlayoffSeries` state machine, round thresholds (40/50/60/70%), `WeakZoneAnalyser`, prescribed-drill generation, mid-series resume.
+
+### Game — SP4 Live Commentary 🔜 Planned (can run parallel to SP2)
+See [SP4 design spec](../HoopTrack/docs/superpowers/specs/2026-04-19-game-commentary-design.md). `CommentaryEventBus`, clip-selection engine (intensity + anti-rep + pacing), 2 personalities at launch. Works with solo training in "lite" mode.
+
+---
+
 ## Future Extension Phases
 
 ---
 
-### Phase 13 — Multiplayer Sessions
+### Phase 13 — Multiplayer Sessions (deprecated — see Game Mode track above)
 **Prerequisite:** Phase 9 (Supabase Realtime).  
 **Reference:** `docs/extension-multiplayer-sessions.md`
 
