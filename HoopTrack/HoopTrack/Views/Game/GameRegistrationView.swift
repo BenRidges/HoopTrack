@@ -21,12 +21,13 @@ struct GameRegistrationView: View {
     @State private var pendingDescriptorBlob: Data?
     @State private var showNameSheet = false
     @State private var frameSubscription: AnyCancellable?
+    @State private var deviceOrientation: UIDeviceOrientation = UIDevice.current.orientation
 
     var body: some View {
         ZStack {
             CameraPreviewView(
                 captureSession: cameraService.captureSession,
-                orientation: .landscape,
+                orientation: CameraOrientation.matching(deviceOrientation),
                 isSessionRunning: cameraService.isSessionRunning
             )
             .ignoresSafeArea()
@@ -95,6 +96,18 @@ struct GameRegistrationView: View {
                     let orientation = visionOrientationForCurrentDevice()
                     captureService.ingest(sampleBuffer: buffer, orientation: orientation)
                 }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIDevice.orientationDidChangeNotification
+        )) { _ in
+            let current = UIDevice.current.orientation
+            // Ignore face-up / face-down / unknown — keep the last real value.
+            switch current {
+            case .portrait, .portraitUpsideDown, .landscapeLeft, .landscapeRight:
+                deviceOrientation = current
+            default:
+                break
+            }
         }
         .onDisappear {
             frameSubscription?.cancel()

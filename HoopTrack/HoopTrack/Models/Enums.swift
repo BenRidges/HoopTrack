@@ -3,6 +3,7 @@
 // Adding a new variant here is the single-source change needed for the whole app.
 
 import Foundation
+import UIKit
 
 // MARK: - Drill / Session Types
 
@@ -171,12 +172,30 @@ nonisolated enum CameraMode: Sendable {
 /// Portrait = 90° rotation (device upright). Landscape = 0° (device sideways).
 nonisolated enum CameraOrientation: Sendable {
     case portrait
-    case landscape
+    case portraitUpsideDown
+    case landscape          // sensor-native for rear camera (matches UIDeviceOrientation.landscapeLeft)
+    case landscapeRight     // 180° rotated — opposite landscape hold
 
     var videoRotationAngle: CGFloat {
         switch self {
-        case .portrait:  return 90
-        case .landscape: return 0
+        case .portrait:           return 90
+        case .portraitUpsideDown: return 270
+        case .landscape:          return 0
+        case .landscapeRight:     return 180
+        }
+    }
+
+    /// Map a live UIDevice orientation to the matching camera rotation so the
+    /// preview visually tracks the phone. Falls back to `.portrait` when the
+    /// device reports an ambiguous orientation (face-up, face-down, unknown).
+    @MainActor
+    static func matching(_ device: UIDeviceOrientation) -> CameraOrientation {
+        switch device {
+        case .portrait:           return .portrait
+        case .portraitUpsideDown: return .portraitUpsideDown
+        case .landscapeLeft:      return .landscape
+        case .landscapeRight:     return .landscapeRight
+        default:                  return .portrait
         }
     }
 }
