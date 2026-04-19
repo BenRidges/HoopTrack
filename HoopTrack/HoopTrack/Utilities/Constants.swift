@@ -30,6 +30,11 @@ nonisolated enum HoopTrack {
         /// Classes: ball, human, rim. Pipeline filters by substring so "ball"
         /// is the ball class and "rim" is queried separately in CoreMLBallDetector.
         static let customTargetLabel = "ball"
+
+        /// Human-readable version string written into telemetry manifests so
+        /// future retrains can correlate data with the model that was in use.
+        /// Update whenever BallDetector.mlmodel is retrained/replaced.
+        static let modelVersion = "BallDetector-yolo11m-2026-04-19"
     }
 
     // MARK: - Court Geometry (normalised 0–1 half-court space)
@@ -172,6 +177,40 @@ nonisolated enum HoopTrack {
 
         /// AppearanceDescriptor schema version — bump on breaking field changes.
         static let appearanceDescriptorSchemaVersion: Int = 1
+    }
+
+    // MARK: - Telemetry (CV-A)
+    enum Telemetry {
+        // Sampling
+        static let baselineSampleFPS: Double = 1.0
+        static let aroundShotPreFrames: Int = 10
+        static let aroundShotPostFrames: Int = 10
+        static let flickerThresholdHigh: Double = 0.6
+        static let flickerThresholdLow: Double = 0.3
+        static let flickerMinConsecutiveFrames: Int = 3
+        static let boundaryFrames: Int = 5
+
+        // Caps
+        static let maxFramesPerSession: Int = 1000
+        static let frameMaxLongestEdgePx: Int = 960
+        static let frameJpegQuality: CGFloat = 0.7
+
+        // Session eligibility
+        static let minSessionDurationSec: Double = 30.0
+
+        // Upload
+        static let maxUploadAttempts: Int = 5
+        static let concurrentFrameUploads: Int = 4
+        static let uploadRequestTimeoutSec: TimeInterval = 60
+
+        // Paths
+        static let telemetryDirectoryName = "Telemetry"
+        static let supabaseBucketName = "telemetry-sessions"
+
+        // Dataset targets — informational, used by future dev tooling.
+        // Not enforced at runtime.
+        static let retrainTargetFrames: Int = 2000
+        static let retrainTargetSessions: Int = 10
     }
 
     // MARK: - Performance Targets

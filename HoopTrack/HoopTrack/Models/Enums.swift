@@ -245,3 +245,21 @@ enum GameFormat: Int, Codable, CaseIterable, Identifiable {
     }
     var totalPlayers: Int { rawValue * 2 }
 }
+
+// MARK: - Telemetry (CV-A)
+
+/// Lifecycle of a telemetry upload for one session. Used by `TelemetryUpload.state`.
+enum UploadState: String, Codable {
+    case pending
+    case uploading
+    case uploaded
+    case failed
+    case abandoned
+}
+
+/// Which session model the telemetry row refers to. Avoids a table split
+/// when looking back at the original session.
+enum SessionKind: String, Codable {
+    case training
+    case game
+}
