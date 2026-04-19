@@ -124,40 +124,31 @@ struct GameRegistrationView: View {
             }
         }
         .sheet(isPresented: $showNameSheet) {
-            NavigationStack {
-                Form {
-                    Section("Name") {
-                        TextField("Player name", text: $pendingName)
-                            .textInputAutocapitalization(.words)
+            NameConfirmSheet(
+                playerNumber: viewModel.currentPlayerIndex + 1,
+                totalPlayers: viewModel.totalPlayers,
+                name: $pendingName,
+                onRetake: {
+                    pendingName = ""
+                    pendingDescriptorBlob = nil
+                    showNameSheet = false
+                    captureService.reset()
+                },
+                onConfirm: {
+                    if let blob = pendingDescriptorBlob, !pendingName.isEmpty {
+                        viewModel.confirmPlayer(name: pendingName, descriptor: blob)
+                    }
+                    pendingName = ""
+                    pendingDescriptorBlob = nil
+                    showNameSheet = false
+                    captureService.reset()
+                    if viewModel.isComplete {
+                        onComplete(viewModel.pendingPlayers)
                     }
                 }
-                .navigationTitle("Confirm player")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Retake") {
-                            pendingName = ""
-                            pendingDescriptorBlob = nil
-                            showNameSheet = false
-                            captureService.reset()
-                        }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Confirm") {
-                            if let blob = pendingDescriptorBlob, !pendingName.isEmpty {
-                                viewModel.confirmPlayer(name: pendingName, descriptor: blob)
-                            }
-                            pendingName = ""
-                            pendingDescriptorBlob = nil
-                            showNameSheet = false
-                            captureService.reset()
-                            if viewModel.isComplete {
-                                onComplete(viewModel.pendingPlayers)
-                            }
-                        }
-                        .disabled(pendingName.isEmpty)
-                    }
-                }
-            }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -181,6 +172,106 @@ struct GameRegistrationView: View {
         case .portrait:            return .right     // 90° CW from sensor-native
         case .portraitUpsideDown:  return .left      // 90° CCW from sensor-native
         default:                   return .right     // face-up / face-down / unknown → safe portrait default
+        }
+    }
+}
+
+// MARK: - Name confirmation sheet
+
+private struct NameConfirmSheet: View {
+    let playerNumber: Int
+    let totalPlayers: Int
+    @Binding var name: String
+    let onRetake: () -> Void
+    let onConfirm: () -> Void
+
+    @FocusState private var nameFocused: Bool
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canConfirm: Bool { !trimmedName.isEmpty }
+
+    var body: some View {
+        VStack(spacing: 22) {
+            // Capture-success badge
+            ZStack {
+                Circle()
+                    .fill(Color.orange.opacity(0.15))
+                    .frame(width: 80, height: 80)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(.orange)
+            }
+            .padding(.top, 8)
+
+            VStack(spacing: 4) {
+                Text("Got you")
+                    .font(.title2.bold())
+                Text("Player \(playerNumber) of \(totalPlayers)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Name entry — large, centred, autofocus, submit on return
+            TextField("Enter name", text: $name)
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .focused($nameFocused)
+                .padding(.vertical, 14)
+                .padding(.horizontal, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.quaternary)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(nameFocused ? Color.orange : .clear, lineWidth: 1.5)
+                )
+                .padding(.horizontal, 24)
+                .onSubmit {
+                    if canConfirm { onConfirm() }
+                }
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 10) {
+                Button(action: { if canConfirm { onConfirm() } }) {
+                    Text("Confirm")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(canConfirm ? Color.orange : Color.secondary.opacity(0.25))
+                        )
+                        .foregroundStyle(.white)
+                }
+                .disabled(!canConfirm)
+
+                Button(action: onRetake) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text("Retake")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
+        }
+        .padding(.top, 20)
+        .onAppear {
+            // Autofocus a beat after present so the keyboard animation doesn't fight the sheet
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                nameFocused = true
+            }
         }
     }
 }
