@@ -35,6 +35,10 @@ nonisolated final class CVPipeline {
     nonisolated(unsafe) private var pipelineState: PipelineState = .idle
     nonisolated(unsafe) private var frameCancellable: AnyCancellable?
 
+    // MARK: - Telemetry (CV-A)
+    nonisolated(unsafe) private var detectionLogger: DetectionLogger?
+    nonisolated(unsafe) private var sessionStartCMTime: CMTime = .zero
+
     // Tracking: if no ball seen for 0.3s, return to IDLE
     nonisolated(unsafe) private var lastDetectionTimestamp: CMTime = .zero
     private let trackingTimeoutSec: Double = 0.3
@@ -68,6 +72,23 @@ nonisolated final class CVPipeline {
         frameCancellable?.cancel()
         frameCancellable = nil
         pipelineState = .idle
+        detectionLogger?.close()
+        detectionLogger = nil
+        sessionStartCMTime = .zero
+    }
+
+    /// Attach a DetectionLogger for the duration of the session. Called by
+    /// LiveSessionView at session start; detached by `stop()`.
+    func attachTelemetry(logger: DetectionLogger) {
+        self.detectionLogger = logger
+        self.sessionStartCMTime = .zero   // reset on each session
+    }
+
+    /// Explicit detach. `stop()` also closes the logger, so this is only
+    /// needed if the caller wants to detach mid-session without stopping.
+    func detachTelemetry() {
+        detectionLogger?.close()
+        detectionLogger = nil
     }
 
     // MARK: - Core Frame Processing
@@ -75,6 +96,33 @@ nonisolated final class CVPipeline {
     private func processBuffer(_ buffer: CMSampleBuffer) {
         guard let scene = detector.detectScene(buffer: buffer) else { return }
         let now = scene.frameTimestamp
+
+        // CV-A — Telemetry per-frame log (only when logger attached)
+        if let logger = detectionLogger {
+            if sessionStartCMTime == .zero { sessionStartCMTime = now }
+            let sessionTime = CMTimeGetSeconds(CMTimeSubtract(now, sessionStartCMTime))
+            let stateStr: String = {
+                switch pipelineState {
+                case .idle:             return "idle"
+                case .tracking:         return "tracking"
+                case .releaseDetected:  return "release_detected"
+                }
+            }()
+            logger.log(DetectionLogEntry(
+                timestampSec:   sessionTime,
+                ballConfidence: scene.ball.map { Double($0.confidence) },
+                ballBox:        scene.ball.map { [Double($0.boundingBox.origin.x),
+                                                   Double($0.boundingBox.origin.y),
+                                                   Double($0.boundingBox.size.width),
+                                                   Double($0.boundingBox.size.height)] },
+                rimConfidence:  scene.basket.map { Double($0.confidence) },
+                rimBox:         scene.basket.map { [Double($0.boundingBox.origin.x),
+                                                    Double($0.boundingBox.origin.y),
+                                                    Double($0.boundingBox.size.width),
+                                                    Double($0.boundingBox.size.height)] },
+                state:          stateStr
+            ))
+        }
 
         // Feed the basket detection to calibration every frame — the
         // smoother handles jitter and missed frames internally.

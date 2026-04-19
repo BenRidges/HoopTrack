@@ -117,6 +117,13 @@ struct LiveSessionView: View {
                 let pipeline = CVPipeline(detector: detector,
                                           calibration: cal,
                                           poseService: poseService)
+
+                // CV-A — attach telemetry logger for this session (no-op if creation fails).
+                if let session = viewModel.session,
+                   let logger = try? DetectionLogger(sessionID: session.id) {
+                    pipeline.attachTelemetry(logger: logger)
+                }
+
                 pipeline.start(framePublisher: cameraService.framePublisher, viewModel: viewModel)
 
                 calibration = cal

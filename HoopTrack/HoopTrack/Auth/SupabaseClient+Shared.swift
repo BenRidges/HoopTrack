@@ -6,6 +6,7 @@ import Foundation
 import Security
 import Auth
 import PostgREST
+import Storage
 
 enum SupabaseContainer {
     /// Lazily-initialised AuthClient. Built from HoopTrack.Backend (which
@@ -33,6 +34,20 @@ enum SupabaseContainer {
             headers: headers,
             logger: nil
         )
+    }
+
+    /// Fresh SupabaseStorageClient per call — same pattern as postgrest(),
+    /// uses the current session's access token so bucket RLS resolves
+    /// against the authenticated user. CV-A uploads use this.
+    static func storage() async throws -> SupabaseStorageClient {
+        let accessToken = try await auth.session.accessToken
+        var headers = anonHeaders
+        headers["Authorization"] = "Bearer \(accessToken)"
+        let config = StorageClientConfiguration(
+            url: HoopTrack.Backend.supabaseURL.appendingPathComponent("storage/v1"),
+            headers: headers
+        )
+        return SupabaseStorageClient(configuration: config)
     }
 
     private static var anonHeaders: [String: String] {

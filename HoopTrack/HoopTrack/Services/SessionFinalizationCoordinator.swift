@@ -16,6 +16,8 @@ import Combine
     private let badgeEvaluationService: BadgeEvaluationServiceProtocol
     private let notificationService:    NotificationService
     private let syncCoordinator:        SyncCoordinator?
+    private let telemetryCaptureService: TelemetryCaptureService?
+    private let telemetryUploadService:  TelemetryUploadService?
 
     init(
         dataService:            DataService,
@@ -24,7 +26,9 @@ import Combine
         skillRatingService:     SkillRatingServiceProtocol,
         badgeEvaluationService: BadgeEvaluationServiceProtocol,
         notificationService:    NotificationService,
-        syncCoordinator:        SyncCoordinator? = nil
+        syncCoordinator:        SyncCoordinator? = nil,
+        telemetryCaptureService: TelemetryCaptureService? = nil,
+        telemetryUploadService:  TelemetryUploadService? = nil
     ) {
         self.dataService            = dataService
         self.goalUpdateService      = goalUpdateService
@@ -33,6 +37,8 @@ import Combine
         self.badgeEvaluationService = badgeEvaluationService
         self.notificationService    = notificationService
         self.syncCoordinator        = syncCoordinator
+        self.telemetryCaptureService = telemetryCaptureService
+        self.telemetryUploadService  = telemetryUploadService
     }
 
     /// Fire-and-forget Supabase upload. Skips if:
@@ -48,6 +54,50 @@ import Combine
         Task { @MainActor [syncCoordinator] in
             try? await syncCoordinator.syncSession(session, userID: userID)
         }
+    }
+
+    /// Step 10 — CV-A Telemetry Capture & Upload.
+    /// Fire-and-forget: runs after sync so it never blocks session summary.
+    /// Skips silently if any prerequisite is missing (no video, no user,
+    /// no services wired, session too short).
+    private func kickOffTelemetry(session: TrainingSession, profile: PlayerProfile) {
+        guard let capture = telemetryCaptureService,
+              let upload = telemetryUploadService,
+              let videoFileName = session.videoFileName,
+              session.durationSeconds >= HoopTrack.Telemetry.minSessionDurationSec,
+              let uidString = profile.supabaseUserID,
+              let userID = UUID(uuidString: uidString)
+        else { return }
+
+        let videoURL = Self.sessionVideoURL(filename: videoFileName)
+        let shotTimestamps = session.shots.map { $0.timestamp.timeIntervalSince(session.startedAt) }
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let sessionID = session.id
+        let sessionStartedAt = session.startedAt
+        let durationSec = session.durationSeconds
+
+        Task { @MainActor in
+            let result = await capture.capture(
+                sessionID: sessionID,
+                sessionKind: .training,
+                videoURL: videoURL,
+                shotTimestamps: shotTimestamps,
+                sessionStartedAt: sessionStartedAt,
+                sessionDurationSec: durationSec,
+                modelVersion: HoopTrack.MLModel.modelVersion,
+                appVersion: appVersion
+            )
+            if result != nil {
+                await upload.uploadPending(userID: userID)
+            }
+        }
+    }
+
+    private static func sessionVideoURL(filename: String) -> URL {
+        FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
+            .appendingPathComponent(filename)
     }
 
     // MARK: - HealthKit permission
@@ -82,7 +132,9 @@ import Combine
         notificationService.checkMilestones(for: profile.goals)
         // 7. Fire-and-forget Supabase sync — non-fatal if offline
         kickOffSync(session: session, profile: profile)
-        // 8. Return result for ViewModel to display
+        // 8. CV-A — fire-and-forget telemetry capture + upload
+        kickOffTelemetry(session: session, profile: profile)
+        // 9. Return result for ViewModel to display
         return SessionResult(session: session, badgeChanges: badgeChanges, badgeSkipReason: badgeSkipReason)
     }
 
@@ -107,6 +159,7 @@ import Combine
         let badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
         notificationService.checkMilestones(for: profile.goals)
         kickOffSync(session: session, profile: profile)
+        kickOffTelemetry(session: session, profile: profile)
         return SessionResult(session: session, badgeChanges: badgeChanges)
     }
 
@@ -123,6 +176,7 @@ import Combine
         let badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
         notificationService.checkMilestones(for: profile.goals)
         kickOffSync(session: session, profile: profile)
+        kickOffTelemetry(session: session, profile: profile)
         return SessionResult(session: session, badgeChanges: badgeChanges)
     }
 }

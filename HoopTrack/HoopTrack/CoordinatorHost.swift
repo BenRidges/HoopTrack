@@ -52,6 +52,8 @@ struct CoordinatorHost: View {
         if retention > 0 {
             try? ds.purgeOldVideos(olderThanDays: retention)
         }
+        let telemetryCapture = TelemetryCaptureService(modelContext: modelContext)
+        let telemetryUpload  = TelemetryUploadService(modelContext: modelContext)
         value = SessionFinalizationCoordinator(
             dataService:            ds,
             goalUpdateService:      GoalUpdateService(modelContext: modelContext),
@@ -59,8 +61,20 @@ struct CoordinatorHost: View {
             skillRatingService:     SkillRatingService(modelContext: modelContext),
             badgeEvaluationService: BadgeEvaluationService(modelContext: modelContext),
             notificationService:    notificationService,
-            syncCoordinator:        SyncCoordinator()
+            syncCoordinator:        SyncCoordinator(),
+            telemetryCaptureService: telemetryCapture,
+            telemetryUploadService:  telemetryUpload
         )
         Task { await value?.requestHealthKitPermission() }
+
+        // CV-A — drain any pending telemetry uploads left from a previous
+        // launch (e.g. app killed mid-upload).
+        Task { @MainActor in
+            if let profile = try? ds.fetchOrCreateProfile(),
+               let uidString = profile.supabaseUserID,
+               let userID = UUID(uuidString: uidString) {
+                await telemetryUpload.uploadPending(userID: userID)
+            }
+        }
     }
 }
