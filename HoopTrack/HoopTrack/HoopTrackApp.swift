@@ -66,6 +66,7 @@ struct HoopTrackApp: App {
             PlayerProfile.self, TrainingSession.self,
             ShotRecord.self, GoalRecord.self, EarnedBadge.self,
             GamePlayer.self, GameSession.self, GameShotRecord.self,
+            TelemetryUpload.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
