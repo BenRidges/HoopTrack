@@ -24,7 +24,9 @@ enum DataServiceError: LocalizedError {
 final class DataService: ObservableObject {
 
     // MARK: - Dependencies
-    private let modelContext: ModelContext
+    /// Internal access for the GameSessionViewModel (SP1+) — needs direct
+    /// context for end-of-game state transitions without a bespoke helper.
+    let modelContext: ModelContext
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -368,20 +370,67 @@ final class DataService: ObservableObject {
     /// Deletes video files older than `days` days for sessions not pinned by the user.
     func purgeOldVideos(olderThanDays days: Int) throws {
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now)!
-        let predicate = #Predicate<TrainingSession> {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let sessionsDir = docs.appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
+
+        // Training sessions
+        let trainingPred = #Predicate<TrainingSession> {
             $0.startedAt < cutoff && !$0.videoPinnedByUser
         }
-        let descriptor = FetchDescriptor(predicate: predicate)
-        let stale = try modelContext.fetch(descriptor)
-
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        for session in stale {
+        let staleTraining = try modelContext.fetch(FetchDescriptor(predicate: trainingPred))
+        for session in staleTraining {
             guard let filename = session.videoFileName else { continue }
-            let url = docs
-                .appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
-                .appendingPathComponent(filename)
-            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: sessionsDir.appendingPathComponent(filename))
             session.videoFileName = nil
+        }
+
+        // Game sessions (Phase 10 — same retention policy)
+        let gamePred = #Predicate<GameSession> {
+            $0.startTimestamp < cutoff && !$0.videoPinnedByUser
+        }
+        let staleGame = try modelContext.fetch(FetchDescriptor(predicate: gamePred))
+        for session in staleGame {
+            guard let filename = session.videoFileName else { continue }
+            try? FileManager.default.removeItem(at: sessionsDir.appendingPathComponent(filename))
+            session.videoFileName = nil
+        }
+
+        try modelContext.save()
+    }
+
+    // MARK: - Game Mode (SP1)
+
+    /// Append a shot to an existing game session and update the team score.
+    /// In SP1 this is called from the manual make/miss buttons in LiveGameView.
+    /// SP2 upgrades to CV-attributed shots via GameScoringCoordinator.
+    func addGameShot(
+        to session: GameSession,
+        shooter: GamePlayer?,
+        result: ShotResult,
+        courtX: Double,
+        courtY: Double,
+        shotType: GameShotType,
+        attributionConfidence: Double = 1.0
+    ) throws {
+        guard InputValidator.isValidCourtCoordinate(courtX),
+              InputValidator.isValidCourtCoordinate(courtY) else {
+            throw DataServiceError.invalidSensorValue("court coordinate out of range")
+        }
+        let shot = GameShotRecord(
+            shooter: shooter,
+            result: result,
+            courtX: courtX, courtY: courtY,
+            shotType: shotType,
+            attributionConfidence: attributionConfidence
+        )
+        session.shots.append(shot)
+        if result == .make {
+            let points = (shotType == .threePoint) ? 3 : 2
+            switch shooter?.teamAssignment {
+            case .teamA: session.teamAScore += points
+            case .teamB: session.teamBScore += points
+            case .none:  break   // unattributed — no team credit
+            }
         }
         try modelContext.save()
     }
