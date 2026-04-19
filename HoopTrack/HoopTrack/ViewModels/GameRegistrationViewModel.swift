@@ -7,10 +7,14 @@
 import Foundation
 import Combine
 
-@MainActor
-final class GameRegistrationViewModel: ObservableObject {
+/// Plain (non-actor) view model — deliberately NOT `@MainActor` because
+/// this VM was hitting a runtime crash in the Swift `back_deploy` shim
+/// for `__deallocating_deinit` (`swift_task_deinitOnExecutorMainActorBackDeploy`)
+/// when tests deallocated it. VM only stores value-type state and is always
+/// driven from SwiftUI's main-actor context anyway.
+nonisolated final class GameRegistrationViewModel: ObservableObject {
 
-    struct PendingPlayer: Identifiable, Equatable {
+    nonisolated struct PendingPlayer: Identifiable, Equatable {
         let id = UUID()
         let name: String
         /// JSON-encoded AppearanceDescriptor. Persisted into GamePlayer.appearanceEmbedding later.

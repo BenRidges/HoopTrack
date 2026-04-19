@@ -1,7 +1,6 @@
 import XCTest
 @testable import HoopTrack
 
-@MainActor
 final class GameRegistrationViewModelTests: XCTestCase {
 
     private func sampleBlob() throws -> Data {

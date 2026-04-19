@@ -55,6 +55,23 @@
                 <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
             </array>
         </dict>
+        <!-- Game Mode appearance descriptors (SP1) — session-scoped on-device
+             clothing-colour profile used only for live player attribution.
+             Never transmitted, deleted when the game session ends. Declared
+             as OtherDiagnosticData since there is no dedicated Apple category
+             for transient biometric-adjacent in-app data. -->
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+            </array>
+        </dict>
     </array>
 
     <key>NSPrivacyTracking</key>
