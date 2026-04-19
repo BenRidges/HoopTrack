@@ -9,10 +9,31 @@ import SwiftUI
 import SwiftData
 
 // MARK: - Orientation Lock
-/// App-wide flag that gates whether landscape orientations are permitted.
-/// Set to `true` before presenting the live session; reset on dismiss.
+/// App-wide gate for which interface orientations the app supports at any
+/// given moment. Most of the app is portrait-locked (`.portraitOnly`).
+/// LiveSessionView / LiveGameView force landscape (`.landscapeOnly`) via
+/// LandscapeHostingController. Game registration opens things up with
+/// `.all` so the user can hold the phone however they want while scanning
+/// a player — AppearanceCaptureService handles orientation via the Vision
+/// handler, not the window.
 enum OrientationLock {
-    @MainActor static var allowLandscape: Bool = false
+    enum Mode {
+        case portraitOnly
+        case landscapeOnly
+        case all
+    }
+
+    @MainActor static var mode: Mode = .portraitOnly
+
+    /// Legacy bool gate, kept so `LandscapeHostingController` can flip
+    /// orientation in the narrow landscape-force case without knowing about
+    /// the enum. Setting this flips between `.landscapeOnly` (true) and
+    /// `.portraitOnly` (false), mirroring the old behaviour. Callers that
+    /// want both orientations (game registration) set `mode = .all` directly.
+    @MainActor static var allowLandscape: Bool {
+        get { mode == .landscapeOnly }
+        set { mode = newValue ? .landscapeOnly : .portraitOnly }
+    }
 }
 
 // MARK: - App Delegate (Orientation Gate)
@@ -21,7 +42,11 @@ final class HoopTrackAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
     ) -> UIInterfaceOrientationMask {
-        OrientationLock.allowLandscape ? .landscape : .portrait
+        switch OrientationLock.mode {
+        case .portraitOnly:  return .portrait
+        case .landscapeOnly: return .landscape
+        case .all:           return .all
+        }
     }
 }
 

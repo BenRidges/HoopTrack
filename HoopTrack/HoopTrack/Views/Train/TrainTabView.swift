@@ -98,7 +98,7 @@ struct TrainTabView: View {
         }
         // MARK: - Game Mode flow (SP1)
         .fullScreenCover(isPresented: $isShowingGameFlow, onDismiss: {
-            OrientationLock.allowLandscape = false
+            OrientationLock.mode = .portraitOnly
             requestOrientationChange(to: .portrait)
         }) {
             GameFlowContainer(
@@ -109,7 +109,11 @@ struct TrainTabView: View {
             .environmentObject(cameraService)
             .environmentObject(dataService)
             .onAppear {
-                OrientationLock.allowLandscape = true
+                // Registration works in any orientation — unlock all four
+                // so the user can hold the phone however they want during
+                // the lineup scan. LandscapeHostingController flips this to
+                // .landscapeOnly for LiveGameView when that screen opens.
+                OrientationLock.mode = .all
             }
         }
     }
