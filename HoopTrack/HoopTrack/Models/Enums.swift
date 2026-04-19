@@ -180,3 +180,49 @@ nonisolated enum CameraOrientation: Sendable {
         }
     }
 }
+
+// MARK: - Game Mode (SP1)
+
+/// What kind of game session this is. Pickup = casual 2v2/3v3.
+/// `bo7Playoff` is the solo BO7 mode added in SP3.
+enum GameType: String, Codable, CaseIterable, Identifiable {
+    case pickup     = "Pickup"
+    case bo7Playoff = "BO7 Playoff"
+    var id: String { rawValue }
+}
+
+/// Lifecycle of a GameSession.
+enum GameState: String, Codable {
+    case registering
+    case inProgress
+    case completed
+}
+
+/// Which team a GamePlayer belongs to within their GameSession.
+enum TeamAssignment: String, Codable, CaseIterable, Identifiable {
+    case teamA = "Team A"
+    case teamB = "Team B"
+    var id: String { rawValue }
+}
+
+/// Point value of a shot in Game Mode — 2PT vs 3PT, derived from court position.
+/// Named GameShotType to avoid colliding with the existing ShotType enum
+/// (catch-and-shoot / pull-up / etc) used by solo training sessions.
+enum GameShotType: String, Codable {
+    case twoPoint   = "2PT"
+    case threePoint = "3PT"
+}
+
+/// Number of players per team for registration. 2v2 or 3v3.
+enum GameFormat: Int, Codable, CaseIterable, Identifiable {
+    case twoOnTwo   = 2
+    case threeOnThree = 3
+    var id: Int { rawValue }
+    var displayName: String {
+        switch self {
+        case .twoOnTwo:     return "2v2"
+        case .threeOnThree: return "3v3"
+        }
+    }
+    var totalPlayers: Int { rawValue * 2 }
+}
