@@ -148,7 +148,16 @@ nonisolated enum HoopTrack {
         static let registrationLockDurationSec: Double = 3.0
 
         /// Minimum Vision body-pose keypoint confidence (shoulders + hips) to count as "valid lock".
-        static let registrationMinBodyConfidence: Float = 0.7
+        /// Was 0.7 — lowered to 0.5 after real-device testing revealed that Vision body-pose
+        /// confidences typically sit in 0.3–0.7 even for clearly visible joints; requiring 0.7
+        /// on all 4 joints simultaneously made the lock practically unachievable.
+        static let registrationMinBodyConfidence: Float = 0.5
+
+        /// How many consecutive bad frames the capture service coasts on a cached
+        /// good reading before giving up and breaking the lock. At 30fps this is
+        /// ~165ms — long enough for motion blur / AE shifts, short enough that
+        /// a player actually walking away breaks the lock.
+        static let registrationMaxStaleFrames: Int = 5
 
         /// Display hints for the user during registration (informational only).
         static let registrationMinDistanceFeet: Double = 6.0
