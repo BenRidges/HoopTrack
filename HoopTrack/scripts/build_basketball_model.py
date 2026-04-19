@@ -97,8 +97,10 @@ def main():
     IMG_SIZE   = 1280        # 2x resolution — big gain on small-ball detection
                              # in wide-angle court footage. Memory-heavy; if the
                              # 3080 OOMs, drop to 960 before reducing batch.
-    BATCH      = 8           # yolo11m @ 1280 on a 10GB 3080. AMP is on by default
-                             # via ultralytics. Bump to 12-16 if VRAM allows.
+    BATCH      = 4           # yolo11m @ 1280 on a 10GB 3080: batch=8 overflows
+                             # into Windows shared-memory fallback (20s/it vs
+                             # <1s/it native), so 4 is the sweet spot. Bump if
+                             # you ever train on a 16GB+ card.
 
     # ── 2. Auto-detect best device ────────────────────────────────────────────────
     if torch.backends.mps.is_available():
