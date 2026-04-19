@@ -44,6 +44,9 @@ struct ProgressTabView: View {
 
                 // MARK: Personal Records
                 personalRecordsSection
+
+                // MARK: Recent Games (SP1)
+                RecentGamesSection()
             }
             .padding(.horizontal)
             .padding(.bottom, 24)

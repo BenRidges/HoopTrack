@@ -15,12 +15,24 @@ struct TrainTabView: View {
     @State private var drillToLaunch: NamedDrill? = nil
     @State private var isShowingPreSessionSheet = false
 
+    // MARK: - Game Mode (SP1)
+    @State private var isShowingGameFlow = false
+    @State private var gameFormat: GameFormat = .twoOnTwo
+    @State private var gameType: GameType = .pickup
+
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
 
                 // MARK: Quick Start Banner
                 quickStartBanner
+
+                // MARK: Game Mode entry (SP1)
+                GameEntryCard { format, type in
+                    gameFormat = format
+                    gameType = type
+                    isShowingGameFlow = true
+                }
 
                 // MARK: Category Filter
                 categoryFilter
@@ -82,6 +94,22 @@ struct TrainTabView: View {
                 .onAppear {
                     requestOrientationChange(to: .landscapeRight)
                 }
+            }
+        }
+        // MARK: - Game Mode flow (SP1)
+        .fullScreenCover(isPresented: $isShowingGameFlow, onDismiss: {
+            OrientationLock.allowLandscape = false
+            requestOrientationChange(to: .portrait)
+        }) {
+            GameFlowContainer(
+                format: gameFormat,
+                gameType: gameType,
+                onDismiss: { isShowingGameFlow = false }
+            )
+            .environmentObject(cameraService)
+            .environmentObject(dataService)
+            .onAppear {
+                OrientationLock.allowLandscape = true
             }
         }
     }
