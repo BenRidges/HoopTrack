@@ -76,6 +76,12 @@ struct GameRegistrationView: View {
             #endif
         }
         .task {
+            // UIDevice.current.orientation is only live while notifications
+            // are being generated. Without this, it can return .unknown even
+            // when the phone is clearly tilted — breaking our orientation
+            // mapping and confusing Vision.
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+
             if cameraService.permissionStatus == .notDetermined {
                 await cameraService.requestPermission()
             }
@@ -93,6 +99,7 @@ struct GameRegistrationView: View {
         .onDisappear {
             frameSubscription?.cancel()
             cameraService.stopSession()
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
         .onChange(of: captureService.captured) { _, new in
             guard let descriptor = new else { return }
@@ -144,17 +151,23 @@ struct GameRegistrationView: View {
     /// Map the live device orientation to a CGImagePropertyOrientation that
     /// tells Vision where "up" is in the camera buffer. The camera is
     /// configured with `videoRotationAngle = 0` (landscape), so buffers
-    /// arrive in landscape-right native orientation. For other device
-    /// orientations we need to tell Vision how to interpret that buffer.
+    /// arrive in the sensor-native orientation.
+    ///
+    /// Sensor-native upright for the rear iPhone camera corresponds to
+    /// `UIDeviceOrientation.landscapeLeft` (device top pointing LEFT, USB-C
+    /// port on the RIGHT). This matches the existing LandscapeContainer
+    /// pattern used by LiveSessionView, where `LandscapeHostingController`
+    /// forces `UIInterfaceOrientation.landscapeRight` (device .landscapeLeft)
+    /// and `PoseEstimationService` uses Vision orientation `.up`.
     ///
     /// Rear camera only — front camera would need mirrored variants.
     private func visionOrientationForCurrentDevice() -> CGImagePropertyOrientation {
         switch UIDevice.current.orientation {
-        case .portrait:            return .right
-        case .portraitUpsideDown:  return .left
-        case .landscapeLeft:       return .down
-        case .landscapeRight:      return .up
-        default:                   return .right    // sensible default (portrait)
+        case .landscapeLeft:       return .up        // sensor-native upright
+        case .landscapeRight:      return .down      // 180° from sensor-native
+        case .portrait:            return .right     // 90° CW from sensor-native
+        case .portraitUpsideDown:  return .left      // 90° CCW from sensor-native
+        default:                   return .right     // face-up / face-down / unknown → safe portrait default
         }
     }
 }
