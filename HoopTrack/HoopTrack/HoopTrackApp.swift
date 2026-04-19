@@ -40,6 +40,7 @@ struct HoopTrackApp: App {
         let schema = Schema([
             PlayerProfile.self, TrainingSession.self,
             ShotRecord.self, GoalRecord.self, EarnedBadge.self,
+            GamePlayer.self, GameSession.self, GameShotRecord.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
