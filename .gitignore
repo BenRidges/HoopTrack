@@ -10,3 +10,13 @@ yolo*.pt
 .env
 .env.*
 !.env.example
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Autolabel tooling — generated outputs (large, regenerable)
+HoopTrack/scripts/autolabel/runs/
+HoopTrack/scripts/autolabel/outputs/
+HoopTrack/scripts/autolabel/preview.png
+HoopTrack/scripts/autolabel/hf_cache/
