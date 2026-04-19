@@ -142,6 +142,29 @@ nonisolated enum HoopTrack {
         static let allowedVideoRetainDays = [7, 14, 30]
     }
 
+    // MARK: - Game Mode (SP1)
+    enum Game {
+        /// How long a valid body lock must hold before registration auto-advances.
+        static let registrationLockDurationSec: Double = 3.0
+
+        /// Minimum Vision body-pose keypoint confidence (shoulders + hips) to count as "valid lock".
+        static let registrationMinBodyConfidence: Float = 0.7
+
+        /// Display hints for the user during registration (informational only).
+        static let registrationMinDistanceFeet: Double = 6.0
+        static let registrationMaxDistanceFeet: Double = 8.0
+
+        /// Hard cap on team size — matches max `GameFormat` (3v3).
+        static let maxPlayersPerTeam: Int = 3
+
+        /// AppearanceDescriptor histogram dimensions.
+        static let histogramHueBins: Int = 8
+        static let histogramValueBins: Int = 4
+
+        /// AppearanceDescriptor schema version — bump on breaking field changes.
+        static let appearanceDescriptorSchemaVersion: Int = 1
+    }
+
     // MARK: - Performance Targets
     enum Performance {
         static let makeDetectionAccuracy:    Double = 0.92  // 92% under good indoor lighting
