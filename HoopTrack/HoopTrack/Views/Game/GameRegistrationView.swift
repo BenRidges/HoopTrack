@@ -67,14 +67,6 @@ struct GameRegistrationView: View {
                         .rotationEffect(.degrees(-90))
                 )
                 .animation(.linear(duration: 0.1), value: captureService.lockProgress)
-
-            #if DEBUG
-            DebugKeypointOverlay(
-                keypoints: captureService.debugKeypoints,
-                lockProgress: captureService.lockProgress,
-                threshold: HoopTrack.Game.registrationMinBodyConfidence
-            )
-            #endif
         }
         .task {
             // UIDevice.current.orientation is only live while notifications
@@ -276,56 +268,3 @@ private struct NameConfirmSheet: View {
     }
 }
 
-// MARK: - DEBUG overlay
-
-#if DEBUG
-private struct DebugKeypointOverlay: View {
-    let keypoints: [String: Float]
-    let lockProgress: Double
-    let threshold: Float
-
-    var body: some View {
-        VStack {
-            HStack {
-                Spacer()
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("CV debug")
-                        .font(.caption.bold())
-                        .foregroundStyle(.orange)
-                    ForEach(orderedKeys, id: \.self) { key in
-                        let conf = keypoints[key] ?? 0
-                        HStack(spacing: 6) {
-                            Text(key)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.white)
-                                .frame(width: 80, alignment: .leading)
-                            Text(String(format: "%.2f", conf))
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(conf >= threshold ? .green : .red)
-                        }
-                    }
-                    Divider().background(.white.opacity(0.3))
-                    HStack(spacing: 6) {
-                        Text("progress")
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.white)
-                            .frame(width: 80, alignment: .leading)
-                        Text(String(format: "%.0f%%", lockProgress * 100))
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.white)
-                    }
-                }
-                .padding(8)
-                .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                .padding(.trailing, 12)
-                .padding(.top, 12)
-            }
-            Spacer()
-        }
-    }
-
-    private var orderedKeys: [String] {
-        ["L-shoulder", "R-shoulder", "L-hip", "R-hip"]
-    }
-}
-#endif
