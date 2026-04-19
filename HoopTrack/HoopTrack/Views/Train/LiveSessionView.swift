@@ -66,15 +66,15 @@ struct LiveSessionView: View {
                                 .padding(.horizontal, 20)
                         }
                     }
+
+                    // Phase 2: calibration prompt — shown until hoop is locked
+                    if !viewModel.isCalibrated {
+                        calibrationOverlay
+                    }
                 }
 
                 // MARK: Right Sidebar (~20%)
                 sidebar
-            }
-
-            // Phase 2: calibration prompt — shown until hoop is locked
-            if !viewModel.isCalibrated {
-                calibrationOverlay
             }
 
             // MARK: Shot glow overlay
