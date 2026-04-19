@@ -22,7 +22,7 @@
 | 9 | Backend & Database | ✅ Complete |
 | 10 | File & Media Storage (local-only) | ✅ Complete |
 | 11 | Accessibility | ✅ Complete |
-| 12 | Web Presence | 🔜 Planned |
+| 12 | Web Presence | ✅ Complete |
 | CV | CV Detection v2 (parallel track) | 🔜 Ready to start (Phase A) |
 | 13 | Multiplayer Sessions | 🔮 Future |
 | 14 | Web Dashboard | 🔮 Future |
