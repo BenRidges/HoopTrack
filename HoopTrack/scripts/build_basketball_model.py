@@ -19,7 +19,7 @@ on dataset size. Adjust EPOCHS, BASE_MODEL, or IMG_SIZE in the config
 block below to trade accuracy for training time.
 """
 
-import subprocess, sys, shutil, os
+import subprocess, sys, shutil, os, platform
 from pathlib import Path
 
 # ── 0. Install dependencies if needed ─────────────────────────────────────────
@@ -50,6 +50,19 @@ try:
 except ImportError:
     print("Installing coremltools …")
     pip_install("coremltools")
+
+# Auto-load .env at the repo root so ROBOFLOW_API_KEY (and any future secrets)
+# are picked up without the caller having to `export` them per-shell. Silent
+# no-op if the file doesn't exist.
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    print("Installing python-dotenv …")
+    pip_install("python-dotenv")
+    from dotenv import load_dotenv
+_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
 
 from ultralytics import YOLO
 import torch

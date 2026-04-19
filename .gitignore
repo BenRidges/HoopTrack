@@ -5,3 +5,8 @@
 
 # YOLO pretrained weights (auto-downloaded by ultralytics)
 yolo*.pt
+
+# Local secrets (never commit)
+.env
+.env.*
+!.env.example
