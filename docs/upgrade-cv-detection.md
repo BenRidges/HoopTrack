@@ -158,7 +158,7 @@ One variable at a time, measured against the Phase A7 eval fixture:
 
 ## B4. Targeted augmentation
 
-Update [build_basketball_model.py](HoopTrack/scripts/build_basketball_model.py) training call with basketball-specific augmentation: `degrees=10`, `hsv_v=0.5`, `flipud=0.0`. Disable mosaic for final 10 epochs (`close_mosaic=10`, already default).
+Update [build_basketball_model.py](../hooptrack-ball-detection/build_basketball_model.py) training call with basketball-specific augmentation: `degrees=10`, `hsv_v=0.5`, `flipud=0.0`. Disable mosaic for final 10 epochs (`close_mosaic=10`, already default).
 
 ## B5. Release checklist
 
@@ -287,7 +287,7 @@ Files this plan will touch, grouped by phase:
 - NEW: `HoopTrackTests/Fixtures/ShotEvalSet/` (fixtures + `BallDetectorEvalTests.swift`, `MakeMissPipelineEvalTests.swift`)
 
 **Phase B:**
-- EDIT: [HoopTrack/scripts/build_basketball_model.py](HoopTrack/scripts/build_basketball_model.py) (multi-class, new augmentation)
+- EDIT: [hooptrack-ball-detection/build_basketball_model.py](../hooptrack-ball-detection/build_basketball_model.py) (multi-class, new augmentation)
 - REPLACE: `HoopTrack/ML/BallDetector.mlpackage`
 - EDIT: `HoopTrack/Utilities/Constants.swift` (class labels, `modelVersion`)
 - EDIT: `HoopTrack/Services/CourtCalibrationService.swift` (consume rim/backboard detections)

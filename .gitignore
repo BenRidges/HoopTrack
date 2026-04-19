@@ -15,8 +15,5 @@ yolo*.pt
 __pycache__/
 *.py[cod]
 
-# Autolabel tooling — generated outputs (large, regenerable)
-HoopTrack/scripts/autolabel/runs/
-HoopTrack/scripts/autolabel/outputs/
-HoopTrack/scripts/autolabel/preview.png
-HoopTrack/scripts/autolabel/hf_cache/
+# (Model-training Python tooling now lives in the sibling
+# hooptrack-ball-detection/ repo — it has its own .gitignore.)
