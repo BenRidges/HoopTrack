@@ -85,6 +85,20 @@ final class LiveSessionViewModel: ObservableObject {
                namedDrill: NamedDrill? = nil,
                courtType: CourtType = .nba,
                locationTag: String = "") {
+        elapsedSeconds       = 0
+        isPaused             = false
+        isSaving             = false
+        recentShots          = []
+        lastShotResult       = nil
+        isCalibrated         = false
+        calibrationIsActive  = false
+        detectedHoopRect     = nil
+        detectedBallBox      = nil
+        detectedBallConfidence = nil
+        pendingShotRecord    = nil
+        sessionResult        = nil
+        errorMessage         = nil
+
         do {
             session = try dataService.startSession(drillType: drillType,
                                                    namedDrill: namedDrill,

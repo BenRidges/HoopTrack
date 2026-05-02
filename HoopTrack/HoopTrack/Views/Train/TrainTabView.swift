@@ -14,6 +14,7 @@ struct TrainTabView: View {
     @State private var isShowingLiveSession = false
     @State private var drillToLaunch: NamedDrill? = nil
     @State private var isShowingPreSessionSheet = false
+    @State private var pendingSessionLaunch = false
 
     // MARK: - Game Mode (SP1)
     @State private var isShowingGameFlow = false
@@ -45,18 +46,23 @@ struct TrainTabView: View {
         }
         .navigationTitle("Train")
         .navigationBarTitleDisplayMode(.large)
-        // Pre-session config sheet
-        .sheet(isPresented: $isShowingPreSessionSheet) {
+        // Pre-session config sheet — defer the fullScreenCover until the sheet
+        // has fully dismissed; presenting both in the same callback causes a
+        // visible flash of TrainTabView between the two modal transitions.
+        .sheet(isPresented: $isShowingPreSessionSheet, onDismiss: {
+            guard pendingSessionLaunch else { return }
+            pendingSessionLaunch = false
+            let needsLandscape = drillToLaunch == nil
+                || (drillToLaunch?.drillType != .dribble
+                    && drillToLaunch?.drillType != .agility)
+            if needsLandscape {
+                OrientationLock.allowLandscape = true
+            }
+            isShowingLiveSession = true
+        }) {
             PreSessionSheetView(drill: drillToLaunch, viewModel: viewModel) {
+                pendingSessionLaunch = true
                 isShowingPreSessionSheet = false
-                // Determine if this is a shooting session (needs landscape)
-                let needsLandscape = drillToLaunch == nil
-                    || (drillToLaunch?.drillType != .dribble
-                        && drillToLaunch?.drillType != .agility)
-                if needsLandscape {
-                    OrientationLock.allowLandscape = true
-                }
-                isShowingLiveSession = true
             }
         }
         // Full-screen live session — routes by drill type
