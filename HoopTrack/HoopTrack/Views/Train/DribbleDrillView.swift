@@ -10,7 +10,7 @@ import AVFoundation
 struct DribbleDrillView: View {
 
     let namedDrill: NamedDrill?
-    let onFinish: (SessionResult?) -> Void
+    let onFinish: (SessionEnd?) -> Void
 
     @EnvironmentObject private var dataService: DataService
     @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
@@ -48,8 +48,9 @@ struct DribbleDrillView: View {
 
 private struct DribbleContent: View {
     @ObservedObject var viewModel: DribbleSessionViewModel
-    let onFinish: (SessionResult?) -> Void
+    let onFinish: (SessionEnd?) -> Void
     @EnvironmentObject private var cameraService: CameraService
+    @State private var saveFailed = false
 
     var body: some View {
         ZStack {
@@ -79,9 +80,7 @@ private struct DribbleContent: View {
                         .padding(.bottom, 20)
                 }
                 counter
-                HoldToEndButton(isBusy: viewModel.isEnding) {
-                    Task { onFinish(await viewModel.end()) }
-                }
+                HoldToEndButton(isBusy: viewModel.isEnding, onConfirm: finish)
                 .padding(.top, 28)
             }
             .padding(Metrics.screenPadding)
@@ -99,6 +98,15 @@ private struct DribbleContent: View {
         .task { await viewModel.start() }
         .onChange(of: cameraService.permissionStatus) { _, _ in
             viewModel.cameraPermissionChanged()
+        }
+        .sessionErrorAlert($viewModel.errorMessage, saveFailed: $saveFailed,
+                           retry: finish, close: { onFinish(nil) })
+    }
+
+    private func finish() {
+        Task {
+            guard let end = await viewModel.end() else { return }
+            if case .failed = end { saveFailed = true } else { onFinish(end) }
         }
     }
 

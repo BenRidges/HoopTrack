@@ -23,6 +23,14 @@ struct RootView: View {
                     .transition(.opacity)
             }
 
+            if let notice = appState.notice {
+                NoticeBanner(text: notice) { appState.notice = nil }
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 64)    // clears the tab bar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(0.5)
+            }
+
             // A layer, not a sheet: the reset link can arrive while another
             // sheet is up, and two sheets can't be presented at once.
             if authViewModel.isSettingNewPassword {
@@ -40,6 +48,7 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.25), value: appLock.isLocked)
         .animation(.easeInOut(duration: 0.3), value: authViewModel.isSettingNewPassword)
         .animation(.easeInOut(duration: 0.3), value: hasCompletedOnboarding)
+        .animation(.snappy, value: appState.notice)
         .fullScreenCover(item: $appState.activeLaunch, onDismiss: {
             Orientation.restorePortrait()
             appState.sessionCoverDismissed()
@@ -69,7 +78,7 @@ struct RootView: View {
 
     @ViewBuilder
     private func session(for launch: TrainingLaunch) -> some View {
-        let finish: (SessionResult?) -> Void = { appState.finishSession(with: $0) }
+        let finish: (SessionEnd?) -> Void = { appState.finishSession(with: $0) }
         switch launch {
         case .shooting(let drill):
             LandscapeContainer {

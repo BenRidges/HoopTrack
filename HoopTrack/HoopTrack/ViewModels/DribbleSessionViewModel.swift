@@ -77,22 +77,26 @@ final class DribbleSessionViewModel: ObservableObject, DribblePipelineDelegate {
         haptics.tap()
     }
 
-    func end() async -> SessionResult? {
-        guard !isEnding, let session else { return nil }
+    /// Finishes the session. Nil when an end is already under way.
+    func end() async -> SessionEnd? {
+        guard !isEnding else { return nil }
         isEnding = true
         let active = activeElapsed()
         pipeline.stop()
         camera.stopSession()
-        if metrics.totalDribbles == 0 && active < 20 {
+        guard let session else { return .discarded }
+        // Same rule as tearDown(): no dribbles, nothing to keep.
+        if metrics.totalDribbles == 0 {
             dataService.discardSession(session)
-            return nil
+            return .discarded
         }
         do {
-            return try await coordinator.finaliseDribbleSession(session, metrics: metrics, activeDuration: active)
+            return .saved(try await coordinator.finaliseDribbleSession(session, metrics: metrics,
+                                                                       activeDuration: active))
         } catch {
             errorMessage = error.localizedDescription
             isEnding = false
-            return nil
+            return .failed
         }
     }
 

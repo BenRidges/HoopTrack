@@ -45,4 +45,16 @@ final class StreakCalculatorTests: XCTestCase {
         XCTAssertEqual(StreakCalculator.longest(trainingDays: dates, calendar: calendar), 4)
         XCTAssertEqual(StreakCalculator.longest(trainingDays: [], calendar: calendar), 0)
     }
+
+    /// The current run is one of the runs `longest` looks at, so it can
+    /// never be the bigger number.
+    func test_longest_isNeverBelowCurrent() {
+        let patterns: [[Int]] = [[], [0], [1], [0, 1], [1, 3, 5], [0, 1, 2, 9, 10], [0, 2, 3, 4], [1, 2, 3, 4, 5, 6]]
+        for pattern in patterns {
+            let dates = pattern.map { daysAgo($0) }
+            let current = StreakCalculator.current(trainingDays: dates, today: today, calendar: calendar)
+            let longest = StreakCalculator.longest(trainingDays: dates, calendar: calendar)
+            XCTAssertGreaterThanOrEqual(longest, current, "days ago: \(pattern)")
+        }
+    }
 }

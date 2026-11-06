@@ -13,7 +13,7 @@ struct LiveSessionView: View {
 
     let namedDrill: NamedDrill?
     var playoffSeriesID: UUID? = nil
-    let onFinish: (SessionResult?) -> Void
+    let onFinish: (SessionEnd?) -> Void
 
     @EnvironmentObject private var dataService: DataService
     @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
@@ -62,9 +62,10 @@ private struct LiveSessionContent: View {
 
     @ObservedObject var viewModel: LiveSessionViewModel
     let showDetectionBoxes: Bool
-    let onFinish: (SessionResult?) -> Void
+    let onFinish: (SessionEnd?) -> Void
 
     @EnvironmentObject private var cameraService: CameraService
+    @State private var saveFailed = false
 
     var body: some View {
         ZStack {
@@ -89,20 +90,14 @@ private struct LiveSessionContent: View {
         .onChange(of: cameraService.permissionStatus) { _, _ in
             viewModel.cameraPermissionChanged()
         }
-        .alert("Couldn't save", isPresented: Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { if !$0 { viewModel.errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(viewModel.errorMessage ?? "")
-        }
+        .sessionErrorAlert($viewModel.errorMessage, saveFailed: $saveFailed,
+                           retry: finish, close: { onFinish(nil) })
     }
 
     private func finish() {
         Task {
-            let result = await viewModel.end()
-            onFinish(result)
+            guard let end = await viewModel.end() else { return }
+            if case .failed = end { saveFailed = true } else { onFinish(end) }
         }
     }
 

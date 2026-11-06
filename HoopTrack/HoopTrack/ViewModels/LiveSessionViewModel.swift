@@ -214,9 +214,9 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         haptics.tap()
     }
 
-    /// Finishes the session. Returns nil when nothing worth keeping happened.
-    func end() async -> SessionResult? {
-        guard phase != .ending, let session else { return nil }
+    /// Finishes the session. Nil when an end is already under way.
+    func end() async -> SessionEnd? {
+        guard phase != .ending else { return nil }
         phase = .ending
         let active = activeElapsed()
         limitWatcher?.cancel()
@@ -226,23 +226,29 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         let videoURL = await finishRecording()
         camera.stopSession()
 
-        // Nothing logged and barely started: don't clutter history.
-        if attempts == 0 && active < 20 {
+        // The session never started (the error was shown): just leave.
+        guard let session else { return .discarded }
+
+        // No shots: an empty session would still count as a training day
+        // and a session. tearDown() already dropped these; now ending does too.
+        if attempts == 0 {
             if let videoURL { try? FileManager.default.removeItem(at: videoURL) }
             dataService.discardSession(session)
-            return nil
+            return .discarded
         }
 
-        session.videoFileName = videoURL?.lastPathComponent
+        // A retry after a failed save has no recorder left; keep the name
+        // the first attempt stored.
+        if let videoURL { session.videoFileName = videoURL.lastPathComponent }
         do {
             let result = try await coordinator.finaliseSession(session, activeDuration: active)
             if let playoffSeries { dataService.refreshPlayoff(playoffSeries) }
             haptics.milestone()
-            return result
+            return .saved(result)
         } catch {
             errorMessage = error.localizedDescription
             phase = .live
-            return nil
+            return .failed
         }
     }
 

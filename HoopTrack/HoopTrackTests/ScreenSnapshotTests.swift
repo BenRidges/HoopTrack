@@ -53,6 +53,7 @@ final class ScreenSnapshotTests: XCTestCase {
 
     func test_profile() throws {
         try seedHistory()
+        try seedPlayoffRun()
         try snapshot("05-profile") { NavigationStack { ProfileTabView() } }
     }
 
@@ -104,6 +105,18 @@ final class ScreenSnapshotTests: XCTestCase {
                     run: run, comebackZone: .cornerThree, onDismiss: {}, onFinish: {})
             }
         }
+    }
+
+    func test_rootWithNotice() throws {
+        // The whole app shell (tab bar included) with the note shown when a
+        // session ends with nothing recorded.
+        try seedHistory()
+        let key = AppPreferences.Key.hasCompletedOnboarding
+        let before = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(true, forKey: key)
+        defer { UserDefaults.standard.set(before, forKey: key) }
+        services.appState.notice = AppState.discardedNotice
+        try snapshot("12-notice") { RootView() }
     }
 
     // MARK: - Data

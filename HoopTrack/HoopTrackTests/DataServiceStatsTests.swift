@@ -41,6 +41,15 @@ final class DataServiceStatsTests: XCTestCase {
         XCTAssertEqual(profile.currentStreakDays, 1)
     }
 
+    func test_streaks_comeFromSessionDays() throws {
+        let yesterday = try shootingSession(makes: 1, misses: 1)
+        yesterday.startedAt = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        _ = try shootingSession(makes: 1, misses: 1)    // today; recomputes
+        let profile = try sut.fetchOrCreateProfile()
+        XCTAssertEqual(profile.currentStreakDays, 2)
+        XCTAssertEqual(profile.longestStreakDays, 2)
+    }
+
     func test_deleteSession_removesItFromCareerTotals() throws {
         _ = try shootingSession(makes: 6, misses: 4)
         let second = try shootingSession(makes: 2, misses: 8)

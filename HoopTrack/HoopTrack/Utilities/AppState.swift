@@ -51,20 +51,34 @@ final class AppState: ObservableObject {
     @Published var activeLaunch: TrainingLaunch?
     /// Summary on screen right now.
     @Published var presentedSummary: CompletedSession?
-    /// Summary to show once the live session has finished dismissing.
-    private var queuedSummary: CompletedSession?
+    /// One short line shown over the tabs for a few seconds.
+    @Published var notice: String?
+    /// How the live session ended, acted on once it has finished dismissing.
+    private var queuedEnd: SessionEnd?
 
-    /// Called by every live session when it ends. The summary is shown after
-    /// the full-screen session has gone, back in portrait.
-    func finishSession(with result: SessionResult?) {
-        queuedSummary = result.map(CompletedSession.init(result:))
+    static let discardedNotice = "Nothing was recorded, so the session wasn't saved."
+
+    /// Called by every live session when it closes; nil when there's
+    /// nothing to report (a game, or closing after a failed save). The
+    /// summary or notice follows once the full-screen session has gone,
+    /// back in portrait.
+    func finishSession(with end: SessionEnd?) {
+        queuedEnd = end
         activeLaunch = nil
     }
 
     /// Hooked to the session cover's onDismiss.
     func sessionCoverDismissed() {
-        presentedSummary = queuedSummary
-        queuedSummary = nil
+        switch queuedEnd {
+        case .saved(let result):
+            presentedSummary = CompletedSession(result: result)
+        case .discarded:
+            // Without this the session just vanished, which read as a crash.
+            notice = Self.discardedNotice
+        case .failed, nil:
+            break
+        }
+        queuedEnd = nil
     }
 
     /// Handles `hooptrack://` URLs:

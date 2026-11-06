@@ -43,6 +43,17 @@ struct SessionResult {
     }
 }
 
+/// How a live session ended.
+enum SessionEnd {
+    /// Finalised: show the summary.
+    case saved(SessionResult)
+    /// Nothing was recorded, so nothing was kept.
+    case discarded
+    /// Saving threw. The session stays on screen with the error so the
+    /// player can try again.
+    case failed
+}
+
 struct AgilityAttempts {
     var bestShuttleRunSeconds: Double?
     var bestLaneAgilitySeconds: Double?

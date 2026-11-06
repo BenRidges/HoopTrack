@@ -58,3 +58,50 @@ struct HoldToEndButton: View {
         }
     }
 }
+
+extension View {
+    /// The error alert every live session shares. A failed save keeps the
+    /// session on screen: Try again, or Close and let the screen's teardown
+    /// make one last attempt in the background. Other errors just need OK.
+    func sessionErrorAlert(_ message: Binding<String?>, saveFailed: Binding<Bool>,
+                           retry: @escaping () -> Void, close: @escaping () -> Void) -> some View {
+        alert(saveFailed.wrappedValue ? "Couldn't save the session" : "Something went wrong",
+              isPresented: Binding(get: { message.wrappedValue != nil },
+                                   set: { if !$0 { message.wrappedValue = nil } })) {
+            if saveFailed.wrappedValue {
+                Button("Try again") { saveFailed.wrappedValue = false; retry() }
+                Button("Close", role: .cancel) { saveFailed.wrappedValue = false; close() }
+            } else {
+                Button("OK", role: .cancel) {}
+            }
+        } message: {
+            Text(message.wrappedValue ?? "")
+        }
+    }
+}
+
+/// A one-line note over the tabs that clears itself, e.g. why a session
+/// left no summary. Tap to dismiss early.
+struct NoticeBanner: View {
+    let text: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        Label(text, systemImage: "info.circle.fill")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.panel, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.08)))
+            .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
+            .padding(.horizontal, Metrics.screenPadding)
+            .onTapGesture(perform: onDismiss)
+            .task(id: text) {
+                AccessibilityNotification.Announcement(text).post()
+                try? await Task.sleep(for: .seconds(3.5))
+                if !Task.isCancelled { onDismiss() }
+            }
+            .accessibilityAddTraits(.isStaticText)
+    }
+}

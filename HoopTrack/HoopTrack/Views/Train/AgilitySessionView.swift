@@ -9,7 +9,7 @@ import Combine
 struct AgilitySessionView: View {
 
     let namedDrill: NamedDrill?
-    let onFinish: (SessionResult?) -> Void
+    let onFinish: (SessionEnd?) -> Void
 
     @EnvironmentObject private var dataService: DataService
     @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
@@ -44,7 +44,8 @@ struct AgilitySessionView: View {
 
 private struct AgilityContent: View {
     @ObservedObject var viewModel: AgilitySessionViewModel
-    let onFinish: (SessionResult?) -> Void
+    let onFinish: (SessionEnd?) -> Void
+    @State private var saveFailed = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -70,11 +71,18 @@ private struct AgilityContent: View {
 
             attemptsList
 
-            HoldToEndButton(isBusy: viewModel.isEnding) {
-                Task { onFinish(await viewModel.end()) }
-            }
+            HoldToEndButton(isBusy: viewModel.isEnding, onConfirm: finish)
         }
         .padding(Metrics.screenPadding)
+        .sessionErrorAlert($viewModel.errorMessage, saveFailed: $saveFailed,
+                           retry: finish, close: { onFinish(nil) })
+    }
+
+    private func finish() {
+        Task {
+            guard let end = await viewModel.end() else { return }
+            if case .failed = end { saveFailed = true } else { onFinish(end) }
+        }
     }
 
     private var isBusy: Bool {

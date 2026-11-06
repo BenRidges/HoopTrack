@@ -97,24 +97,26 @@ import Combine
         }
     }
 
-    func end() async -> SessionResult? {
-        guard !isEnding, let session else { return nil }
+    /// Finishes the session. Nil when an end is already under way.
+    func end() async -> SessionEnd? {
+        guard !isEnding else { return nil }
         isEnding = true
         countdownTask?.cancel()
         resetTask?.cancel()
+        guard let session else { return .discarded }
         if shuttleAttempts.isEmpty && laneAttempts.isEmpty {
             dataService.discardSession(session)
-            return nil
+            return .discarded
         }
         let attempts = AgilityAttempts(bestShuttleRunSeconds: shuttleAttempts.min(),
                                        bestLaneAgilitySeconds: laneAttempts.min())
         do {
-            return try await coordinator.finaliseAgilitySession(session, attempts: attempts,
-                                                                activeDuration: Date.now.timeIntervalSince(startedAt))
+            return .saved(try await coordinator.finaliseAgilitySession(
+                session, attempts: attempts, activeDuration: Date.now.timeIntervalSince(startedAt)))
         } catch {
             errorMessage = error.localizedDescription
             isEnding = false
-            return nil
+            return .failed
         }
     }
 
