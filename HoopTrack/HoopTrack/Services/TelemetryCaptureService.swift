@@ -57,10 +57,10 @@ final class TelemetryCaptureService {
         let extraction = await Task.detached { () -> (frames: Int, frameBytes: Int)? in
             do {
                 let log = try Self.readLog(at: logURL).sorted { $0.timestampSec < $1.timestampSec }
-                let shotTimes = shots.map(\.videoSec)
+                let shotTimes = FrameSampler.shotMoments(log: log, shotTimestamps: shots.map(\.videoSec))
                 let timestamps = FrameSampler.sampleTimestamps(
                     log: log,
-                    shotTimestamps: shotTimes,
+                    shotTimestamps: shots.map(\.videoSec),
                     sessionDurationSec: sessionDurationSec
                 )
                 let extracted = try Self.extractFrames(videoURL: videoURL, timestamps: timestamps,

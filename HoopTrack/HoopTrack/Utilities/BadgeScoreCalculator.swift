@@ -254,15 +254,17 @@ enum BadgeScoreCalculator {
             return highFlyer(prVerticalJumpCm: profile.prVerticalJumpCm)
 
         // MARK: Consistency
+        // Shooting sessions without a shot (0 % FG) say nothing about
+        // consistency; counting them broke "Reliable" streaks.
         case .automatic:
             let recent = profile.sessions
-                .filter { $0.drillType == .freeShoot && $0.isComplete }
+                .filter { $0.drillType == .freeShoot && $0.isComplete && $0.shotsAttempted > 0 }
                 .sorted { $0.startedAt > $1.startedAt }
                 .prefix(10)
                 .map { $0.fgPercent }
             return automatic(recentFGPcts: Array(recent))
         case .metronome:
-            let shootingSessions = profile.sessions.filter { $0.drillType == .freeShoot && $0.isComplete }
+            let shootingSessions = profile.sessions.filter { $0.drillType == .freeShoot && $0.isComplete && $0.shotsAttempted > 0 }
             let values = shootingSessions.compactMap { $0.consistencyScore }
             let avg: Double? = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
             return metronome(avgReleaseAngleStdDev: avg, sessionCount: shootingSessions.count)
@@ -273,7 +275,7 @@ enum BadgeScoreCalculator {
             return iceVeins(careerFTPct: pct, totalFTAttempts: ftShots.count)
         case .reliable:
             let streak = profile.sessions
-                .filter { $0.drillType == .freeShoot && $0.isComplete }
+                .filter { $0.drillType == .freeShoot && $0.isComplete && $0.shotsAttempted > 0 }
                 .sorted { $0.startedAt > $1.startedAt }
                 .prefix(while: { $0.fgPercent >= 40 })
                 .count

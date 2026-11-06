@@ -62,7 +62,9 @@ final class AppServices: ObservableObject {
         // Keep the reminder window rolling.
         notificationService.refreshTrainingReminders(trainedToday: dataService.hasTrainedToday)
 
-        // CV-A — drain uploads left over from a previous launch (opt-in only).
+        // CV-A — clear what can't be sent, then drain uploads left over from
+        // a previous launch (opt-in only). Nothing is recording at launch.
+        telemetryUpload.tidyUp()
         if let uid = profile?.supabaseUserID.flatMap(UUID.init(uuidString:)) {
             Task { await telemetryUpload.uploadPending(userID: uid) }
         }

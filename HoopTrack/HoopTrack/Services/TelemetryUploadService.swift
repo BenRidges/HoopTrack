@@ -1,8 +1,10 @@
 // TelemetryUploadService.swift
 // Uploads pending TelemetryUpload rows to the Supabase `telemetry-sessions`
-// bucket. Wi-Fi-only, waits for connectivity. On success: deletes the local
-// session directory, updates the row. On failure: increments attempt count,
-// records error; abandoned after `maxUploadAttempts`.
+// bucket. Only on unmetered networks (SupabaseContainer.storage refuses
+// cellular and Low Data Mode); being off Wi-Fi doesn't count as a failed
+// attempt. On success: deletes the local session directory, updates the
+// row. On failure: increments attempt count, records error; abandoned
+// after `maxUploadAttempts`. `tidyUp()` clears what can never be sent.
 
 import Foundation
 import SwiftData
@@ -96,12 +98,43 @@ final class TelemetryUploadService {
             try? fileManager.removeItem(at: sessionDir)
 
         } catch {
-            row.state = Self.nextStateAfterFailure(
-                currentAttempts: row.attemptCount,
-                maxAttempts: HoopTrack.Telemetry.maxUploadAttempts
-            )
-            row.errorMessage = String(describing: error)
+            if (error as? URLError)?.networkUnavailableReason != nil {
+                // Cellular, hotspot or Low Data Mode: wait for Wi-Fi.
+                row.state = .pending
+                row.attemptCount -= 1
+            } else {
+                row.state = Self.nextStateAfterFailure(
+                    currentAttempts: row.attemptCount,
+                    maxAttempts: HoopTrack.Telemetry.maxUploadAttempts
+                )
+                row.errorMessage = String(describing: error)
+            }
             try? modelContext.save()
+        }
+    }
+
+    // MARK: - Housekeeping
+
+    /// At launch: frees uploads interrupted when the app was closed, and
+    /// deletes local telemetry nothing will ever send: abandoned or sent
+    /// uploads, and logs from sessions that were never captured (too short,
+    /// discarded, recorded signed out).
+    func tidyUp() {
+        let rows = (try? modelContext.fetch(FetchDescriptor<TelemetryUpload>())) ?? []
+        var waiting = Set<UUID>()
+        for row in rows {
+            if row.state == .uploading { row.state = .pending }
+            if Self.isEligibleForRetry(state: row.state, attempts: row.attemptCount) {
+                waiting.insert(row.sessionID)
+            }
+        }
+        try? modelContext.save()
+
+        let root = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(HoopTrack.Telemetry.telemetryDirectoryName)
+        let folders = (try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        for folder in folders where !(UUID(uuidString: folder.lastPathComponent).map(waiting.contains) ?? false) {
+            try? fileManager.removeItem(at: folder)
         }
     }
 

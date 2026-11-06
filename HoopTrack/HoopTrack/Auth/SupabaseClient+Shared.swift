@@ -46,10 +46,21 @@ enum SupabaseContainer {
         headers["Authorization"] = "Bearer \(accessToken)"
         let config = StorageClientConfiguration(
             url: HoopTrack.Backend.supabaseURL.appendingPathComponent("storage/v1"),
-            headers: headers
+            headers: headers,
+            session: StorageHTTPSession(session: unmeteredSession)
         )
         return SupabaseStorageClient(configuration: config)
     }
+
+    /// Telemetry uploads run to tens of MB, so they never use cellular, a
+    /// personal hotspot or Low Data Mode. (The upload service's header
+    /// promised Wi-Fi only; nothing enforced it.)
+    private static let unmeteredSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.allowsExpensiveNetworkAccess = false
+        configuration.allowsConstrainedNetworkAccess = false
+        return URLSession(configuration: configuration)
+    }()
 
     /// Edge Functions, called as the signed-in user.
     static func functions() async throws -> FunctionsClient {

@@ -45,8 +45,17 @@ jobs:
           devices = json.load(sys.stdin)['devices']
           print(next(d['udid'] for runtime, ds in devices.items() if 'iOS' in runtime
                      for d in ds if d['name'].startswith('iPhone')))")
-          xcodebuild test \
+          # TEST_RUNNER_ variables reach the tests without the prefix:
+          # ScreenSnapshotTests writes a PNG of each main screen here.
+          TEST_RUNNER_SNAPSHOT_DIR="$RUNNER_TEMP/screens" xcodebuild test \
             -project HoopTrack.xcodeproj \
             -scheme HoopTrack \
             -destination "id=$SIM" \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
+      - name: Screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: ${{ runner.temp }}/screens
+          if-no-files-found: warn

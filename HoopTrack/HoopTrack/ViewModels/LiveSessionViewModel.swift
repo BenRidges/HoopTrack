@@ -161,8 +161,11 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         pipeline.recorder = recorder
         pipeline.publishesBall = showDetectionBoxes
         pipeline.isPaused = isPaused
-        // CV-A — local detection log, only when the user has opted in to sharing.
-        if AppPreferences.shareTrainingData, let logger = try? DetectionLogger(sessionID: session.id) {
+        // CV-A — local detection log, only when the user has opted in to
+        // sharing and is signed in (signed out, nothing could send it).
+        if AppPreferences.shareTrainingData,
+           (try? dataService.fetchOrCreateProfile())?.supabaseUserID != nil,
+           let logger = try? DetectionLogger(sessionID: session.id) {
             pipeline.attachTelemetry(logger: logger)
         }
         pipeline.start(framePublisher: camera.framePublisher, delegate: self)

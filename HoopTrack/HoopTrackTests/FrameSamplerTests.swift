@@ -113,4 +113,13 @@ final class FrameSamplerTests: XCTestCase {
         XCTAssertEqual(timestamps, timestamps.sorted())
         XCTAssertEqual(Set(timestamps).count, timestamps.count)
     }
+
+    func test_shotMoments_includeTheTrackersCallsAtTheRim() {
+        var call = DetectionLogEntry(timestampSec: 5.2, ballConfidence: 0.8, ballBox: nil,
+                                     rimConfidence: nil, rimBox: nil, state: "tracking")
+        call.event = "make"
+        let plain = DetectionLogEntry(timestampSec: 5.3, ballConfidence: 0.8, ballBox: nil,
+                                      rimConfidence: nil, rimBox: nil, state: "idle")
+        XCTAssertEqual(FrameSampler.shotMoments(log: [call, plain], shotTimestamps: [4.0]), [4.0, 5.2])
+    }
 }

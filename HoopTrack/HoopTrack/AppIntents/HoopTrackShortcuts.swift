@@ -17,7 +17,7 @@ struct HoopTrackShortcuts: AppShortcutsProvider {
                 "Start shooting in \(.applicationName)",
                 "Begin a shooting session in \(.applicationName)"
             ],
-            shortTitle: "Free Shoot",
+            shortTitle: "Start Shooting",
             systemImageName: "basketball.fill"
         )
 

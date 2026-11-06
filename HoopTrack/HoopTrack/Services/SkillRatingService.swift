@@ -13,7 +13,7 @@ import SwiftData
 
         // Extract primitives for calculators
         let recentFGPcts = profile.sessions
-            .filter { $0.drillType == .freeShoot && $0.isComplete }
+            .filter { $0.drillType == .freeShoot && $0.isComplete && $0.shotsAttempted > 0 }
             .sorted { $0.startedAt > $1.startedAt }
             .prefix(10)
             .map { $0.fgPercent }
@@ -26,7 +26,11 @@ import SwiftData
             return Double(n) / Double(session.shotsAttempted)
         }()
 
-        let shootingScore = SkillRatingCalculator.shootingScore(
+        // Only a session with shots says anything about shooting. Without
+        // this guard a dribble or agility session (0 shots, 0 % FG) pulled
+        // the shooting and consistency ratings towards zero.
+        let tookShots = session.shotsAttempted > 0
+        let shootingScore = !tookShots ? nil : SkillRatingCalculator.shootingScore(
             fgPct:                session.fgPercent,
             threePct:             session.threePointPercentage,
             ftPct:                session.freeThrowPercentage,
@@ -48,10 +52,11 @@ import SwiftData
 
         let athleticismScore = SkillRatingCalculator.athleticismScore(
             verticalJumpCm: session.avgVerticalJumpCm,
-            shuttleRunSec:  session.bestShuttleRunSeconds
+            shuttleRunSec:  session.bestShuttleRunSeconds,
+            laneAgilitySec: session.bestLaneAgilitySeconds
         )
 
-        let consistencyScore = SkillRatingCalculator.consistencyScore(
+        let consistencyScore = !tookShots ? nil : SkillRatingCalculator.consistencyScore(
             releaseAngleStdDev: session.consistencyScore,
             fgPctHistory:       Array(recentFGPcts),
             ftPct:              session.freeThrowPercentage,

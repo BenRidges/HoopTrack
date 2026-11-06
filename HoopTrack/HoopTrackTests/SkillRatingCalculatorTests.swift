@@ -128,9 +128,11 @@ final class SkillRatingCalculatorTests: XCTestCase {
     }
 
     func test_athleticismScore_jumpOnlyUsesFullWeight() {
+        // 55 cm is halfway through the jump range; 5.5 s is an elite shuttle.
         let jumpOnly = SkillRatingCalculator.athleticismScore(verticalJumpCm: 55, shuttleRunSec: nil)!
-        let bothData = SkillRatingCalculator.athleticismScore(verticalJumpCm: 55, shuttleRunSec: 7.5)!
-        XCTAssertNotEqual(jumpOnly, bothData, accuracy: 5.0)
+        let bothData = SkillRatingCalculator.athleticismScore(verticalJumpCm: 55, shuttleRunSec: 5.5)!
+        XCTAssertEqual(jumpOnly, 50, accuracy: 0.01)
+        XCTAssertEqual(bothData, 0.6 * 50 + 0.4 * 100, accuracy: 0.01)
     }
 
     // MARK: - consistencyScore
@@ -183,5 +185,22 @@ final class SkillRatingCalculatorTests: XCTestCase {
         let withShooting    = SkillRatingCalculator.overallScore(shooting: 100, handling: nil, athleticism: nil, consistency: nil, volume: 0)
         let withoutShooting = SkillRatingCalculator.overallScore(shooting: nil, handling: nil, athleticism: nil, consistency: nil, volume: 0)
         XCTAssertGreaterThan(withShooting, withoutShooting)
+    }
+
+    // MARK: - athleticism speed ranges
+
+    func test_athleticism_shuttleRun_usesItsOwnRange() {
+        let R = HoopTrack.SkillRating.self
+        let mid = (R.shuttleRunBestSec + R.shuttleRunWorstSec) / 2
+        let score = SkillRatingCalculator.athleticismScore(verticalJumpCm: nil, shuttleRunSec: mid)
+        XCTAssertEqual(score!, 50, accuracy: 0.01)
+    }
+
+    func test_athleticism_laneAgility_countsWhenThereIsNoShuttle() {
+        let R = HoopTrack.SkillRating.self
+        let score = SkillRatingCalculator.athleticismScore(verticalJumpCm: nil, shuttleRunSec: nil,
+                                                           laneAgilitySec: R.laneAgilityBestSec)
+        XCTAssertEqual(score!, 100, accuracy: 0.01)
+        XCTAssertNil(SkillRatingCalculator.athleticismScore(verticalJumpCm: nil, shuttleRunSec: nil))
     }
 }

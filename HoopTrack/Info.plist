@@ -36,7 +36,7 @@
     <key>NSFaceIDUsageDescription</key>
     <string>HoopTrack uses Face ID to unlock your training history when the app lock is on.</string>
     <key>NSHealthUpdateUsageDescription</key>
-    <string>HoopTrack logs your basketball sessions as workouts in the Health app, including active time and estimated calories.</string>
+    <string>HoopTrack saves your basketball sessions to the Health app as workouts, with when they started and ended.</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>

@@ -18,7 +18,7 @@ nonisolated enum FrameSampler {
         guard !log.isEmpty, sessionDurationSec > 0 else { return [] }
 
         let baseline   = baselineTimestamps(durationSec: sessionDurationSec)
-        let aroundShot = aroundShotTimestamps(log: log, shots: shotTimestamps)
+        let aroundShot = aroundShotTimestamps(log: log, shots: shotMoments(log: log, shotTimestamps: shotTimestamps))
         let flicker    = flickerTimestamps(log: log)
         let boundary   = boundaryTimestamps(log: log)
 
@@ -32,6 +32,14 @@ nonisolated enum FrameSampler {
             boundary: boundary,
             cap: HoopTrack.Telemetry.maxFramesPerSession
         )
+    }
+
+    /// The moments around which frames are worth having: each saved shot's
+    /// time (release, for auto calls) plus every call the tracker logged.
+    /// Shot times alone only covered the release; the frames that decide
+    /// make or miss are at the rim, a second or so later.
+    static func shotMoments(log: [DetectionLogEntry], shotTimestamps: [Double]) -> [Double] {
+        shotTimestamps + log.compactMap { $0.event == nil ? nil : $0.timestampSec }
     }
 
     // MARK: - Triggers

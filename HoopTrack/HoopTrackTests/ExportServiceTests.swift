@@ -58,6 +58,22 @@ final class ExportServiceTests: XCTestCase {
         XCTAssertEqual(firstShot?["made"] as? Bool, true)
     }
 
+    func test_exportJSON_includesGoalsBadgesAndPlayoffRuns() async throws {
+        let profile = try dataService.fetchOrCreateProfile()
+        try dataService.addGoal(GoalRecord(title: "Hit 45%", skill: .shooting, metric: .fgPercent,
+                                           targetValue: 45, baselineValue: 30), to: profile)
+        _ = try dataService.startPlayoffSeries(spot: .threes)
+
+        let url = try await ExportService().exportJSON(for: profile)
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+
+        XCTAssertEqual((json["goals"] as? [[String: Any]])?.first?["metric"] as? String, "FG %")
+        XCTAssertEqual((json["playoffRuns"] as? [[String: Any]])?.first?["spot"] as? String, "threes")
+        XCTAssertNotNil(json["badges"])
+        XCTAssertNotNil(json["games"])
+        XCTAssertNotNil(json["career"])
+    }
+
     func test_exportJSON_emptySessionListProducesValidJSON() async throws {
         let profile = try dataService.fetchOrCreateProfile()
         profile.name = "Empty Player"

@@ -112,23 +112,36 @@ enum SkillRatingCalculator {
 
     // MARK: - Athleticism
 
+    /// Jump height and speed. Speed comes from the shuttle run, or the lane
+    /// agility drill when there's no shuttle time; each is scored against
+    /// its own range (they used to share the lane-agility one, so almost
+    /// any shuttle run scored 100 and lane times were ignored).
     static func athleticismScore(
         verticalJumpCm: Double?,
-        shuttleRunSec: Double?
+        shuttleRunSec: Double?,
+        laneAgilitySec: Double? = nil
     ) -> Double? {
-        guard verticalJumpCm != nil || shuttleRunSec != nil else { return nil }
         let R = HoopTrack.SkillRating.self
+        let speed: Double? = {
+            if let shuttle = shuttleRunSec {
+                return normalize(R.shuttleRunWorstSec - shuttle, min: 0,
+                                 max: R.shuttleRunWorstSec - R.shuttleRunBestSec)
+            }
+            if let lane = laneAgilitySec {
+                return normalize(R.laneAgilityWorstSec - lane, min: 0,
+                                 max: R.laneAgilityWorstSec - R.laneAgilityBestSec)
+            }
+            return nil
+        }()
+        guard verticalJumpCm != nil || speed != nil else { return nil }
         var components: [(value: Double, weight: Double)] = []
 
         if let jump = verticalJumpCm {
-            let w = shuttleRunSec == nil ? 1.0 : 0.60
+            let w = speed == nil ? 1.0 : 0.60
             components.append((normalize(jump, min: R.verticalJumpMinCm, max: R.verticalJumpMaxCm), w))
         }
-        if let shuttle = shuttleRunSec {
-            let score = normalize(R.laneAgilityWorstSec - shuttle,
-                                   min: 0,
-                                   max: R.laneAgilityWorstSec - R.laneAgilityBestSec)
-            components.append((score, 0.40))
+        if let speed {
+            components.append((speed, 0.40))
         }
 
         let totalWeight = components.reduce(0) { $0 + $1.weight }
