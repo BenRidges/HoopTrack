@@ -22,7 +22,11 @@ final class MetricsService: NSObject, ObservableObject {
     }
 
     deinit {
-        MXMetricManager.shared.remove(self)
+        // Only the app's own instance registers, and it lives for the whole
+        // launch. Handing MetricKit an object that is already being freed lets
+        // it message the dead object later from its own queue; that crashed
+        // the test host whenever a test released its AppServices.
+        if isRegistered { MXMetricManager.shared.remove(self) }
     }
 
     // MARK: - Log Helpers
