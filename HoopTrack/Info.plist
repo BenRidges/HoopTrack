@@ -29,6 +29,8 @@
             </array>
         </dict>
     </array>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>NSCameraUsageDescription</key>
     <string>HoopTrack watches the ball and hoop to log your makes, misses and where you shot from. Session videos are saved on this phone.</string>
     <key>NSFaceIDUsageDescription</key>

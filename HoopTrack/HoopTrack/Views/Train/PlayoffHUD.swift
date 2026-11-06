@@ -51,7 +51,7 @@ struct PlayoffScoreboard: View {
         switch run.status {
         case .playing:  return "\(run.roundName.uppercased()) · GAME \(run.gameNumber)"
         case .comeback: return "COMEBACK · \(run.roundName.uppercased())"
-        case .champion, .retired: return "PLAYOFFS · \(run.spot.rawValue.uppercased())"
+        case .champion, .retired: return "PLAYOFFS · \(run.spot.displayName.uppercased())"
         }
     }
 
@@ -200,7 +200,7 @@ struct PlayoffMomentCard: View {
             let spot = comebackZone.map { ", ideally from \($0.displayName.lowercased())" } ?? ""
             return "Lost \(game.seriesWins)–\(game.seriesLosses) in the \(PlayoffRun.roundName(round).lowercased()). Make \(run.comebackTarget)\(spot) to earn another shot."
         case .champion:
-            return "\(run.spot.rawValue) playoffs won in \(run.games.count) games."
+            return "\(run.spot.displayName) playoffs won in \(run.games.count) games."
         case .comebackComplete(let round):
             return "\(PlayoffRun.roundName(round)), from 0–0."
         }

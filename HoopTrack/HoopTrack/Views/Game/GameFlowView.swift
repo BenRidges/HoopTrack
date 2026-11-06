@@ -182,7 +182,7 @@ private struct ScorekeeperView: View {
 
     private func winnerBanner(_ team: TeamAssignment) -> some View {
         HStack {
-            Text("\(team.rawValue) wins")
+            Text("\(team.displayName) wins")
                 .font(.headline)
             Spacer()
             Button("Finish") { end() }

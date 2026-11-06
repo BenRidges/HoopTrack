@@ -93,7 +93,7 @@ All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums:
 
 - **`Utilities/KeychainService.swift`** — `@MainActor final class`. All auth tokens and sensitive values go here — never `UserDefaults`. Key constants in `HoopTrack.KeychainKey`. Call `deleteAll()` during account deletion.
 - **`Utilities/InputValidator.swift`** — Pure `enum` with static validators. Call before persisting any sensor value or user string: `isValidReleaseAngle`, `isValidJumpHeight`, `isValidCourtCoordinate`, `sanitisedProfileName`.
-- **`Utilities/PinningURLSessionDelegate.swift`** — SPKI SHA-256 cert pinning (real Supabase hashes live since Phase 9). **Delegate is not yet wired into supabase-swift's URLSession — the pins are scenery until that happens.** Tracked P0 in `docs/production-readiness.md`.
+- **`Utilities/PinningURLSessionDelegate.swift`** — SPKI SHA-256 pinning, checked against every certificate in the chain. **Deliberately not wired in**: Supabase is served through Cloudflare, which rotates certificates and CAs without notice, so pins would eventually lock users out. Reasoning in the class doc and `docs/production-readiness.md`.
 - **`PrivacyInfo.xcprivacy`** — App Store privacy manifest. Auto-discovered by Xcode 26. No pbxproj edits needed.
 - **`DataService.deleteAllUserData()`** — GDPR right-to-delete. Deletes every SwiftData record (all ten models), session videos, telemetry files, exports, the Keychain, and every key in `AppPreferences.allKeys`.
 
@@ -104,6 +104,9 @@ All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums:
 - **`AppLock`** — optional Face ID / passcode lock, independent of signing in. Re-locks after `HoopTrack.Auth.backgroundLockTimeoutSec` in the background; `LockedView` overlays `RootView`.
 - **`PlayerProfile.supabaseUserID`** — linked in `HoopTrackApp` when a verified user is restored, unlinked only on explicit sign-out; canonical key for RLS `auth.uid()` matching.
 - **Sign in with Apple is intentionally skipped.** Email-only is App Store compliant when no other social provider is offered.
+- **Password reset** — `hooptrack://auth/reset` (`HoopTrack.Auth.passwordResetURL`); the link signs the user in and `AuthViewModel.isSettingNewPassword` shows `SetNewPasswordView` as a layer over `RootView`.
+- **Account deletion** — `AuthViewModel.deleteAccount()` → `delete-account` Edge Function (`supabase/functions/`, deployed by hand). "Delete all my data" deletes the account first and aborts if that fails.
+- **`BackendSecrets.swift`** — Debug builds use the development project, Release the production one (`#if DEBUG` in the file).
 
 ### Sync layer (added Phase 9)
 
@@ -111,7 +114,7 @@ All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums:
 - **`SessionFinalizationCoordinator` step 8** — `kickOffSync(session:profile:)` fires a fire-and-forget Supabase upload after every shooting / dribble / agility session. Skips if no coordinator injected, no signed-in user, `endedAt == nil`, or `durationSeconds < 30`.
 - **`cloudSyncedAt: Date?`** on the 5 syncable models — nil means never-synced or dirty. Stamped by `SyncCoordinator` after a successful upsert.
 - **Postgres schema + RLS** live on Supabase project `nfzhqcgofuohsjhtxvqa`. 5 tables, 16 RLS policies keyed on `auth.uid()`. `shot_records` is append-only by policy (select + insert only).
-- **Row-to-model mapping uses enum `rawValue`** — display strings ("Free Shoot", "Mid-Range", "Make"). Renaming a UI label would break existing Postgres rows until stable `exportKey`s are introduced on `DrillType` / `ShotResult` / `ShotType` / `SkillDimension` / `GoalMetric`. Flagged P0 in `docs/production-readiness.md`.
+- **Enum raw values are storage keys** — SwiftData and the Postgres rows both hold them ("Free Shoot", "Mid-Range", "Make"). Never change one; UI text comes from `displayName`. `PersistedKeysTests` fails on any change.
 
 ## Testing conventions
 

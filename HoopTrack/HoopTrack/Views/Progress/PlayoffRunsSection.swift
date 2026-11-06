@@ -37,7 +37,7 @@ struct PlayoffRunsSection: View {
                 .foregroundStyle(run.status == .champion ? Color.leather : .secondary)
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: 2) {
-                Text(run.spot.rawValue)
+                Text(run.spot.displayName)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.primary)
                 Text("\(run.standing) · \(run.createdAt.relativeDayLabel)")
@@ -100,7 +100,7 @@ struct PlayoffRunView: View {
             .padding(.bottom, 32)
         }
         .courtBackground()
-        .navigationTitle("\(series.spot.rawValue) playoffs")
+        .navigationTitle("\(series.spot.displayName) playoffs")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { run = dataService.playoffRun(for: series) }
         .onChange(of: dataService.revision) { _, _ in run = dataService.playoffRun(for: series) }

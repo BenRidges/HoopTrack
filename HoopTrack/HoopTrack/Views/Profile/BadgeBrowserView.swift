@@ -19,7 +19,7 @@ struct BadgeBrowserView: View {
                     }
                     .listRowBackground(Color.panel)
                 } header: {
-                    Label(dimension.rawValue, systemImage: dimension.systemImage)
+                    Label(dimension.displayName, systemImage: dimension.systemImage)
                 }
             }
         }

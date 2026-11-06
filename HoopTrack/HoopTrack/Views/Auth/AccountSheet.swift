@@ -1,6 +1,7 @@
 // AccountSheet.swift
 // Optional cloud backup account. Opened from Profile — the app never
-// blocks on it. Sign in / create account / confirm email in one sheet.
+// blocks on it. Sign in / create account / reset password / confirm email
+// in one sheet.
 
 import SwiftUI
 import UIKit
@@ -10,6 +11,10 @@ struct AccountSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var creating = false
+    @State private var resetting = false
+    @State private var resetNote: String?
+    @State private var resetFailed = false
+    @State private var isSendingReset = false
     @State private var email = ""
     @State private var password = ""
     @State private var confirm = ""
@@ -24,6 +29,8 @@ struct AccountSheet: View {
                 VStack(alignment: .leading, spacing: 24) {
                     if case .authenticated(let user) = authViewModel.state, !user.emailVerified {
                         verify(user)
+                    } else if resetting {
+                        resetForm
                     } else {
                         form
                     }
@@ -39,6 +46,9 @@ struct AccountSheet: View {
             }
             .onChange(of: authViewModel.state) { _, state in
                 if case .authenticated(let user) = state, user.emailVerified { dismiss() }
+            }
+            .onChange(of: authViewModel.isSettingNewPassword) { _, setting in
+                if setting { dismiss() }
             }
         }
         .presentationDragIndicator(.visible)
@@ -70,6 +80,17 @@ struct AccountSheet: View {
                 }
             }
 
+            if !creating {
+                Button("Forgot password?") {
+                    resetting = true
+                    resetNote = nil
+                    authViewModel.dismissError()
+                }
+                .font(.footnote.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, -8)
+            }
+
             if case .error(let error) = authViewModel.state {
                 Label(error.errorDescription ?? "Something went wrong.", systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
@@ -94,6 +115,55 @@ struct AccountSheet: View {
             }
             .font(.subheadline.weight(.semibold))
             .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: - Reset password
+
+    private var resetForm: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Reset your password")
+                    .font(.largeTitle.bold())
+                Text("We'll email you a link. Open it on this phone to choose a new password.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            field("Email", text: $email, field: .email)
+                .textContentType(.emailAddress)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            if let resetNote {
+                Label(resetNote, systemImage: resetFailed ? "exclamationmark.triangle.fill" : "envelope.fill")
+                    .font(.footnote)
+                    .foregroundStyle(resetFailed ? Color.miss : .secondary)
+            }
+
+            Button {
+                focused = nil
+                isSendingReset = true
+                Task {
+                    let error = await authViewModel.sendPasswordReset(email: email)
+                    resetFailed = error != nil
+                    resetNote = error?.errorDescription
+                        ?? "If there's an account for that email, the link is on its way."
+                    isSendingReset = false
+                }
+            } label: {
+                if isSendingReset {
+                    ProgressView().tint(Color.onLeather)
+                } else {
+                    Text("Send reset link")
+                }
+            }
+            .buttonStyle(.primary)
+            .disabled(email.isEmpty || isSendingReset)
+
+            Button("Back to sign in") { resetting = false }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
         }
     }
 

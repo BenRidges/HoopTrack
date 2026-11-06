@@ -15,6 +15,9 @@ final class MockAuthProvider: AuthProviding, @unchecked Sendable {
     var scriptedResendResult:  Result<Void, Error> = .success(())
     var scriptedRefreshResult: Result<AuthUser?, Error> = .success(nil)
     var scriptedDeepLinkResult: Result<AuthUser, Error>?
+    var scriptedResetResult: Result<Void, Error> = .success(())
+    var scriptedUpdatePasswordResult: Result<Void, Error> = .success(())
+    var scriptedDeleteAccountResult: Result<Void, Error> = .success(())
 
     // Call recorders — tests assert on these.
     private(set) var signUpCalls:  [(email: String, password: String)] = []
@@ -22,6 +25,9 @@ final class MockAuthProvider: AuthProviding, @unchecked Sendable {
     private(set) var signOutCount = 0
     private(set) var resendCalls: [String] = []
     private(set) var deepLinkCalls: [URL] = []
+    private(set) var resetCalls: [String] = []
+    private(set) var updatedPasswords: [String] = []
+    private(set) var deleteAccountCount = 0
 
     func restoreSession() async throws -> AuthUser? {
         try scriptedRestoreResult.get()
@@ -64,5 +70,20 @@ final class MockAuthProvider: AuthProviding, @unchecked Sendable {
                              emailVerified: true, createdAt: Date())
         }
         return try scripted.get()
+    }
+
+    func sendPasswordReset(to email: String) async throws {
+        resetCalls.append(email)
+        try scriptedResetResult.get()
+    }
+
+    func updatePassword(_ password: String) async throws {
+        updatedPasswords.append(password)
+        try scriptedUpdatePasswordResult.get()
+    }
+
+    func deleteAccount() async throws {
+        deleteAccountCount += 1
+        try scriptedDeleteAccountResult.get()
     }
 }

@@ -32,4 +32,15 @@ protocol AuthProviding: Sendable {
     /// a Supabase session. Called from the app's deep-link handler when the
     /// user taps the confirmation link in their email.
     func handleDeepLink(_ url: URL) async throws -> AuthUser
+
+    /// Emails a password-reset link that opens `HoopTrack.Auth.passwordResetURL`.
+    /// Succeeds whether or not an account exists, so it can't be used to probe emails.
+    func sendPasswordReset(to email: String) async throws
+
+    /// Sets a new password for the signed-in user (after a reset link).
+    func updatePassword(_ password: String) async throws
+
+    /// Deletes the account on the server (the `delete-account` Edge Function)
+    /// with everything synced to it, then drops the local session.
+    func deleteAccount() async throws
 }

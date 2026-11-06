@@ -1,7 +1,7 @@
 # Production Readiness Checklist
 
-**Last updated:** 2026-04-18
-**Status:** Active — items move from ⏳ to ✅ as they ship.
+**Last updated:** 2026-11-07
+**Status:** Active — items move from ⏳ to ✅ as they ship (🟡 = code done, a dashboard or App Store Connect step remains; ❎ = decided against, with the reason).
 
 This document tracks everything that is deliberately dev-only, placeholder, or deferred in the current codebase. It must reach zero P0 items before the first App Store submission.
 
@@ -28,13 +28,14 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
   - *Current:* `hooptrack://auth/callback` configured in dev project.
   - *Required:* Same URL configured in the **production** Supabase project (if separate from dev). Plus an **HTTPS Universal Link** option (e.g. `https://hooptrack.app/auth/callback`) for email clients that refuse to follow non-HTTPS redirects. Requires an `apple-app-site-association` file hosted at `/.well-known/apple-app-site-association` on the domain.
 
-- ⏳ **Forgot-password flow**
-  - *Current:* Not implemented. A user who forgets their password cannot recover the account.
-  - *Required:* New `ForgotPasswordView` off `SignInView`. Calls `client.resetPasswordForEmail(_:redirectTo:)`. Deep link handler recognises the password-reset callback and surfaces a `SetNewPasswordView`. ~2 hours of work.
+- ✅ **Forgot-password flow** (Nov 2026)
+  - Account sheet → "Forgot password?" sends `resetPasswordForEmail` with `hooptrack://auth/reset`. The link signs the user in, and `SetNewPasswordView` asks for the new password.
+  - *Still needed (dashboard):* allow-list `hooptrack://auth/reset` under Redirect URLs.
 
-- ⏳ **Server-side account deletion**
-  - *Current:* `DataService.deleteAllUserData()` wipes local SwiftData, files, Keychain, UserDefaults. Does **not** delete the Supabase user.
-  - *Required:* Add a Supabase Edge Function that deletes the authenticated user (`auth.admin.deleteUser(uid)`). App calls it from `DataService.deleteAllUserData()` before wiping local state. Required for App Store "Sign in with X" compliance if any social login is later added, and for GDPR / App Store Guideline 5.1.1(v) ("Account Deletion").
+- ✅ **Server-side account deletion** (Nov 2026)
+  - Profile → Delete account calls the `delete-account` Edge Function (`supabase/functions/delete-account`). It deletes the user's rows, their telemetry files and the auth user.
+  - "Delete all my data" deletes the account first and stops if the server can't be reached.
+  - *Still needed:* `supabase functions deploy delete-account` (see `supabase/README.md`).
 
 - ⏳ **PKCE vs. OTP flow decision**
   - *Current:* PKCE flow + custom URL scheme. Works on iOS Mail, fragile with email-preview scanners (Outlook, corporate Gmail) that can pre-consume tokens.
@@ -89,11 +90,14 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 ### P0 — Blocking
 
 - ✅ **Real Supabase SPKI SHA-256 hash in `PinningURLSessionDelegate`** — shipped in Phase 9 (commit `4cbd258`). Primary pin is the GTS WE1 intermediate; backup pin is the supabase.co leaf. Both EC P-256.
-- ⏳ **Wire `PinningURLSessionDelegate` into the supabase-swift URLSession** — NEW. The delegate has real hashes but is not yet routed to; supabase-swift uses its own default `URLSession`. Construct a custom `URLSessionConfiguration` and pass it into `AuthClient.Configuration` + `PostgrestClient` init. Without this, the pin hashes are scenery — TLS still validates via system trust only.
+- ❎ **Wire `PinningURLSessionDelegate` into supabase-swift: decided against** (Nov 2026)
+  - The delegate had a bug: it only hashed the leaf certificate, while the primary pin is the intermediate. Wired in, every request would have failed after the first leaf renewal. Now fixed: any certificate in the chain matches, and every key type is handled.
+  - Still deliberately unwired. `*.supabase.co` is served through Cloudflare, which renews about every 90 days and can switch CA (Let's Encrypt, Google Trust Services, SSL.com) without notice. Pins would eventually lock every user out until an app update. ATS already enforces TLS and a valid chain. The class doc says how to enable it if that changes.
 
-- ⏳ **Privacy manifest audit for all SPM dependencies**
-  - *Current:* `PrivacyInfo.xcprivacy` declares our first-party data categories from Phase 7.
-  - *Required:* `supabase-swift` and its transitive dependencies must each have their own privacy manifests. Apple requires the app's manifest to include the full list of "required reason API" declarations from the SDKs we use. If `supabase-swift` doesn't ship one (check its repo), we have to document its uses in ours.
+- ✅ **Privacy manifest audit** (Nov 2026)
+  - supabase-swift 2.43.1 and its dependencies use no required-reason APIs and ship no manifest.
+  - `PrivacyInfo.xcprivacy` now lists what is actually sent: email, user ID, fitness data, and opt-in frames and diagnostics. It dropped two declarations: "Health", which is never sent, and the invalid "VideoAndSoundData".
+  - Label answers: `docs/app-store/privacy.md`.
 
 - ⏳ **BackendSecrets.swift safety**
   - *Current:* Gitignored. Local copy has real anon key.
@@ -143,6 +147,11 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 
 ## Backend & Database (Phase 9 — Not Started)
 
+> **7 Nov 2026:** `nfzhqcgofuohsjhtxvqa.supabase.co` returns NXDOMAIN; the
+> domain no longer exists, so the project is paused or deleted. Sign-in
+> and sync can't work until it's restored or replaced. Free projects pause
+> after a week without traffic.
+
 ### P0 — Blocking (once Phase 9 begins)
 
 - ✅ **Postgres schema + RLS policies** — shipped in Phase 9. Five tables, 16 RLS policies keyed on `auth.uid()`, `shot_records` is append-only.
@@ -152,7 +161,9 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 - ⏳ **Config.xcconfig or similar for separate dev / staging / prod projects**
   - *Current:* Single project (`nfzhqcgofuohsjhtxvqa`), shared between dev testing and any future prod traffic.
   - *Recommended:* Three Supabase projects. Xcode build configuration selects which URL + anon key baked in. Avoids a dev-only database with prod data.
-- ⏳ **Stable enum export keys** — NEW. DTOs today serialize enum `rawValue` (display strings like "Free Shoot", "Mid-Range", "Make"). A UI relabel would create schema mismatch with existing Postgres rows. Introduce stable codes on `DrillType`, `ShotResult`, `ShotType`, `SkillDimension`, `GoalMetric` analogous to the existing `CourtZone.exportKey` pattern, then use those in DTOs.
+- ✅ **Stable enum keys** (Nov 2026)
+  - Raw values are frozen as storage keys. SwiftData uses them too, not just the DTOs. Every enum shown in the UI has a `displayName`.
+  - `PersistedKeysTests` fails if a key changes, so existing Postgres rows keep matching and no database migration is needed.
 
 ### P1 — High
 
@@ -168,25 +179,23 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 
 ### P0 — Blocking
 
-- ⏳ **App Store Connect metadata**
-  - App name, subtitle, description, keywords, categories, age rating.
-  - Screenshots at required iPhone sizes (6.7″, 6.5″, 5.5″) — App Store Connect rejects without these.
-  - Privacy Policy URL (required for any app collecting data).
-  - Support URL.
-  - Marketing URL (optional but recommended).
+- 🟡 **App Store Connect metadata** (drafted Nov 2026)
+  - Name, subtitle, description, keywords, categories, review notes and screenshot list: `docs/app-store/listing.md`.
+  - Privacy policy draft: `docs/app-store/privacy-policy.md`.
+  - *Still needed:* host the policy and a support page, then take the screenshots.
 
-- ⏳ **Age rating form filled accurately**
-  - HoopTrack isn't mature content but uses the camera and sends data. Confirm the rating matches reality.
+- 🟡 **Age rating form**
+  - 4+, with "None" for every content question. See `docs/app-store/listing.md`. Fill it in App Store Connect.
 
-- ⏳ **Privacy nutrition label**
-  - App Store Connect → Privacy. Declare every data category we collect, whether it's linked to the user's identity, and whether it's used for tracking. Must match `PrivacyInfo.xcprivacy` and actual behaviour. Easy to get wrong; re-review before every submission.
+- 🟡 **Privacy nutrition label**
+  - The answers are in `docs/app-store/privacy.md` and match `PrivacyInfo.xcprivacy`. Enter them in App Store Connect.
 
 - ⏳ **Real App Store build signed with distribution cert**
   - *Current:* All builds are development-signed.
   - *Required:* Production scheme with distribution provisioning profile. Upload via Xcode Organizer or `xcodebuild -exportArchive`.
 
-- ⏳ **Export compliance statement**
-  - Because we use TLS and auth tokens (cryptography), the Info.plist may need `ITSAppUsesNonExemptEncryption = false` (we only use standard TLS) or a real export compliance number.
+- ✅ **Export compliance** (Nov 2026)
+  - `ITSAppUsesNonExemptEncryption = NO` in Info.plist. The app only uses standard Apple TLS and the Keychain.
 
 ### P1 — High
 
@@ -211,8 +220,9 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
   - *Current:* Single project (dev).
   - *Required:* At minimum, a separate production project so dev tinkering can't nuke real user data. Three-tier (dev/staging/prod) is ideal.
 
-- ⏳ **Distinct `BackendSecrets.swift` per environment**
-  - Xcode build configurations can select different files via `EXCLUDED_SOURCE_FILE_NAMES`, or we use a single file whose values come from build settings fed by xcconfig per configuration. Either works.
+- 🟡 **Distinct backend per environment** (Nov 2026)
+  - `BackendSecrets.swift.example` now has a development project for Debug and a production one for Release (`#if DEBUG`), with no project-file changes.
+  - *Still needed:* create the production project, then update the local `BackendSecrets.swift` to the new shape.
 
 ### P1 — High
 
@@ -225,19 +235,17 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 
 ### P0 — Blocking
 
-- ⏳ **Gate or remove CV-A telemetry before App Store submission**
-  - *Current:* CV-A captures sampled frames + detection metadata from every session and uploads to Supabase Storage with no consent, no runtime gate, no UI. Acceptable for a single-dev pre-release project.
-  - *Required for submission:* Either (a) compile CV-A out entirely behind a build flag for Release builds, (b) convert to opt-in with an explicit consent screen under Profile → Privacy ("Help improve shot detection" toggle, default OFF), or (c) add a Supabase user-ID allowlist that disables telemetry for non-dev accounts. Option (b) matches Apple's telemetry-opt-in norms; (c) is lowest-friction if dev-testing is still ongoing at submission time.
+- ✅ **CV-A telemetry is opt-in** (Nov 2026)
+  - Profile → Privacy → "Help improve shot tracking", off by default. It needs an account, and nothing is logged or uploaded without it.
 
-- ⏳ **Game-mode privacy for telemetry-captured frames**
-  - *Current:* SP1 game sessions record 2v2/3v3 play to the local `.mov`, from which CV-A samples frames that include other players' torsos/faces. Uploaded to Supabase under the owner's user ID with no consent from the other participants.
-  - *Required for submission:* Either per-participant consent during `GameRegistrationView` that covers "your likeness may be uploaded to improve shot detection", or face-blurring applied to sampled frames before upload (Vision face detection + CIFilter Gaussian blur), or CV-A simply disabled during game-mode sessions.
+- ✅ **Game-mode privacy**
+  - Pickup games don't record video or telemetry, so no other players' frames are captured. Training sessions can still catch bystanders; the privacy policy asks users to turn sharing on only when people in view are happy with it.
 
 ### P1 — High
 
-- ⏳ **Telemetry dataset puller**
-  - *Current:* `hooptrack-ball-detection/TELEMETRY_PULLER.md` describes the intended Python script. Not implemented.
-  - *Required before regular dog-fooding:* Build the puller so uploaded sessions drain to local disk and the Supabase bucket stays near-empty. Without it the bucket hits the free-tier 1 GB ceiling at ~33 sessions.
+- 🟡 **Telemetry dataset puller**
+  - `Tools/dataset/build_dataset.py` turns downloaded sessions into a YOLO dataset with a review list.
+  - *Still needed:* a script that downloads the `telemetry-sessions` bucket and empties it. It needs the service key, so it runs on Ben's machine only.
 
 - ⏳ **Supabase Storage cost revisit**
   - *Current:* Free tier is fine at dev volumes with the staging-area pattern (bucket is transit-only, puller empties it).

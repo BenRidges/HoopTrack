@@ -17,7 +17,7 @@ struct PlayoffCard: View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("PLAYOFFS · \(series.spot.rawValue.uppercased())")
+                    Text("PLAYOFFS · \(series.spot.displayName.uppercased())")
                         .font(.label)
                         .foregroundStyle(Color.leather)
                     Spacer()
@@ -157,7 +157,7 @@ struct PlayoffSetupSheet: View {
                     .foregroundStyle(Color.leather)
                     .frame(width: 34)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(option.rawValue)
+                    Text(option.displayName)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.primary)
                     Text("\(option.detail) Makes to win: \(option.makesToWin.map(String.init).joined(separator: " · ")).")

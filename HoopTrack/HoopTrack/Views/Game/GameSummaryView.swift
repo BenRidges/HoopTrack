@@ -48,7 +48,7 @@ struct GameSummaryView: View {
 
     private func teamTable(_ team: TeamAssignment) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionLabel(team.rawValue)
+            SectionLabel(team.displayName)
             VStack(spacing: 0) {
                 row(name: "", pts: "PTS", fg: "FG", three: "3PT", header: true)
                 ForEach(lines.filter { $0.team == team }) { line in

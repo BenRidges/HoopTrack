@@ -23,13 +23,22 @@ struct RootView: View {
                     .transition(.opacity)
             }
 
+            // A layer, not a sheet: the reset link can arrive while another
+            // sheet is up, and two sheets can't be presented at once.
+            if authViewModel.isSettingNewPassword {
+                SetNewPasswordView()
+                    .transition(.move(edge: .bottom))
+                    .zIndex(1)
+            }
+
             if appLock.isLocked {
                 LockedView()
                     .transition(.opacity)
-                    .zIndex(1)
+                    .zIndex(2)
             }
         }
         .animation(.easeInOut(duration: 0.25), value: appLock.isLocked)
+        .animation(.easeInOut(duration: 0.3), value: authViewModel.isSettingNewPassword)
         .animation(.easeInOut(duration: 0.3), value: hasCompletedOnboarding)
         .fullScreenCover(item: $appState.activeLaunch, onDismiss: {
             Orientation.restorePortrait()

@@ -196,6 +196,8 @@ nonisolated enum HoopTrack {
         /// in the Supabase dashboard (Auth → URL Configuration → Redirect URLs).
         /// iOS routes the scheme back to the app via Info.plist CFBundleURLTypes.
         static let redirectURL = URL(string: "hooptrack://auth/callback")!
+        /// Where a password-reset email sends the user. Allow-list it too.
+        static let passwordResetURL = URL(string: "hooptrack://auth/reset")!
     }
 
 }

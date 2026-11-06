@@ -27,6 +27,9 @@ struct ProfileTabView: View {
     @State private var draftName = ""
     @State private var showAccount = false
     @State private var confirmDeleteAll = false
+    @State private var confirmDeleteAccount = false
+    @State private var isDeleting = false
+    @State private var deleteError: String?
     @State private var exportURL: URL?
     @State private var exportError: String?
     @State private var isExporting = false
@@ -98,16 +101,48 @@ struct ProfileTabView: View {
             Text(exportError ?? "")
         }
         .confirmationDialog("Delete everything?", isPresented: $confirmDeleteAll, titleVisibility: .visible) {
-            Button("Delete all my data", role: .destructive) {
+            Button("Delete all my data", role: .destructive) { deleteEverything() }
+        } message: {
+            Text(isSignedIn
+                 ? "Every session, shot, goal, badge, game and video on this phone is erased, and your account and cloud backup are deleted. Workouts already saved to Apple Health stay there. This can't be undone."
+                 : "Every session, shot, goal, badge, game and video on this phone is erased. Workouts already saved to Apple Health stay there. This can't be undone.")
+        }
+        .confirmationDialog("Delete your account?", isPresented: $confirmDeleteAccount, titleVisibility: .visible) {
+            Button("Delete account", role: .destructive) {
+                isDeleting = true
                 Task {
-                    await dataService.deleteAllUserData()
-                    await authViewModel.signOut()
-                    notificationService.cancelAll()
-                    _ = try? dataService.fetchOrCreateProfile()
+                    deleteError = await authViewModel.deleteAccount()?.errorDescription
+                    isDeleting = false
                 }
             }
         } message: {
-            Text("Every session, shot, goal, badge, game and video on this phone is erased, and you're signed out. Workouts already saved to Apple Health stay there. This can't be undone.")
+            Text("Your HoopTrack account and everything backed up to it are deleted. Sessions on this phone stay. This can't be undone.")
+        }
+        .alert("Couldn't delete", isPresented: Binding(get: { deleteError != nil },
+                                                      set: { if !$0 { deleteError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("\(deleteError ?? "") Nothing was deleted; try again when you're online.")
+        }
+    }
+
+    private var isSignedIn: Bool { authViewModel.state.isAuthenticated }
+
+    /// The account goes first: if the server can't be reached, stop before
+    /// wiping the phone, so the cloud copy isn't left behind unnoticed.
+    private func deleteEverything() {
+        isDeleting = true
+        Task {
+            if isSignedIn, let error = await authViewModel.deleteAccount() {
+                deleteError = error.errorDescription
+                isDeleting = false
+                return
+            }
+            await dataService.deleteAllUserData()
+            await authViewModel.signOut()
+            notificationService.cancelAll()
+            _ = try? dataService.fetchOrCreateProfile()
+            isDeleting = false
         }
     }
 
@@ -237,9 +272,19 @@ struct ProfileTabView: View {
         switch authViewModel.state {
         case .authenticated(let user) where user.emailVerified:
             LabeledContent("Signed in", value: user.email)
-            Button("Sign out", role: .destructive) {
+            Button("Sign out") {
                 Task { await authViewModel.signOut() }
             }
+            Button(role: .destructive) {
+                confirmDeleteAccount = true
+            } label: {
+                HStack {
+                    Text("Delete account")
+                    Spacer()
+                    if isDeleting { ProgressView() }
+                }
+            }
+            .disabled(isDeleting)
         case .authenticated:
             Button("Confirm your email") { showAccount = true }
         case .authenticating:
@@ -279,6 +324,7 @@ struct ProfileTabView: View {
         }
         .disabled(isExporting || profile == nil)
         Button("Delete all my data", role: .destructive) { confirmDeleteAll = true }
+            .disabled(isDeleting)
     }
 
     private func export() {

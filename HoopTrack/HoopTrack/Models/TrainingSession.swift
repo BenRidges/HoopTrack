@@ -119,7 +119,7 @@ final class TrainingSession {
     /// Shown in lists and headers: the named drill, else the drill type.
     var title: String {
         if playoffSeriesID != nil { return "Playoffs" }
-        return namedDrill?.rawValue ?? drillType.displayName
+        return namedDrill?.displayName ?? drillType.displayName
     }
 
     var shotsMissed: Int { shotsAttempted - shotsMade }

@@ -1,21 +1,34 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App Store privacy manifest. Audited November 2026 against what the app
+  actually sends off the phone (see docs/app-store/privacy.md, which also
+  has the matching App Store Connect privacy-label answers).
+
+  Nothing leaves the phone without an account. With one:
+    - the email and user id identify the account;
+    - sessions, shots, goals and badges are backed up (fitness data);
+  and only with "Help improve shot tracking" also on:
+    - sampled video frames and detection logs are uploaded to retrain
+      the shot detector.
+  Videos, Apple Health data and pickup-game appearance data never leave
+  the phone, so they aren't "collected" in Apple's sense.
+
+  supabase-swift 2.43.1 and its dependencies use none of the
+  required-reason APIs and ship no manifest of their own.
+-->
 <plist version="1.0">
 <dict>
-    <!-- Required reasons APIs -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+
+    <!-- Required-reason APIs -->
     <key>NSPrivacyAccessedAPITypes</key>
     <array>
-        <!-- File timestamp — AVCaptureSession, video file writes -->
-        <dict>
-            <key>NSPrivacyAccessedAPIType</key>
-            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
-            <key>NSPrivacyAccessedAPITypeReasons</key>
-            <array>
-                <string>C617.1</string>
-            </array>
-        </dict>
-        <!-- UserDefaults — app preferences (non-sensitive) -->
+        <!-- @AppStorage / UserDefaults: the app's own non-sensitive settings. -->
         <dict>
             <key>NSPrivacyAccessedAPIType</key>
             <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
@@ -24,17 +37,26 @@
                 <string>CA92.1</string>
             </array>
         </dict>
+        <!-- File metadata of session videos and telemetry files in the
+             app's own container. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>C617.1</string>
+            </array>
+        </dict>
     </array>
 
-    <!-- Data collection declarations -->
+    <!-- Data sent off the device (only with an account) -->
     <key>NSPrivacyCollectedDataTypes</key>
     <array>
-        <!-- Health/fitness data from CV pipeline -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>
-            <string>NSPrivacyCollectedDataTypeHealth</string>
+            <string>NSPrivacyCollectedDataTypeEmailAddress</string>
             <key>NSPrivacyCollectedDataTypeLinked</key>
-            <false/>
+            <true/>
             <key>NSPrivacyCollectedDataTypeTracking</key>
             <false/>
             <key>NSPrivacyCollectedDataTypePurposes</key>
@@ -42,12 +64,11 @@
                 <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
             </array>
         </dict>
-        <!-- Camera / video -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>
-            <string>NSPrivacyCollectedDataTypeVideoAndSoundData</string>
+            <string>NSPrivacyCollectedDataTypeUserID</string>
             <key>NSPrivacyCollectedDataTypeLinked</key>
-            <false/>
+            <true/>
             <key>NSPrivacyCollectedDataTypeTracking</key>
             <false/>
             <key>NSPrivacyCollectedDataTypePurposes</key>
@@ -55,26 +76,47 @@
                 <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
             </array>
         </dict>
-        <!-- Game Mode appearance descriptors (SP1) — session-scoped on-device
-             clothing-colour profile used only for live player attribution.
-             Never transmitted, deleted when the game session ends. Declared
-             as OtherDiagnosticData since there is no dedicated Apple category
-             for transient biometric-adjacent in-app data. -->
+        <!-- Cloud backup of sessions, shots, goals and badges. -->
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypeFitness</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <true/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+            </array>
+        </dict>
+        <!-- Opt-in: sampled frames from session videos. -->
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypePhotosorVideos</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <true/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+                <string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+            </array>
+        </dict>
+        <!-- Opt-in: per-frame detection logs that go with those frames. -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>
             <string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
             <key>NSPrivacyCollectedDataTypeLinked</key>
-            <false/>
+            <true/>
             <key>NSPrivacyCollectedDataTypeTracking</key>
             <false/>
             <key>NSPrivacyCollectedDataTypePurposes</key>
             <array>
                 <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+                <string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
             </array>
         </dict>
     </array>
-
-    <key>NSPrivacyTracking</key>
-    <false/>
 </dict>
 </plist>

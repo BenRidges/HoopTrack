@@ -167,7 +167,7 @@ struct TrainTabView: View {
                 ForEach(Array(NamedDrill.library.enumerated()), id: \.element) { index, drill in
                     if index > 0 { Hairline(inset: 64) }
                     DrillRow(icon: drill.drillType.systemImage,
-                             title: drill.rawValue,
+                             title: drill.displayName,
                              detail: drill.summary) {
                         hapticService.tap()
                         appState.activeLaunch = .forDrill(drill)

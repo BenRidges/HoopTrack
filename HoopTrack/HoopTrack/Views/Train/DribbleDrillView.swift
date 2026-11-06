@@ -104,7 +104,7 @@ private struct DribbleContent: View {
 
     private var topBar: some View {
         HStack {
-            Text(viewModel.namedDrill?.rawValue ?? "Ball handling")
+            Text(viewModel.namedDrill?.displayName ?? "Ball handling")
                 .font(.headline)
                 .foregroundStyle(.white)
             Spacer()

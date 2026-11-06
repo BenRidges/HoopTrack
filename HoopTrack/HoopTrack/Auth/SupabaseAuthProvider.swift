@@ -1,6 +1,7 @@
 // HoopTrack/Auth/SupabaseAuthProvider.swift
 import Foundation
 import Auth
+import Functions
 
 final class SupabaseAuthProvider: AuthProviding, @unchecked Sendable {
 
@@ -66,6 +67,32 @@ final class SupabaseAuthProvider: AuthProviding, @unchecked Sendable {
         } catch {
             throw mapError(error)
         }
+    }
+
+    func sendPasswordReset(to email: String) async throws {
+        do {
+            try await client.resetPasswordForEmail(email, redirectTo: HoopTrack.Auth.passwordResetURL)
+        } catch {
+            throw mapError(error)
+        }
+    }
+
+    func updatePassword(_ password: String) async throws {
+        do {
+            _ = try await client.update(user: UserAttributes(password: password))
+        } catch {
+            throw mapError(error)
+        }
+    }
+
+    func deleteAccount() async throws {
+        do {
+            try await SupabaseContainer.functions().invoke("delete-account")
+        } catch {
+            throw mapError(error)
+        }
+        // The server session died with the user; just forget it here.
+        try? await client.signOut(scope: .local)
     }
 
     // MARK: - Mapping

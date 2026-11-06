@@ -5,6 +5,7 @@
 import Foundation
 import Security
 import Auth
+import Functions
 import PostgREST
 import Storage
 
@@ -48,6 +49,17 @@ enum SupabaseContainer {
             headers: headers
         )
         return SupabaseStorageClient(configuration: config)
+    }
+
+    /// Edge Functions, called as the signed-in user.
+    static func functions() async throws -> FunctionsClient {
+        let accessToken = try await auth.session.accessToken
+        var headers = anonHeaders
+        headers["Authorization"] = "Bearer \(accessToken)"
+        return FunctionsClient(
+            url: HoopTrack.Backend.supabaseURL.appendingPathComponent("functions/v1"),
+            headers: headers
+        )
     }
 
     private static var anonHeaders: [String: String] {

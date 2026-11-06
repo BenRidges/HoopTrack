@@ -257,7 +257,7 @@ private struct SkillsSection: View {
                     .frame(width: 80)
                     VStack(spacing: 10) {
                         ForEach(SkillDimension.allCases) { skill in
-                            SkillBar(name: skill.rawValue, value: profile.skillRatings[skill] ?? 0)
+                            SkillBar(name: skill.displayName, value: profile.skillRatings[skill] ?? 0)
                         }
                     }
                 }

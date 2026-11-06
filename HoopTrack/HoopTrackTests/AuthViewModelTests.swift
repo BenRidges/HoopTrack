@@ -98,4 +98,64 @@ final class AuthViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state, .unauthenticated)
         XCTAssertEqual(mock.signOutCount, 1)
     }
+
+    // MARK: - Forgotten password
+
+    func test_passwordReset_validatesEmail_andDoesntTouchState() async {
+        let mock = MockAuthProvider()
+        let vm = AuthViewModel(provider: mock)
+        let bad = await vm.sendPasswordReset(email: "nope")
+        XCTAssertEqual(bad, .invalidEmail)
+        let ok = await vm.sendPasswordReset(email: "  a@b.co ")
+        XCTAssertNil(ok)
+        XCTAssertEqual(mock.resetCalls, ["a@b.co"])
+        XCTAssertEqual(vm.state, .unauthenticated)
+    }
+
+    func test_resetLink_asksForANewPassword() async {
+        let vm = AuthViewModel(provider: MockAuthProvider())
+        await vm.handleDeepLink(URL(string: "hooptrack://auth/reset?code=abc")!)
+        XCTAssertTrue(vm.isSettingNewPassword)
+        XCTAssertTrue(vm.state.isAuthenticated)
+
+        let confirmLink = AuthViewModel(provider: MockAuthProvider())
+        await confirmLink.handleDeepLink(URL(string: "hooptrack://auth/callback?code=abc")!)
+        XCTAssertFalse(confirmLink.isSettingNewPassword)
+    }
+
+    func test_setNewPassword_validatesThenSaves() async {
+        let mock = MockAuthProvider()
+        let vm = AuthViewModel(provider: mock)
+        vm.isSettingNewPassword = true
+        let short = await vm.setNewPassword("short", confirm: "short")
+        XCTAssertEqual(short, .passwordTooShort(minimum: HoopTrack.Auth.minPasswordLength))
+        let mismatch = await vm.setNewPassword("longenough1", confirm: "longenough2")
+        XCTAssertEqual(mismatch, .passwordMismatch)
+        let saved = await vm.setNewPassword("longenough1", confirm: "longenough1")
+        XCTAssertNil(saved)
+        XCTAssertEqual(mock.updatedPasswords, ["longenough1"])
+        XCTAssertFalse(vm.isSettingNewPassword)
+    }
+
+    // MARK: - Delete account
+
+    func test_deleteAccount_signsOutOnSuccess() async {
+        let mock = MockAuthProvider()
+        let vm = AuthViewModel(provider: mock)
+        await vm.signIn(email: "a@b.co", password: "password123")
+        let error = await vm.deleteAccount()
+        XCTAssertNil(error)
+        XCTAssertEqual(mock.deleteAccountCount, 1)
+        XCTAssertEqual(vm.state, .unauthenticated)
+    }
+
+    func test_deleteAccount_failure_keepsTheUserSignedIn() async {
+        let mock = MockAuthProvider()
+        mock.scriptedDeleteAccountResult = .failure(AuthError.networkUnavailable)
+        let vm = AuthViewModel(provider: mock)
+        await vm.signIn(email: "a@b.co", password: "password123")
+        let error = await vm.deleteAccount()
+        XCTAssertEqual(error, .networkUnavailable)
+        XCTAssertTrue(vm.state.isAuthenticated)
+    }
 }

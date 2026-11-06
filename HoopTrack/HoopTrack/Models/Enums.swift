@@ -1,6 +1,11 @@
 // Enums.swift
 // All shared domain enumerations used across models, view-models, and views.
 // Adding a new variant here is the single-source change needed for the whole app.
+//
+// Raw values are storage keys: SwiftData saves these enums by raw value and
+// the Supabase rows use the same strings. Changing one makes existing data
+// unreadable, so they never change (PersistedKeysTests holds them). Text
+// shown to people comes from `displayName`.
 
 import Foundation
 #if canImport(UIKit)
@@ -52,6 +57,22 @@ nonisolated enum NamedDrill: String, Codable, CaseIterable, Identifiable {
     case verticalJumpTest    = "Vertical Jump Test"
 
     var id: String { rawValue }
+
+    /// UI label.
+    var displayName: String {
+        switch self {
+        case .aroundTheArc:       return "Around the arc"
+        case .freethrowChallenge: return "Free throw challenge"
+        case .midSideMid:         return "Mid-side-mid"
+        case .fiveMinEndurance:   return "5-minute endurance"
+        case .mikanDrill:         return "Mikan drill"
+        case .crossoverSeries:    return "Crossover series"
+        case .twoBallDribble:     return "Two-ball dribble"
+        case .shuttleRun:         return "Shuttle run"
+        case .laneAgility:        return "Lane agility"
+        case .verticalJumpTest:   return "Vertical jump test"
+        }
+    }
 
     /// Drills offered in the library. The vertical jump test needs a jump
     /// measurement the app doesn't do yet; old sessions keep the case.
@@ -189,6 +210,18 @@ nonisolated enum SkillDimension: String, Codable, CaseIterable, Identifiable {
     case volume       = "Volume"
 
     var id: String { rawValue }
+
+    /// UI label.
+    var displayName: String {
+        switch self {
+        case .shooting:     return "Shooting"
+        case .ballHandling: return "Ball handling"
+        case .athleticism:  return "Athleticism"
+        case .consistency:  return "Consistency"
+        case .volume:       return "Volume"
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .shooting:     return "basketball"
@@ -250,6 +283,14 @@ nonisolated enum TeamAssignment: String, Codable, CaseIterable, Identifiable {
     case teamA = "Team A"
     case teamB = "Team B"
     var id: String { rawValue }
+
+    /// UI label.
+    var displayName: String {
+        switch self {
+        case .teamA: return "Team A"
+        case .teamB: return "Team B"
+        }
+    }
 }
 
 /// Point value of a shot in Game Mode — 2PT vs 3PT, derived from court position.
@@ -298,11 +339,20 @@ nonisolated enum SessionKind: String, Codable {
 
 /// Where a playoff run is shot from. Easier spots need more makes a game.
 nonisolated enum PlayoffSpot: String, Codable, CaseIterable, Identifiable {
-    case threes     = "Threes"
-    case midRange   = "Mid-range"
-    case freeThrows = "Free throws"
+    case threes
+    case midRange
+    case freeThrows
 
     var id: String { rawValue }
+
+    /// UI label.
+    var displayName: String {
+        switch self {
+        case .threes:     return "Threes"
+        case .midRange:   return "Mid-range"
+        case .freeThrows: return "Free throws"
+        }
+    }
 
     /// Makes needed to win a 10-shot game in rounds 1 to 4.
     var makesToWin: [Int] {

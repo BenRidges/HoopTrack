@@ -11,10 +11,15 @@ import Security
 /// which rotates ~every 5 years. The leaf is included as a backup.
 /// Both are P-256, so the algorithm-identifier prepend below is valid.
 ///
-/// **Not yet wired into supabase-swift.** The SDK uses its own URLSession
-/// under the hood; routing through this delegate requires constructing a
-/// custom `URLSessionConfiguration` and passing it into AuthClient /
-/// PostgrestClient. Tracked as a P0 in `docs/production-readiness.md`.
+/// **Deliberately not wired in** (Nov 2026). `*.supabase.co` is served
+/// through Cloudflare, whose certificates renew about every 90 days and may
+/// switch CA (Let's Encrypt, Google Trust Services, SSL.com) without
+/// notice. Any pin set short of every possible root would eventually lock
+/// every user out until an app update. iOS already enforces TLS and a valid
+/// chain (App Transport Security). If this is ever enabled, every client in
+/// `SupabaseContainer` takes a `fetch:` handler; pass
+/// `{ try await pinnedSession.data(for: $0) }`. See
+/// `docs/production-readiness.md`.
 ///
 /// Refresh pins via:
 ///   echo | openssl s_client -servername <project>.supabase.co \
@@ -51,9 +56,12 @@ final class PinningURLSessionDelegate: NSObject, URLSessionDelegate {
         didReceive challenge: URLAuthenticationChallenge,
         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
+        // Only server trust is ours to judge; anything else gets the default.
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
         guard
-            challenge.protectionSpace.authenticationMethod ==
-                NSURLAuthenticationMethodServerTrust,
             let serverTrust = challenge.protectionSpace.serverTrust,
             SecTrustEvaluateWithError(serverTrust, nil)
         else {
@@ -61,33 +69,52 @@ final class PinningURLSessionDelegate: NSObject, URLSessionDelegate {
             return
         }
 
-        // Extract the leaf certificate public key
-        guard
-            let certChain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
-            let leafCert = certChain.first,
-            let publicKey = SecCertificateCopyKey(leafCert),
-            let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data?
-        else {
+        // Any certificate in the chain may carry the pin: the primary pin
+        // is the intermediate, which the leaf-only check this replaced never
+        // looked at (so the pins failed as soon as the leaf renewed).
+        guard let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate] else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
-
-        // Prepend EC P-256 SPKI algorithm-identifier header so the hash matches
-        // the output of: openssl ... | openssl dgst -sha256 -binary | base64
-        let ecP256SpkiHeader = Data([
-            0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86,
-            0x48, 0xCE, 0x3D, 0x02, 0x01, 0x06, 0x08, 0x2A,
-            0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x03,
-            0x42, 0x00
-        ])
-        let spkiData = ecP256SpkiHeader + publicKeyData
-        let hash = SHA256.hash(data: spkiData)
-        let base64Hash = Data(hash).base64EncodedString()
-
-        if Self.pinnedHashes.contains(base64Hash) {
+        if chain.contains(where: { Self.spkiHash(of: $0).map(Self.pinnedHashes.contains) ?? false }) {
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
         } else {
             completionHandler(.cancelAuthenticationChallenge, nil)
+        }
+    }
+
+    // MARK: - SPKI
+
+    /// Base64 SHA-256 of the certificate's SubjectPublicKeyInfo, matching
+    /// `openssl x509 -pubkey | openssl pkey -pubin -outform der | sha256`.
+    /// Security.framework returns the bare key, so the ASN.1 header for its
+    /// type and size goes back on first. Nil for key types not listed.
+    static func spkiHash(of certificate: SecCertificate) -> String? {
+        guard let key = SecCertificateCopyKey(certificate),
+              let attributes = SecKeyCopyAttributes(key) as? [CFString: Any],
+              let type = attributes[kSecAttrKeyType] as? String,
+              let bits = attributes[kSecAttrKeySizeInBits] as? Int,
+              let header = spkiHeader(type: type, bits: bits),
+              let raw = SecKeyCopyExternalRepresentation(key, nil) as Data? else { return nil }
+        return Data(SHA256.hash(data: header + raw)).base64EncodedString()
+    }
+
+    private static func spkiHeader(type: String, bits: Int) -> Data? {
+        switch (type, bits) {
+        case (kSecAttrKeyTypeECSECPrimeRandom as String, 256):
+            return Data([0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01,
+                         0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00])
+        case (kSecAttrKeyTypeECSECPrimeRandom as String, 384):
+            return Data([0x30, 0x76, 0x30, 0x10, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01,
+                         0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x22, 0x03, 0x62, 0x00])
+        case (kSecAttrKeyTypeRSA as String, 2048):
+            return Data([0x30, 0x82, 0x01, 0x22, 0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7,
+                         0x0D, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0F, 0x00])
+        case (kSecAttrKeyTypeRSA as String, 4096):
+            return Data([0x30, 0x82, 0x02, 0x22, 0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7,
+                         0x0D, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x02, 0x0F, 0x00])
+        default:
+            return nil
         }
     }
 }

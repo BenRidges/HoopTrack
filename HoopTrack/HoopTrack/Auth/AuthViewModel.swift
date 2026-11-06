@@ -6,6 +6,9 @@ import Combine
 final class AuthViewModel: ObservableObject {
 
     @Published private(set) var state: AuthState = .unauthenticated
+    /// Set when a password-reset link opened the app; RootView then asks
+    /// for the new password.
+    @Published var isSettingNewPassword = false
 
     private let provider: AuthProviding
 
@@ -120,8 +123,55 @@ final class AuthViewModel: ObservableObject {
         do {
             let user = try await provider.handleDeepLink(url)
             state = .authenticated(user)
+            if url.path.lowercased().hasPrefix(HoopTrack.Auth.passwordResetURL.path) {
+                isSettingNewPassword = true
+            }
         } catch {
             state = .error(mapError(error))
+        }
+    }
+
+    // MARK: - Forgotten password
+
+    /// Sends the reset email. Errors are returned, not put in `state`, so a
+    /// failed send doesn't knock the sign-in form into an error state.
+    func sendPasswordReset(email: String) async -> AuthError? {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isValidEmail(trimmed) else { return .invalidEmail }
+        do {
+            try await provider.sendPasswordReset(to: trimmed)
+            return nil
+        } catch {
+            return mapError(error)
+        }
+    }
+
+    func setNewPassword(_ password: String, confirm: String) async -> AuthError? {
+        guard password.count >= HoopTrack.Auth.minPasswordLength else {
+            return .passwordTooShort(minimum: HoopTrack.Auth.minPasswordLength)
+        }
+        guard password == confirm else { return .passwordMismatch }
+        do {
+            try await provider.updatePassword(password)
+            isSettingNewPassword = false
+            return nil
+        } catch {
+            return mapError(error)
+        }
+    }
+
+    // MARK: - Delete account
+
+    /// Deletes the account and its cloud data. Nil on success, after which
+    /// the user is signed out.
+    func deleteAccount() async -> AuthError? {
+        guard state.isAuthenticated else { return nil }
+        do {
+            try await provider.deleteAccount()
+            state = .unauthenticated
+            return nil
+        } catch {
+            return mapError(error)
         }
     }
 
