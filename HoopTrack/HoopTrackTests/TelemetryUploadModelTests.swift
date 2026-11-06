@@ -6,8 +6,7 @@ import SwiftData
 final class TelemetryUploadModelTests: XCTestCase {
 
     private func makeContainer() throws -> ModelContainer {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        return try ModelContainer(for: TelemetryUpload.self, configurations: config)
+        try HoopTrackStore.makeInMemoryContainer()
     }
 
     func test_defaultState_isPending() throws {

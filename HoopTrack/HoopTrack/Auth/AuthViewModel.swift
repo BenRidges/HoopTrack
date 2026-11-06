@@ -76,17 +76,16 @@ final class AuthViewModel: ObservableObject {
         state = .unauthenticated
     }
 
-    // MARK: - Locking
+    // MARK: - Email confirmation
 
-    func lock() {
-        if case .authenticated(let user) = state {
-            state = .locked(user)
-        }
-    }
-
-    func unlock() {
-        if case .locked(let user) = state {
-            state = .authenticated(user)
+    /// Re-sends the sign-up confirmation email. Returns false on failure.
+    func resendConfirmation() async -> Bool {
+        guard let email = state.user?.email, !email.isEmpty else { return false }
+        do {
+            try await provider.resendConfirmationEmail(to: email)
+            return true
+        } catch {
+            return false
         }
     }
 

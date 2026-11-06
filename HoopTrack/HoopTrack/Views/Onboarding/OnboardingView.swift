@@ -1,335 +1,145 @@
 // OnboardingView.swift
-// 5-screen first-launch flow combining feature showcase with permission requests.
-// Gated by @AppStorage("hasCompletedOnboarding") — shown only once.
-// All page subviews are private to this file.
+// Two steps: who you are, and how to set the phone up. Permissions are
+// asked for when they're needed (camera here, because the next thing you
+// do is shoot; notifications only when you turn on a reminder).
+//
+// The old five-page flow saved the name to UserDefaults and only applied
+// it if the profile name was empty — it never was ("Player"), so names
+// entered during onboarding were silently dropped.
 
 import SwiftUI
 import AVFoundation
-import UserNotifications
 
 struct OnboardingView: View {
-    @Binding var hasCompletedOnboarding: Bool
-    @State private var currentPage = 0
+    let onComplete: () -> Void
+
+    @EnvironmentObject private var dataService: DataService
+    @EnvironmentObject private var cameraService: CameraService
+    @State private var step = 0
+    @State private var name = ""
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $currentPage) {
-                WelcomePage(currentPage: $currentPage)
-                    .tag(0)
-                CameraPage(currentPage: $currentPage)
-                    .tag(1)
-                NotificationsPage(currentPage: $currentPage)
-                    .tag(2)
-                GoalsPage(currentPage: $currentPage)
-                    .tag(3)
-                ProfileSetupPage(isComplete: $hasCompletedOnboarding)
-                    .tag(4)
+        ZStack {
+            Color.court.ignoresSafeArea()
+            if step == 0 {
+                welcome.transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
+            } else {
+                setup.transition(.move(edge: .trailing).combined(with: .opacity))
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
-
-            HStack(spacing: 8) {
-                ForEach(0..<5) { index in
-                    Circle()
-                        .fill(currentPage == index ? Color.orange : Color.white.opacity(0.3))
-                        .frame(width: 8, height: 8)
-                        .animation(.easeInOut(duration: 0.2), value: currentPage)
-                }
-            }
-            .padding(.bottom, 16)
         }
-        .background(Color(.systemBackground))
+        .animation(.easeInOut(duration: 0.3), value: step)
     }
-}
 
-// MARK: - Page 1: Welcome
+    // MARK: - Welcome
 
-private struct WelcomePage: View {
-    @Binding var currentPage: Int
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HalfCourtShape()
+                .stroke(Color.leather.opacity(0.35), lineWidth: 2)
+                .aspectRatio(CourtGeometry.widthFt / CourtGeometry.depthFt, contentMode: .fit)
+                .padding(.horizontal, -40)
+                .frame(maxHeight: 300)
+                .accessibilityHidden(true)
 
-    var body: some View {
-        VStack(spacing: 32) {
-            Spacer()
-            VStack(spacing: 16) {
-                Image(systemName: "basketball.fill")
-                    .font(.system(size: 80))
-                    .foregroundStyle(.orange)
-                Text("HoopTrack")
-                    .font(.system(size: 42, weight: .black, design: .rounded))
-                Text("Track every shot.\nOwn your game.")
+            VStack(alignment: .leading, spacing: 10) {
+                Text("HOOPTRACK")
+                    .font(.score(64))
+                Text("Prop up your phone, shoot, and see every make, miss and spot you shot from.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
+            .padding(.top, 8)
+
             Spacer()
-            Button {
-                withAnimation { currentPage = 1 }
-            } label: {
-                Text("Get Started")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.orange, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .foregroundStyle(.white)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("What should we call you?")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField("Your name", text: $name)
+                    .font(.title3)
+                    .textContentType(.givenName)
+                    .submitLabel(.continue)
+                    .focused($nameFocused)
+                    .onSubmit(next)
+                    .padding(16)
+                    .background(Color.panel, in: RoundedRectangle(cornerRadius: Metrics.controlRadius, style: .continuous))
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 48)
+
+            Button("Continue", action: next)
+                .buttonStyle(.primary)
+                .padding(.top, 16)
         }
-        .padding(.horizontal, 24)
+        .padding(Metrics.screenPadding)
     }
-}
 
-// MARK: - Page 2: Camera + Shot Tracking
+    private func next() {
+        nameFocused = false
+        dataService.setPlayerName(name)
+        step = 1
+    }
 
-private struct CameraPage: View {
-    @Binding var currentPage: Int
-    @State private var permissionGranted = false
+    // MARK: - Setup
 
-    var body: some View {
-        VStack(spacing: 28) {
+    private var setup: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Set up once, then just shoot")
+                    .font(.largeTitle.bold())
+                Text("Tracking works best from behind you, looking at the hoop.")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 40)
+
+            VStack(alignment: .leading, spacing: 22) {
+                tip(number: 1, title: "Phone sideways on a stand",
+                    detail: "A tripod, a water bottle, a bag — about chest height, a few steps behind where you shoot.")
+                tip(number: 2, title: "Whole rim in the picture",
+                    detail: "You'll see brackets lock onto the hoop when it's found.")
+                tip(number: 3, title: "Shoot",
+                    detail: "Makes and misses log themselves. Tap Make or Miss any time to fix a call.")
+            }
+
             Spacer()
+
             VStack(spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("FG%")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("52%")
-                            .font(.title2.bold())
-                            .foregroundStyle(.orange)
+                if cameraService.permissionStatus == .notDetermined {
+                    Button("Allow camera and start") {
+                        Task {
+                            await cameraService.requestPermission()
+                            onComplete()
+                        }
                     }
-                    Spacer()
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text("Shot auto-detected")
-                        .font(.caption)
+                    .buttonStyle(.primary)
+                    Button("Not now", action: onComplete)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
-                }
-                ProgressView(value: 0.52)
-                    .tint(.orange)
-            }
-            .padding(16)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(.horizontal, 32)
-
-            VStack(spacing: 12) {
-                Image(systemName: "camera.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.orange)
-                Text("Auto Shot Detection")
-                    .font(.title2.bold())
-                Text("Your camera tracks makes and misses automatically — no buttons needed during your session.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-            }
-
-            Spacer()
-
-            VStack(spacing: 12) {
-                Button {
-                    Task {
-                        await AVCaptureDevice.requestAccess(for: .video)
-                        permissionGranted = true
-                        withAnimation { currentPage = 2 }
-                    }
-                } label: {
-                    Text("Allow Camera")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(Color.orange, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .foregroundStyle(.white)
-                }
-                if !permissionGranted {
-                    Button("Continue without camera") {
-                        withAnimation { currentPage = 2 }
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                } else {
+                    Button("Start", action: onComplete)
+                        .buttonStyle(.primary)
                 }
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 48)
         }
-        .padding(.horizontal, 24)
+        .padding(Metrics.screenPadding)
     }
-}
 
-// MARK: - Page 3: Notifications + Badges
-
-private struct NotificationsPage: View {
-    @Binding var currentPage: Int
-
-    var body: some View {
-        VStack(spacing: 28) {
-            Spacer()
-            VStack(spacing: 10) {
-                Text("🏅 Badge Earned!")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.orange)
-                HStack(spacing: 8) {
-                    Text("Deadeye · Gold I")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.orange.opacity(0.2), in: Capsule())
-                        .overlay(Capsule().stroke(Color.orange, lineWidth: 1))
-                        .foregroundStyle(.orange)
-                }
-                Text("+120 MMR")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(16)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(.horizontal, 32)
-
-            VStack(spacing: 12) {
-                Image(systemName: "bell.badge.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.orange)
-                Text("Badge Milestones")
-                    .font(.title2.bold())
-                Text("Get notified when you earn badges and hit milestones. You can turn this off anytime in Settings.")
+    private func tip(number: Int, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            Text("\(number)")
+                .font(.score(26))
+                .foregroundStyle(Color.onLeather)
+                .frame(width: 36, height: 36)
+                .background(Color.leather, in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(detail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer()
-
-            VStack(spacing: 12) {
-                Button {
-                    Task {
-                        _ = try? await UNUserNotificationCenter.current()
-                            .requestAuthorization(options: [.alert, .badge, .sound])
-                        withAnimation { currentPage = 3 }
-                    }
-                } label: {
-                    Text("Allow Notifications")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(Color.orange, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .foregroundStyle(.white)
-                }
-                Button("Skip for now") {
-                    withAnimation { currentPage = 3 }
-                }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 48)
         }
-        .padding(.horizontal, 24)
-    }
-}
-
-// MARK: - Page 4: Goals Showcase
-
-private struct GoalsPage: View {
-    @Binding var currentPage: Int
-
-    var body: some View {
-        VStack(spacing: 28) {
-            Spacer()
-            VStack(alignment: .leading, spacing: 12) {
-                Text("ACTIVE GOALS")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Shoot 50% FG")
-                        .font(.subheadline.bold())
-                    ProgressView(value: 0.68)
-                        .tint(.orange)
-                    Text("48% → 50%")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(16)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(.horizontal, 32)
-
-            VStack(spacing: 12) {
-                Image(systemName: "target")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.orange)
-                Text("Set Your Goals")
-                    .font(.title2.bold())
-                Text("Track progress toward your shooting and fitness targets. Set your first goal right from the Progress tab.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-            }
-
-            Spacer()
-
-            Button {
-                withAnimation { currentPage = 4 }
-            } label: {
-                Text("Continue →")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.orange, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .foregroundStyle(.white)
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 48)
-        }
-        .padding(.horizontal, 24)
-    }
-}
-
-// MARK: - Page 5: Profile Setup
-
-private struct ProfileSetupPage: View {
-    @Binding var isComplete: Bool
-    @State private var playerName: String = ""
-
-    var body: some View {
-        VStack(spacing: 28) {
-            Spacer()
-            VStack(spacing: 16) {
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 72))
-                    .foregroundStyle(.orange)
-                Text("What's your name?")
-                    .font(.title2.bold())
-                Text("Used on your profile and career stats.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            TextField("Your name", text: $playerName)
-                .font(.title3)
-                .multilineTextAlignment(.center)
-                .padding(.vertical, 14)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.horizontal, 48)
-            Spacer()
-            Button {
-                // Phase 7 — Security: sanitise name before persisting
-                if let sanitised = InputValidator.sanitisedProfileName(playerName) {
-                    UserDefaults.standard.set(sanitised, forKey: "onboardingPlayerName")
-                }
-                isComplete = true
-            } label: {
-                Text("Start Training 🏀")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color.orange, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .foregroundStyle(.white)
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 48)
-        }
-        .padding(.horizontal, 24)
+        .accessibilityElement(children: .combine)
     }
 }

@@ -1,6 +1,5 @@
 // HoopRectSmootherTests.swift
 import XCTest
-import CoreGraphics
 @testable import HoopTrack
 
 final class HoopRectSmootherTests: XCTestCase {

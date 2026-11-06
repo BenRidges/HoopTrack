@@ -1,103 +1,8 @@
+// HoopTrackTests/ShotScienceCalculatorTests.swift
 import XCTest
-import AVFoundation
 @testable import HoopTrack
 
 final class ShotScienceCalculatorTests: XCTestCase {
-
-    // MARK: - releaseAngle
-
-    func test_releaseAngle_typicalAscendingShot_returnsPositiveAngle() {
-        let detections = [
-            BallDetection(boundingBox: CGRect(x: 0.30, y: 0.40, width: 0.05, height: 0.05),
-                          confidence: 0.9,
-                          frameTimestamp: CMTime(value: 0, timescale: 60)),
-            BallDetection(boundingBox: CGRect(x: 0.34, y: 0.47, width: 0.05, height: 0.05),
-                          confidence: 0.9,
-                          frameTimestamp: CMTime(value: 1, timescale: 60)),
-        ]
-        let angle = ShotScienceCalculator.releaseAngle(trajectory: detections)
-        XCTAssertNotNil(angle)
-        XCTAssertTrue(angle! > 30 && angle! < 80, "Expected shooting arc angle, got \(angle!)")
-    }
-
-    func test_releaseAngle_singleDetection_returnsNil() {
-        let detections = [
-            BallDetection(boundingBox: CGRect(x: 0.3, y: 0.4, width: 0.05, height: 0.05),
-                          confidence: 0.9,
-                          frameTimestamp: .zero),
-        ]
-        XCTAssertNil(ShotScienceCalculator.releaseAngle(trajectory: detections))
-    }
-
-    func test_releaseAngle_emptyTrajectory_returnsNil() {
-        XCTAssertNil(ShotScienceCalculator.releaseAngle(trajectory: []))
-    }
-
-    func test_releaseAngle_descendingBall_returnsNil() {
-        // Ball moving downward (dy < 0 in Vision coords) — not a valid release angle
-        let detections = [
-            BallDetection(boundingBox: CGRect(x: 0.30, y: 0.50, width: 0.05, height: 0.05),
-                          confidence: 0.9,
-                          frameTimestamp: CMTime(value: 0, timescale: 60)),
-            BallDetection(boundingBox: CGRect(x: 0.34, y: 0.40, width: 0.05, height: 0.05),
-                          confidence: 0.9,
-                          frameTimestamp: CMTime(value: 1, timescale: 60)),
-        ]
-        XCTAssertNil(ShotScienceCalculator.releaseAngle(trajectory: detections))
-    }
-
-    // MARK: - releaseTime
-
-    func test_releaseTime_thirtyFramesAt60fps_returns500ms() {
-        let t1 = CMTime(value: 0,  timescale: 60)
-        let t2 = CMTime(value: 30, timescale: 60)
-        let detections = [
-            BallDetection(boundingBox: .zero, confidence: 0.9, frameTimestamp: t1),
-            BallDetection(boundingBox: .zero, confidence: 0.9, frameTimestamp: t2),
-        ]
-        let time = ShotScienceCalculator.releaseTime(trajectory: detections)
-        XCTAssertNotNil(time)
-        XCTAssertEqual(time!, 500.0, accuracy: 1.0)
-    }
-
-    func test_releaseTime_singleDetection_returnsNil() {
-        let detections = [
-            BallDetection(boundingBox: .zero, confidence: 0.9, frameTimestamp: .zero),
-        ]
-        XCTAssertNil(ShotScienceCalculator.releaseTime(trajectory: detections))
-    }
-
-    // MARK: - shotSpeed
-
-    func test_shotSpeed_knownDisplacement_returnsPositiveSpeed() {
-        let t1 = CMTime(value: 0, timescale: 60)
-        let t2 = CMTime(value: 1, timescale: 60)
-        let detections = [
-            BallDetection(boundingBox: CGRect(x: 0.00, y: 0.5, width: 0.05, height: 0.05),
-                          confidence: 0.9, frameTimestamp: t1),
-            BallDetection(boundingBox: CGRect(x: 0.10, y: 0.5, width: 0.05, height: 0.05),
-                          confidence: 0.9, frameTimestamp: t2),
-        ]
-        let speed = ShotScienceCalculator.shotSpeed(trajectory: detections, hoopRectWidth: 0.1)
-        XCTAssertNotNil(speed)
-        XCTAssertTrue(speed! > 0)
-    }
-
-    func test_shotSpeed_singleDetection_returnsNil() {
-        let detections = [BallDetection(boundingBox: .zero, confidence: 0.9, frameTimestamp: .zero)]
-        XCTAssertNil(ShotScienceCalculator.shotSpeed(trajectory: detections, hoopRectWidth: 0.1))
-    }
-
-    func test_shotSpeed_zeroHoopWidth_returnsNil() {
-        let t1 = CMTime(value: 0, timescale: 60)
-        let t2 = CMTime(value: 1, timescale: 60)
-        let detections = [
-            BallDetection(boundingBox: .zero, confidence: 0.9, frameTimestamp: t1),
-            BallDetection(boundingBox: CGRect(x: 0.1, y: 0, width: 0.05, height: 0.05),
-                          confidence: 0.9, frameTimestamp: t2),
-        ]
-        XCTAssertNil(ShotScienceCalculator.shotSpeed(trajectory: detections, hoopRectWidth: 0))
-    }
 
     // MARK: - consistencyScore
 
@@ -115,55 +20,78 @@ final class ShotScienceCalculatorTests: XCTestCase {
         XCTAssertNil(ShotScienceCalculator.consistencyScore(releaseAngles: []))
     }
 
-    func test_consistencyScore_spreadAngles_returnsPositiveStdDev() {
+    func test_consistencyScore_spreadAngles_returnsPopulationStdDev() {
         let score = ShotScienceCalculator.consistencyScore(releaseAngles: [40, 45, 50, 55, 60])
-        XCTAssertNotNil(score)
-        XCTAssertTrue(score! > 0)
+        XCTAssertEqual(score!, 7.071, accuracy: 0.01)
     }
 
-    // MARK: - legAngleGeometry
+    // MARK: - ShotPhysics
 
-    func test_legAngleGeometry_straightLeg_returns180Degrees() {
-        let angle = ShotScienceCalculator.legAngleGeometry(
-            hip:   CGPoint(x: 0.5, y: 0.8),
-            knee:  CGPoint(x: 0.5, y: 0.5),
-            ankle: CGPoint(x: 0.5, y: 0.2)
-        )
-        XCTAssertNotNil(angle)
-        XCTAssertEqual(angle!, 180.0, accuracy: 0.5)
+    /// A free throw (4.19 m) launched at 50° from 2.2 m reaches rim height
+    /// after ~0.92 s. Feeding that flight time back must recover ~50°.
+    func test_launch_freeThrowFlightTime_recoversFiftyDegrees() {
+        let launch = ShotPhysics.launch(horizontalDistanceM: 4.19, flightTime: 0.92)
+        XCTAssertNotNil(launch)
+        XCTAssertEqual(launch!.angleDeg, 50, accuracy: 1.5)
+        XCTAssertEqual(launch!.speedMph, 15.9, accuracy: 1.0)
     }
 
-    func test_legAngleGeometry_rightAngle_returns90Degrees() {
-        let angle = ShotScienceCalculator.legAngleGeometry(
-            hip:   CGPoint(x: 0.5, y: 0.8),
-            knee:  CGPoint(x: 0.5, y: 0.5),
-            ankle: CGPoint(x: 0.8, y: 0.5)
-        )
-        XCTAssertNotNil(angle)
-        XCTAssertEqual(angle!, 90.0, accuracy: 0.5)
+    func test_launch_longerFlightSameDistance_isHigherArc() {
+        let flat = ShotPhysics.launch(horizontalDistanceM: 5, flightTime: 0.8)!
+        let high = ShotPhysics.launch(horizontalDistanceM: 5, flightTime: 1.2)!
+        XCTAssertGreaterThan(high.angleDeg, flat.angleDeg)
     }
 
-    // MARK: - verticalJumpGeometry
-
-    func test_verticalJumpGeometry_standingPosition_returnsNilOrNearZero() {
-        // hipHeightFrac exactly at standing baseline (0.55) → excessFrac = 0 → returns nil
-        let result = ShotScienceCalculator.verticalJumpGeometry(
-            hipY: 0.55, ankleY: 0.0, shoulderY: 1.0
-        )
-        XCTAssertNil(result)
+    func test_launch_implausibleInputs_returnNil() {
+        XCTAssertNil(ShotPhysics.launch(horizontalDistanceM: 5, flightTime: 0.1))
+        XCTAssertNil(ShotPhysics.launch(horizontalDistanceM: 5, flightTime: 4))
+        XCTAssertNil(ShotPhysics.launch(horizontalDistanceM: 0.2, flightTime: 1))
+        XCTAssertNil(ShotPhysics.launch(horizontalDistanceM: .nan, flightTime: 1))
     }
 
-    func test_verticalJumpGeometry_jumpedPosition_returnsPositiveCm() {
-        let result = ShotScienceCalculator.verticalJumpGeometry(
-            hipY: 0.68, ankleY: 0.05, shoulderY: 0.95
-        )
-        XCTAssertNotNil(result)
-        XCTAssertTrue(result! > 5.0)
+    // MARK: - CourtPositionEstimator
+
+    private let fov = 68.0
+    private var focal: Double { 0.5 / tan(fov * .pi / 360) }
+
+    /// Apparent width (image-width units) of an object `size` metres across at `depth`.
+    private func width(_ size: Double, at depth: Double) -> Double { focal * size / depth }
+
+    func test_estimate_shooterStraightBehindAtFreeThrowDistance() {
+        // Rim 9 m from the camera, shooter 4.19 m in front of the rim on the same line.
+        let rimW = width(CourtPositionEstimator.rimDiameterM, at: 9)
+        let ballW = width(CourtPositionEstimator.ballDiameterM, at: 9 - 4.19)
+        let rim = CGRect(x: 0.5 - rimW / 2, y: 0.7, width: rimW, height: rimW * 0.8)
+        let ball = CGRect(x: 0.5 - ballW / 2, y: 0.5, width: ballW, height: ballW * 16 / 9)
+
+        let estimate = CourtPositionEstimator.estimate(ballBox: ball, ballDiameter: ballW,
+                                                       rimBox: rim, horizontalFOV: fov)
+        XCTAssertNotNil(estimate)
+        XCTAssertEqual(estimate!.depthM, 4.19, accuracy: 0.05)
+        XCTAssertEqual(estimate!.lateralM, 0, accuracy: 0.05)
+
+        let position = CourtPositionEstimator.courtPosition(for: estimate!)
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: position.courtX, courtY: position.courtY), .freeThrow)
     }
 
-    func test_verticalJumpGeometry_bodyNotFullyVisible_returnsNil() {
-        XCTAssertNil(ShotScienceCalculator.verticalJumpGeometry(
-            hipY: 0.5, ankleY: 0.48, shoulderY: 0.52
-        ))
+    func test_estimate_shooterOffToTheRight_mapsRightOfBasket() {
+        let rimDepth = 9.0, ballDepth = 5.0, lateral = 2.0
+        let rimW = width(CourtPositionEstimator.rimDiameterM, at: rimDepth)
+        let ballW = width(CourtPositionEstimator.ballDiameterM, at: ballDepth)
+        let ballCentreX = 0.5 + lateral * focal / ballDepth
+        let rim = CGRect(x: 0.5 - rimW / 2, y: 0.7, width: rimW, height: rimW)
+        let ball = CGRect(x: ballCentreX - ballW / 2, y: 0.5, width: ballW, height: ballW)
+
+        let estimate = CourtPositionEstimator.estimate(ballBox: ball, ballDiameter: ballW,
+                                                       rimBox: rim, horizontalFOV: fov)!
+        XCTAssertEqual(estimate.lateralM, 2, accuracy: 0.05)
+        XCTAssertEqual(estimate.depthM, 4, accuracy: 0.05)
+        XCTAssertGreaterThan(CourtPositionEstimator.courtPosition(for: estimate).courtX, 0.5)
+    }
+
+    func test_estimate_degenerateSizes_returnNil() {
+        let rim = CGRect(x: 0.45, y: 0.7, width: 0.05, height: 0.04)
+        XCTAssertNil(CourtPositionEstimator.estimate(ballBox: .zero, ballDiameter: 0, rimBox: rim))
+        XCTAssertNil(CourtPositionEstimator.estimate(ballBox: rim, ballDiameter: 0.02, rimBox: .zero))
     }
 }

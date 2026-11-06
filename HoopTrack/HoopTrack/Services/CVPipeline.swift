@@ -1,255 +1,250 @@
 // HoopTrack/Services/CVPipeline.swift
-// Subscribes to CameraService.framePublisher and runs the shot-detection
-// state machine. All Vision work and trajectory maths run on the camera's
-// sessionQueue. Calls @MainActor methods on LiveSessionViewModel for shot logging.
+// Per-frame shot detection on the camera's session queue:
+//
+//   frame ─▶ SessionRecorder (video)
+//         ─▶ detector (ball candidates + hoop; cropped around the hoop
+//            while a shot is in flight — see DetectionRegion)
+//         ─▶ CourtCalibrationService (smoothed rim)
+//         ─▶ ShotTracker (make / miss state machine)
+//         ─▶ CourtPositionEstimator + ShotPhysics (where from, what arc)
+//         ─▶ delegate on the main actor
+//
+// All mutable state is touched only from the Combine sink, which runs
+// synchronously on the serial session queue that delivers frames. The
+// `nonisolated(unsafe)` annotations record that the compiler can't prove it.
 
 import AVFoundation
 import Combine
 import CoreGraphics
 import Foundation
 
-// MARK: - Internal State
+// MARK: - Output types
 
-private enum PipelineState: Sendable {
-    case idle
-    case tracking(trajectory: [BallDetection])
-    case releaseDetected(releaseBox: CGRect, trajectory: [BallDetection])
+/// A shot the pipeline has called, ready to be logged.
+nonisolated struct DetectedShot: Sendable {
+    let result: ShotResult
+    let confidence: Double
+    let courtX: Double
+    let courtY: Double
+    let zone: CourtZone
+    let distanceFt: Double?
+    let science: ShotScienceMetrics?
+    /// Seconds into the session video where the shot was released.
+    let videoOffset: Double?
+}
+
+@MainActor protocol ShotPipelineDelegate: AnyObject, Sendable {
+    func pipelineHoopChanged(_ state: CalibrationState)
+    func pipelineBallMoved(_ box: CGRect?)
+    func pipelineShotStarted()
+    func pipelineShotResolved(_ shot: DetectedShot)
 }
 
 // MARK: - CVPipeline
 
-/// Runs on the camera's sessionQueue. All mutable state is accessed only from
-/// the Combine sink closure, which Combine delivers synchronously on the same
-/// serial queue that calls `frameSubject.send(...)` in CameraService. The
-/// `nonisolated(unsafe)` annotations record that the compiler cannot prove
-/// this serialisation but it holds at runtime.
-nonisolated final class CVPipeline {
+nonisolated final class CVPipeline: @unchecked Sendable {
 
-    // MARK: - Dependencies
-    private let detector:    BallDetectorProtocol
-    private let calibration: CourtCalibrationService
-    private let poseService: PoseEstimationService?
-    nonisolated(unsafe) private weak var viewModel: LiveSessionViewModel?
+    /// Nil in manual mode (no model bundled): the pipeline then only records.
+    private let detector: BallDetectorProtocol?
+    private let calibration = CourtCalibrationService()
+    private let threePointDistanceFt: Double
+    private let fieldOfView: @Sendable () -> Double
 
-    // MARK: - State
-    nonisolated(unsafe) private var pipelineState: PipelineState = .idle
+    nonisolated(unsafe) private var tracker = ShotTracker()
     nonisolated(unsafe) private var frameCancellable: AnyCancellable?
+    nonisolated(unsafe) private weak var delegate: ShotPipelineDelegate?
 
-    // MARK: - Telemetry (CV-A)
+    /// Video is written for the whole session, paused or not, so shot
+    /// offsets line up with the file.
+    nonisolated(unsafe) var recorder: SessionRecorder?
+    /// Shots aren't detected while paused.
+    nonisolated(unsafe) var isPaused = false
+    /// Publishes the ball box for the debug overlay.
+    nonisolated(unsafe) var publishesBall = false
+
+    // CV-A telemetry
     nonisolated(unsafe) private var detectionLogger: DetectionLogger?
-    nonisolated(unsafe) private var sessionStartCMTime: CMTime = .zero
+    nonisolated(unsafe) private var sessionStartTime: Double?
 
-    // Tracking: if no ball seen for 0.3s, return to IDLE
-    nonisolated(unsafe) private var lastDetectionTimestamp: CMTime = .zero
-    private let trackingTimeoutSec: Double = 0.3
+    // Main-actor update throttling
+    nonisolated(unsafe) private var lastHoopKind = -1
+    nonisolated(unsafe) private var lastHoopPublish: Double = 0
+    nonisolated(unsafe) private var lastBallPublish: Double = 0
 
-    // Release resolved: 2s timeout → MISS
-    nonisolated(unsafe) private var releaseTimestamp: CMTime = .zero
-    private let shotTimeoutSec: Double = 2.0
+    // Shot in flight
+    nonisolated(unsafe) private var pendingEstimate: CourtPositionEstimator.Estimate?
 
-    // MARK: - Init
-    init(detector: BallDetectorProtocol,
-         calibration: CourtCalibrationService,
-         poseService: PoseEstimationService? = nil) {
-        self.detector    = detector
-        self.calibration = calibration
-        self.poseService = poseService
+    // Load shedding
+    nonisolated(unsafe) private var frameIndex = 0
+    nonisolated(unsafe) private var isHot = false
+
+    init(detector: BallDetectorProtocol?,
+         threePointDistanceFt: Double,
+         fieldOfView: @escaping @Sendable () -> Double) {
+        self.detector = detector
+        self.threePointDistanceFt = threePointDistanceFt
+        self.fieldOfView = fieldOfView
     }
 
     // MARK: - Lifecycle
 
-    func start(framePublisher: AnyPublisher<CMSampleBuffer, Never>,
-                           viewModel: LiveSessionViewModel) {
-        self.viewModel = viewModel
-        // Frames arrive on sessionQueue — CV work stays there; UI calls dispatch to main.
-        frameCancellable = framePublisher
-            .sink { [weak self] buffer in
-                self?.processBuffer(buffer)
-            }
+    func start(framePublisher: AnyPublisher<CMSampleBuffer, Never>, delegate: ShotPipelineDelegate) {
+        self.delegate = delegate
+        frameCancellable = framePublisher.sink { [weak self] buffer in
+            self?.process(buffer)
+        }
     }
 
     func stop() {
         frameCancellable?.cancel()
         frameCancellable = nil
-        pipelineState = .idle
+        tracker.reset()
+        calibration.reset()
         detectionLogger?.close()
         detectionLogger = nil
-        sessionStartCMTime = .zero
     }
 
-    /// Attach a DetectionLogger for the duration of the session. Called by
-    /// LiveSessionView at session start; detached by `stop()`.
     func attachTelemetry(logger: DetectionLogger) {
-        self.detectionLogger = logger
-        self.sessionStartCMTime = .zero   // reset on each session
+        detectionLogger = logger
+        sessionStartTime = nil
     }
 
-    /// Explicit detach. `stop()` also closes the logger, so this is only
-    /// needed if the caller wants to detach mid-session without stopping.
-    func detachTelemetry() {
-        detectionLogger?.close()
-        detectionLogger = nil
-    }
+    // MARK: - Frame processing
 
-    // MARK: - Core Frame Processing
+    private func process(_ buffer: CMSampleBuffer) {
+        recorder?.append(buffer)
+        guard !isPaused, let detector else { return }
 
-    private func processBuffer(_ buffer: CMSampleBuffer) {
-        guard let scene = detector.detectScene(buffer: buffer) else { return }
-        let now = scene.frameTimestamp
-
-        // CV-A — Telemetry per-frame log (only when logger attached)
-        if let logger = detectionLogger {
-            if sessionStartCMTime == .zero { sessionStartCMTime = now }
-            let sessionTime = CMTimeGetSeconds(CMTimeSubtract(now, sessionStartCMTime))
-            let stateStr: String = {
-                switch pipelineState {
-                case .idle:             return "idle"
-                case .tracking:         return "tracking"
-                case .releaseDetected:  return "release_detected"
-                }
-            }()
-            logger.log(DetectionLogEntry(
-                timestampSec:   sessionTime,
-                ballConfidence: scene.ball.map { Double($0.confidence) },
-                ballBox:        scene.ball.map { [Double($0.boundingBox.origin.x),
-                                                   Double($0.boundingBox.origin.y),
-                                                   Double($0.boundingBox.size.width),
-                                                   Double($0.boundingBox.size.height)] },
-                rimConfidence:  scene.basket.map { Double($0.confidence) },
-                rimBox:         scene.basket.map { [Double($0.boundingBox.origin.x),
-                                                    Double($0.boundingBox.origin.y),
-                                                    Double($0.boundingBox.size.width),
-                                                    Double($0.boundingBox.size.height)] },
-                state:          stateStr
-            ))
+        // Check the temperature about once a second; when hot, detect on
+        // alternate frames. The tracker works from timestamps, so it copes.
+        frameIndex &+= 1
+        if frameIndex % 60 == 0 {
+            isHot = ProcessInfo.processInfo.thermalState.rawValue >= HoopTrack.CV.throttleAtThermalState
         }
+        if isHot && frameIndex % 2 == 1 { return }
 
-        // Feed the basket detection to calibration every frame — the
-        // smoother handles jitter and missed frames internally.
-        calibration.updateBasket(scene.basket, timestamp: now)
+        let region = focusRegion(for: buffer)
+        guard let scene = detector.detectScene(buffer: buffer, region: region) else { return }
+        let now = CMTimeGetSeconds(scene.frameTimestamp)
 
-        // Push ball detection to the debug overlay.
-        let overlayBox = scene.ball?.boundingBox
-        let overlayConfidence = scene.ball?.confidence
-        Task { @MainActor [weak viewModel] in
-            viewModel?.updateBallDetection(box: overlayBox, confidence: overlayConfidence)
-        }
+        calibration.updateBasket(scene.basket, timestamp: scene.frameTimestamp)
+        publishHoop(now: now)
+        publishBall(scene.ball?.boundingBox, now: now)
 
-        // Shot detection requires a tracked (or recently-tracked) hoop rect.
-        guard let hoopRect = calibration.state.hoopRect else { return }
-
-        let detection = scene.ball
-
-        switch pipelineState {
-
-        case .idle:
-            if let d = detection {
-                pipelineState = .tracking(trajectory: [d])
-                lastDetectionTimestamp = now
+        let event = tracker.update(balls: scene.balls.map(\.boundingBox),
+                                   hoop: calibration.state.hoopRect,
+                                   time: now)
+        logTelemetry(scene, region: region, event: event, now: now)
+        switch event {
+        case .started(let release):
+            pendingEstimate = calibration.state.hoopRect.flatMap { hoop in
+                CourtPositionEstimator.estimate(ballBox: release.box,
+                                                ballDiameter: release.ballDiameter,
+                                                rimBox: hoop,
+                                                horizontalFOV: fieldOfView())
             }
+            Task { @MainActor [weak delegate] in delegate?.pipelineShotStarted() }
 
-        case .tracking(var trajectory):
-            if let d = detection {
-                trajectory.append(d)
-                lastDetectionTimestamp = now
+        case .resolved(let outcome):
+            let shot = makeShot(from: outcome)
+            pendingEstimate = nil
+            Task { @MainActor [weak delegate] in delegate?.pipelineShotResolved(shot) }
 
-                if isAtPeak(trajectory: trajectory) {
-                    let releaseBox = trajectory.first!.boundingBox
-
-                    // Phase 3: compute Shot Science synchronously on the session queue
-                    let science: ShotScienceMetrics?
-                    if let ps = poseService {
-                        let observation = ps.detectPose(buffer: buffer)
-                        science = ShotScienceCalculator.compute(
-                            trajectory: trajectory,
-                            poseObservation: observation,
-                            hoopRectWidth: hoopRect.width
-                        )
-                    } else {
-                        science = nil
-                    }
-
-                    pipelineState    = .releaseDetected(releaseBox: releaseBox, trajectory: trajectory)
-                    releaseTimestamp = now
-                    logPendingShot(releaseBox: releaseBox, science: science)
-                } else {
-                    pipelineState = .tracking(trajectory: trajectory)
-                }
-            } else {
-                let elapsed = CMTimeGetSeconds(CMTimeSubtract(now, lastDetectionTimestamp))
-                if elapsed > trackingTimeoutSec { pipelineState = .idle }
-            }
-
-        case .releaseDetected(let releaseBox, _):
-            let elapsed = CMTimeGetSeconds(CMTimeSubtract(now, releaseTimestamp))
-
-            if let d = detection {
-                if isEnteringHoop(ballBox: d.boundingBox, hoopRect: hoopRect) {
-                    resolveShot(result: .make, releaseBox: releaseBox)
-                    return
-                }
-                if isBelowHoop(ballBox: d.boundingBox, hoopRect: hoopRect) {
-                    resolveShot(result: .miss, releaseBox: releaseBox)
-                    return
-                }
-            }
-
-            if elapsed > shotTimeoutSec {
-                resolveShot(result: .miss, releaseBox: releaseBox)
-            }
+        case nil:
+            break
         }
     }
 
-    // MARK: - Trajectory Analysis
-
-    /// True when the ball has risen at least 5% of frame height and is now 3% below its peak.
-    /// Vision Y coordinates: origin bottom-left, increasing upward.
-    private func isAtPeak(trajectory: [BallDetection]) -> Bool {
-        guard trajectory.count >= 5 else { return false }
-        let ys      = trajectory.suffix(5).map { $0.boundingBox.midY }
-        let peak    = ys.max()!
-        let current = ys.last!
-        let first   = ys.first!
-        let wasRising = peak - first   > 0.05
-        let hasPeaked = peak - current > 0.03
-        return wasRising && hasPeaked
+    /// A crop around the hoop and the shot ball while a shot is in flight;
+    /// nil (full frame) otherwise, so a new release anywhere is still seen.
+    private func focusRegion(for buffer: CMSampleBuffer) -> CGRect? {
+        guard HoopTrack.CV.focusDuringShots,
+              let ball = tracker.shotBallBox,
+              let hoop = calibration.state.hoopRect,
+              let pixels = CMSampleBufferGetImageBuffer(buffer) else { return nil }
+        return DetectionRegion.around(hoop: hoop, ball: ball,
+                                      frameWidth: Double(CVPixelBufferGetWidth(pixels)),
+                                      frameHeight: Double(CVPixelBufferGetHeight(pixels)))
     }
 
-    /// Ball centre is within an expanded hoop rect — indicates a make.
-    private func isEnteringHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
-        let expanded   = hoopRect.insetBy(dx: -hoopRect.width  * 0.2,
-                                          dy: -hoopRect.height * 0.5)
-        let ballCentre = CGPoint(x: ballBox.midX, y: ballBox.midY)
-        return expanded.contains(ballCentre)
-    }
+    private func makeShot(from outcome: ShotTracker.Outcome) -> DetectedShot {
+        let estimate = pendingEstimate
+        let position = estimate.map(CourtPositionEstimator.courtPosition(for:))
+        let zone = position.map {
+            CourtZoneClassifier.classify(courtX: $0.courtX, courtY: $0.courtY,
+                                         threePointDistanceFt: threePointDistanceFt)
+        } ?? .unknown
 
-    /// Ball has fallen below the bottom edge of the hoop rect — indicates a miss.
-    private func isBelowHoop(ballBox: CGRect, hoopRect: CGRect) -> Bool {
-        return ballBox.midY < hoopRect.minY - 0.05
-    }
-
-    // MARK: - Shot Logging (dispatches to main actor)
-
-    private func logPendingShot(releaseBox: CGRect, science: ShotScienceMetrics?) {
-        let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
-        let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
-        Task { @MainActor [weak self] in
-            self?.viewModel?.logPendingShot(zone: zone,
-                                            courtX: pos.courtX,
-                                            courtY: pos.courtY,
-                                            science: science)
+        var science: ShotScienceMetrics?
+        if let estimate, let arrival = outcome.rimArrivalTime,
+           let launch = ShotPhysics.launch(horizontalDistanceM: estimate.distanceM,
+                                           flightTime: arrival - outcome.release.time) {
+            science = ShotScienceMetrics(releaseAngleDeg: launch.angleDeg, shotSpeedMph: launch.speedMph)
         }
+
+        return DetectedShot(result: outcome.result,
+                            confidence: outcome.confidence,
+                            courtX: position?.courtX ?? 0.5,
+                            courtY: position?.courtY ?? 0.5,
+                            zone: zone,
+                            distanceFt: estimate?.distanceFt,
+                            science: science,
+                            videoOffset: recorder?.startTime.map { max(0, outcome.release.time - $0) })
     }
 
-    private func resolveShot(result: ShotResult, releaseBox: CGRect) {
-        let pos  = calibration.courtPosition(for: releaseBox) ?? (courtX: 0.5, courtY: 0.5)
-        let zone = CourtZoneClassifier.classify(courtX: pos.courtX, courtY: pos.courtY)
-        pipelineState = .idle
-        Task { @MainActor [weak self] in
-            self?.viewModel?.resolvePendingShot(result: result,
-                                                 zone: zone,
-                                                 courtX: pos.courtX,
-                                                 courtY: pos.courtY)
+    // MARK: - Main-actor publishing (throttled)
+
+    private func publishHoop(now: Double) {
+        let state = calibration.state
+        let kind: Int
+        switch state {
+        case .looking:  kind = 0
+        case .tracking: kind = 1
+        case .lost:     kind = 2
         }
+        // State changes go out immediately; rect movement at ~15 Hz.
+        guard kind != lastHoopKind || (kind == 1 && now - lastHoopPublish > 1.0 / 15) else { return }
+        lastHoopKind = kind
+        lastHoopPublish = now
+        Task { @MainActor [weak delegate] in delegate?.pipelineHoopChanged(state) }
+    }
+
+    private func publishBall(_ box: CGRect?, now: Double) {
+        guard publishesBall, now - lastBallPublish > 1.0 / 20 else { return }
+        lastBallPublish = now
+        Task { @MainActor [weak delegate] in delegate?.pipelineBallMoved(box) }
+    }
+
+    // MARK: - Telemetry (CV-A)
+
+    /// Everything needed to replay the frame offline (Tools/HoopTrackCore
+    /// shot-eval): all ball candidates, the raw rim, the crop and the call.
+    private func logTelemetry(_ scene: SceneDetection, region: CGRect?,
+                              event: ShotTracker.Event?, now: Double) {
+        guard let logger = detectionLogger else { return }
+        if sessionStartTime == nil { sessionStartTime = now }
+        func box(_ r: CGRect) -> [Double] {
+            [Double(r.origin.x), Double(r.origin.y), Double(r.width), Double(r.height)]
+        }
+        var entry = DetectionLogEntry(
+            timestampSec:   now - (sessionStartTime ?? now),
+            ballConfidence: scene.ball.map { Double($0.confidence) },
+            ballBox:        scene.ball.map { box($0.boundingBox) },
+            rimConfidence:  scene.basket.map { Double($0.confidence) },
+            rimBox:         scene.basket.map { box($0.boundingBox) },
+            state:          tracker.isTrackingShot ? "tracking" : "idle"
+        )
+        entry.balls = scene.balls.map { box($0.boundingBox) + [Double($0.confidence)] }
+        entry.region = region.map(box)
+        switch event {
+        case .started:
+            entry.event = "start"
+        case .resolved(let outcome):
+            entry.event = outcome.result == .make ? "make" : "miss"
+            entry.eventConfidence = outcome.confidence
+        case nil:
+            break
+        }
+        logger.log(entry)
     }
 }

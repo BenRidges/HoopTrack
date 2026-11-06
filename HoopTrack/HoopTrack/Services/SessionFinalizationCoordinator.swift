@@ -1,6 +1,13 @@
 // SessionFinalizationCoordinator.swift
-// Sequences the 7-step finalisation pipeline after every session ends.
-// Holds protocol references only — concrete types injected at app startup.
+// Runs the post-session pipeline after every session ends:
+//   1. stamp end + duration, recompute stats and career totals
+//   2. goal progress
+//   3. Apple Health workout (opt-in)
+//   4. skill ratings (EMA)
+//   5. badge MMR
+//   6. goal milestone notifications
+//   7. Supabase sync (signed-in users, fire-and-forget)
+//   8. CV-A telemetry capture + upload (opt-in, fire-and-forget)
 
 import Foundation
 import Combine
@@ -41,27 +48,90 @@ import Combine
         self.telemetryUploadService  = telemetryUploadService
     }
 
-    /// Fire-and-forget Supabase upload. Skips if:
-    /// - No coordinator wired (tests, uninjected contexts).
-    /// - No supabaseUserID on the profile (user is signed out).
-    /// - Session is too trivial to be interesting (< 30s or no endedAt).
-    /// Failure is silent — the local save already succeeded.
+    // MARK: - HealthKit permission
+
+    /// Called when the user turns on "Save to Apple Health".
+    func requestHealthKitPermission() async {
+        await healthKitService.requestPermission()
+    }
+
+    // MARK: - Finalisation entry points
+
+    /// Shooting session.
+    func finaliseSession(_ session: TrainingSession,
+                         activeDuration: TimeInterval? = nil) async throws -> SessionResult {
+        try dataService.finaliseSession(session, activeDuration: activeDuration)
+        let skipReason = Self.badgeSkipReason(drillType: session.drillType,
+                                              shotsAttempted: session.shotsAttempted)
+        return try await runPipeline(for: session, evaluateBadges: skipReason == nil, skipReason: skipReason)
+    }
+
+    /// Dribble drill session.
+    func finaliseDribbleSession(_ session: TrainingSession,
+                                metrics: DribbleLiveMetrics,
+                                activeDuration: TimeInterval? = nil) async throws -> SessionResult {
+        try dataService.finaliseDribbleSession(session, metrics: metrics, activeDuration: activeDuration)
+        return try await runPipeline(for: session, evaluateBadges: true, skipReason: nil)
+    }
+
+    /// Agility session — best times measured during the session.
+    func finaliseAgilitySession(_ session: TrainingSession,
+                                attempts: AgilityAttempts,
+                                activeDuration: TimeInterval? = nil) async throws -> SessionResult {
+        session.bestShuttleRunSeconds  = attempts.bestShuttleRunSeconds
+        session.bestLaneAgilitySeconds = attempts.bestLaneAgilitySeconds
+        try dataService.finaliseSession(session, activeDuration: activeDuration)
+        return try await runPipeline(for: session, evaluateBadges: true, skipReason: nil)
+    }
+
+    /// Pure decision: a skip reason when badge evaluation should be bypassed,
+    /// nil when it should run. Only shooting sessions are gated, by shot count.
+    nonisolated static func badgeSkipReason(drillType: DrillType,
+                                            shotsAttempted: Int) -> String? {
+        let minShots = HoopTrack.SkillRating.badgeMinShotsForShootingSession
+        guard drillType == .freeShoot, shotsAttempted < minShots else { return nil }
+        return "Shoot at least \(minShots) shots to move your badges."
+    }
+
+    // MARK: - Shared pipeline
+
+    private func runPipeline(for session: TrainingSession,
+                             evaluateBadges: Bool,
+                             skipReason: String?) async throws -> SessionResult {
+        let profile = try dataService.fetchOrCreateProfile()
+        try goalUpdateService.update(after: session, profile: profile)
+        if AppPreferences.healthKitEnabled {
+            try? await healthKitService.writeWorkout(for: session)
+        }
+        try skillRatingService.recalculate(for: profile, session: session)
+        let badgeChanges = evaluateBadges
+            ? (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
+            : []
+        notificationService.checkMilestones(for: profile.goals)
+        notificationService.refreshTrainingReminders(trainedToday: true)
+        kickOffSync(session: session, profile: profile)
+        kickOffTelemetry(session: session, profile: profile)
+        return SessionResult(session: session, badgeChanges: badgeChanges, badgeSkipReason: skipReason)
+    }
+
+    /// Fire-and-forget Supabase upload. Skips when signed out or for trivial
+    /// sessions. Failure is silent — the local save already succeeded.
     private func kickOffSync(session: TrainingSession, profile: PlayerProfile) {
-        guard let syncCoordinator else { return }
-        guard let uidString = profile.supabaseUserID,
-              let userID = UUID(uuidString: uidString) else { return }
-        guard session.endedAt != nil, session.durationSeconds >= 30 else { return }
-        Task { @MainActor [syncCoordinator] in
+        guard let syncCoordinator,
+              let uidString = profile.supabaseUserID,
+              let userID = UUID(uuidString: uidString),
+              session.endedAt != nil, session.durationSeconds >= 30 else { return }
+        Task { @MainActor [syncCoordinator, dataService] in
             try? await syncCoordinator.syncSession(session, userID: userID)
+            try? dataService.modelContext.save()
         }
     }
 
-    /// Step 10 — CV-A Telemetry Capture & Upload.
-    /// Fire-and-forget: runs after sync so it never blocks session summary.
-    /// Skips silently if any prerequisite is missing (no video, no user,
-    /// no services wired, session too short).
+    /// CV-A telemetry. Strictly opt-in; also needs a recorded video and a
+    /// signed-in account to upload to.
     private func kickOffTelemetry(session: TrainingSession, profile: PlayerProfile) {
-        guard let capture = telemetryCaptureService,
+        guard AppPreferences.shareTrainingData,
+              let capture = telemetryCaptureService,
               let upload = telemetryUploadService,
               let videoFileName = session.videoFileName,
               session.durationSeconds >= HoopTrack.Telemetry.minSessionDurationSec,
@@ -69,8 +139,8 @@ import Combine
               let userID = UUID(uuidString: uidString)
         else { return }
 
-        let videoURL = Self.sessionVideoURL(filename: videoFileName)
-        let shotTimestamps = session.shots.map { $0.timestamp.timeIntervalSince(session.startedAt) }
+        let videoURL = SessionRecorder.directory.appendingPathComponent(videoFileName)
+        let shotTimestamps = session.orderedShots.compactMap(\.videoTimestampSeconds)
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         let sessionID = session.id
         let sessionStartedAt = session.startedAt
@@ -91,92 +161,5 @@ import Combine
                 await upload.uploadPending(userID: userID)
             }
         }
-    }
-
-    private static func sessionVideoURL(filename: String) -> URL {
-        FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
-            .appendingPathComponent(filename)
-    }
-
-    // MARK: - HealthKit permission
-
-    func requestHealthKitPermission() async {
-        await healthKitService.requestPermission()
-    }
-
-    // MARK: - Finalisation entry points
-
-    /// Standard shooting session.
-    func finaliseSession(_ session: TrainingSession) async throws -> SessionResult {
-        let profile = try dataService.fetchOrCreateProfile()
-        // 1. Stamp endedAt, recalculate stats, persist
-        try dataService.finaliseSession(session)
-        // 2. Update goal currentValues + isAchieved
-        try goalUpdateService.update(after: session, profile: profile)
-        // 3. Write HealthKit workout (async, silent failure)
-        try? await healthKitService.writeWorkout(for: session)
-        // 4. EMA-update all 5 skill dimension ratings
-        try skillRatingService.recalculate(for: profile, session: session)
-        // 5. Badge MMR delta — skip for shooting sessions under the minimum shot threshold
-        let badgeSkipReason = Self.badgeSkipReason(drillType: session.drillType,
-                                                   shotsAttempted: session.shotsAttempted)
-        let badgeChanges: [BadgeTierChange]
-        if badgeSkipReason != nil {
-            badgeChanges = []
-        } else {
-            badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
-        }
-        // 6. Fire milestone notifications for newly crossed thresholds
-        notificationService.checkMilestones(for: profile.goals)
-        // 7. Fire-and-forget Supabase sync — non-fatal if offline
-        kickOffSync(session: session, profile: profile)
-        // 8. CV-A — fire-and-forget telemetry capture + upload
-        kickOffTelemetry(session: session, profile: profile)
-        // 9. Return result for ViewModel to display
-        return SessionResult(session: session, badgeChanges: badgeChanges, badgeSkipReason: badgeSkipReason)
-    }
-
-    /// Pure decision: returns a skip reason when badge evaluation should be bypassed for
-    /// this session, or nil when evaluation should run. Currently gates only shooting
-    /// sessions by shot count — dribble and agility drills always evaluate.
-    nonisolated static func badgeSkipReason(drillType: DrillType,
-                                             shotsAttempted: Int) -> String? {
-        let minShots = HoopTrack.SkillRating.badgeMinShotsForShootingSession
-        guard drillType == .freeShoot, shotsAttempted < minShots else { return nil }
-        return "Shoot at least \(minShots) shots to update badges."
-    }
-
-    /// Dribble drill session.
-    func finaliseDribbleSession(_ session: TrainingSession,
-                                 metrics: DribbleLiveMetrics) async throws -> SessionResult {
-        let profile = try dataService.fetchOrCreateProfile()
-        try dataService.finaliseDribbleSession(session, metrics: metrics)
-        try goalUpdateService.update(after: session, profile: profile)
-        try? await healthKitService.writeWorkout(for: session)
-        try skillRatingService.recalculate(for: profile, session: session)
-        let badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
-        notificationService.checkMilestones(for: profile.goals)
-        kickOffSync(session: session, profile: profile)
-        kickOffTelemetry(session: session, profile: profile)
-        return SessionResult(session: session, badgeChanges: badgeChanges)
-    }
-
-    /// Agility session — caller provides best times measured during the session.
-    func finaliseAgilitySession(_ session: TrainingSession,
-                                 attempts: AgilityAttempts) async throws -> SessionResult {
-        session.bestShuttleRunSeconds  = attempts.bestShuttleRunSeconds
-        session.bestLaneAgilitySeconds = attempts.bestLaneAgilitySeconds
-        let profile = try dataService.fetchOrCreateProfile()
-        try dataService.finaliseSession(session)
-        try goalUpdateService.update(after: session, profile: profile)
-        try? await healthKitService.writeWorkout(for: session)
-        try skillRatingService.recalculate(for: profile, session: session)
-        let badgeChanges = (try? badgeEvaluationService.evaluate(session: session, profile: profile)) ?? []
-        notificationService.checkMilestones(for: profile.goals)
-        kickOffSync(session: session, profile: profile)
-        kickOffTelemetry(session: session, profile: profile)
-        return SessionResult(session: session, badgeChanges: badgeChanges)
     }
 }

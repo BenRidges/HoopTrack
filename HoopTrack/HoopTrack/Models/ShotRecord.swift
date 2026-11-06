@@ -34,6 +34,8 @@ final class ShotRecord {
     // MARK: - Video
     var videoTimestampSeconds: Double?  // offset into session video for thumbnail
     var isUserCorrected: Bool           // true if user edited result/position
+    /// Set when the CV call was low-confidence; the summary asks the user to check it.
+    var needsReview: Bool = false
 
     // MARK: - Sync (Phase 9)
     var cloudSyncedAt: Date?

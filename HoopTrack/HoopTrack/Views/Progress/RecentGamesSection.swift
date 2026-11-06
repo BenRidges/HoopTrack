@@ -1,48 +1,47 @@
 // RecentGamesSection.swift
-// Lightweight section at the bottom of ProgressTabView showing the
-// player's recent GameSessions. Hidden entirely when there are none
-// so it doesn't clutter the analytics dashboard.
+// Last few pickup games on the Progress tab. Hidden when there are none.
 
 import SwiftUI
 import SwiftData
 
 struct RecentGamesSection: View {
 
-    @Query(sort: \GameSession.startTimestamp, order: .reverse)
+    @Query(filter: #Predicate<GameSession> { $0.endTimestamp != nil },
+           sort: \GameSession.startTimestamp, order: .reverse)
     private var games: [GameSession]
 
     var body: some View {
-        if games.isEmpty {
-            EmptyView()
-        } else {
+        if !games.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Recent Games")
-                    .font(.headline)
-
-                ForEach(games.prefix(5)) { game in
-                    gameRow(game)
+                SectionLabel("Pickup games")
+                VStack(spacing: 0) {
+                    ForEach(Array(games.prefix(5).enumerated()), id: \.element.id) { index, game in
+                        if index > 0 { Hairline(inset: Metrics.cardPadding) }
+                        NavigationLink {
+                            GameSummaryView(game: game)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(game.gameFormat.displayName) pickup")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(game.startTimestamp.relativeDayLabel)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("\(game.teamAScore)–\(game.teamBScore)")
+                                    .font(.score(26))
+                                    .foregroundStyle(.primary)
+                            }
+                            .padding(Metrics.cardPadding)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.pressable)
+                    }
                 }
+                .background(Color.panel, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             }
-            .padding()
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        }
-    }
-
-    private func gameRow(_ game: GameSession) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "person.2.fill")
-                .foregroundStyle(.orange)
-                .frame(width: 36, height: 36)
-                .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(game.gameType.rawValue) · \(game.gameFormat.displayName)")
-                    .font(.subheadline.bold())
-                Text("\(game.teamAScore) – \(game.teamBScore) · \(game.players.count) players")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(game.startTimestamp, style: .date)
-                .font(.caption).foregroundStyle(.tertiary)
         }
     }
 }

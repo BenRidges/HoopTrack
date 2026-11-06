@@ -1,11 +1,11 @@
-// HoopTrack/Utilities/DribbleCalculator.swift
-// Pure dribble math. No side effects. All functions are static.
+// DribbleCalculator.swift
+// Pure dribble maths. No side effects.
 
 import Foundation
 
-enum DribbleCalculator {
+nonisolated enum DribbleCalculator {
 
-    enum HandSide {
+    enum HandSide: Sendable {
         case left, right
     }
 
@@ -37,5 +37,58 @@ enum DribbleCalculator {
             if handHistory[i] != handHistory[i - 1] { count += 1 }
         }
         return count
+    }
+}
+
+/// Counts dribbles from one wrist's vertical position. A dribble is the hand
+/// pushing down and coming back up; we count it at the bottom turn, but only
+/// when both the push and the recovery cover a real distance relative to
+/// the player's torso — so tracking jitter and small hand wobbles don't count.
+nonisolated struct WristBounceDetector: Sendable {
+
+    /// Minimum push / recovery, as a fraction of torso length.
+    var threshold: Double = 0.12
+
+    private enum Direction: Sendable { case unknown, down, up }
+    private var direction: Direction = .unknown
+    private var high: Double = 0
+    private var low: Double = 0
+
+    init(threshold: Double = 0.12) {
+        self.threshold = threshold
+    }
+
+    /// - Parameters:
+    ///   - y: wrist height, normalised with y increasing upward.
+    ///   - torso: torso length in the same units (neck → hip centre).
+    /// - Returns: true when a dribble completes on this sample.
+    mutating func update(y: Double, torso: Double) -> Bool {
+        let step = threshold * max(torso, 0.05)
+        switch direction {
+        case .unknown:
+            high = y; low = y
+            direction = .down
+            return false
+        case .down:
+            if y < low { low = y }
+            if y > low + step {
+                let pushed = high - low >= step
+                direction = .up
+                high = y
+                return pushed
+            }
+            return false
+        case .up:
+            if y > high { high = y }
+            if y < high - step {
+                direction = .down
+                low = y
+            }
+            return false
+        }
+    }
+
+    mutating func reset() {
+        direction = .unknown
     }
 }

@@ -1,51 +1,75 @@
-// HoopTrack/Utilities/CourtZoneClassifier.swift
+// CourtZoneClassifier.swift
+// One court model shared by the classifier, the CV position estimator and
+// the shot chart. Everything is in feet on an NBA-proportioned half court
+// (50 ft wide × 47 ft deep, basket centre 5.25 ft from the baseline).
+//
+// Stored shot positions stay normalised 0–1 so existing data keeps working:
+//   courtX = feet from the left sideline / 50
+//   courtY = feet from the baseline     / 47
+
 import Foundation
 
-/// Maps a normalised court position (0–1, origin bottom-left half-court)
-/// to a CourtZone using the geometry constants in HoopTrack.CourtGeometry.
+nonisolated enum CourtGeometry {
+    static let widthFt: Double = 50
+    static let depthFt: Double = 47
+    static let basketYFt: Double = 5.25
+    static let paintHalfWidthFt: Double = 8
+    static let freeThrowLineFt: Double = 19
+    static let freeThrowCircleRadiusFt: Double = 6
+    static let restrictedAreaRadiusFt: Double = 4
+    /// Corner three distance cap — the straight part of the line sits 22 ft
+    /// from the basket on NBA courts. Shorter arcs simply have no straight part.
+    static let cornerThreeMaxFt: Double = 22
+
+    /// Feet from the basket centre to a normalised court point.
+    static func offsetFromBasket(courtX: Double, courtY: Double) -> (lateralFt: Double, depthFt: Double) {
+        (courtX * widthFt - widthFt / 2, courtY * depthFt - basketYFt)
+    }
+
+    /// Normalised court point for an offset from the basket, clamped onto the court.
+    static func normalised(lateralFt: Double, depthFt: Double) -> (courtX: Double, courtY: Double) {
+        let x = (widthFt / 2 + lateralFt) / widthFt
+        let y = (basketYFt + depthFt) / self.depthFt
+        return (x.clamped(to: 0...1), y.clamped(to: 0...1))
+    }
+
+    /// Height above the baseline (ft) where the three-point arc meets the corner line.
+    static func cornerBreakFt(threePointDistanceFt r: Double) -> Double {
+        let c = min(r, cornerThreeMaxFt)
+        return basketYFt + max(0, r * r - c * c).squareRoot()
+    }
+}
+
 nonisolated enum CourtZoneClassifier {
 
-    static func classify(courtX: Double, courtY: Double) -> CourtZone {
-        // Phase 7 — Security: guard against NaN, Inf, or out-of-range inputs from
-        // uncalibrated frames or future callers that skip the DataService validation layer.
+    /// Classifies a normalised court position. Non-finite or off-court input
+    /// returns `.unknown` rather than guessing a zone.
+    static func classify(courtX: Double,
+                         courtY: Double,
+                         threePointDistanceFt: Double = 23.75) -> CourtZone {
         guard InputValidator.isValidCourtCoordinate(courtX),
-              InputValidator.isValidCourtCoordinate(courtY) else {
-            return .midRange
-        }
+              InputValidator.isValidCourtCoordinate(courtY) else { return .unknown }
 
-        let paintHalfWidth     = HoopTrack.CourtGeometry.paintWidthFraction / 2.0    // 0.16
-        let inPaintX           = abs(courtX - 0.5) <= paintHalfWidth
-        let freeThrowTolerance = 0.05
-        let atFreeThrowY       = abs(courtY - HoopTrack.CourtGeometry.freeThrowLineFraction) <= freeThrowTolerance
+        let (dx, dy) = CourtGeometry.offsetFromBasket(courtX: courtX, courtY: courtY)
+        let yFromBaseline = courtY * CourtGeometry.depthFt
+        let distance = (dx * dx + dy * dy).squareRoot()
+        let cornerDistance = min(threePointDistanceFt, CourtGeometry.cornerThreeMaxFt)
 
-        // Free throw (checked before paint to avoid free-throw-line shots classified as paint)
-        if inPaintX && atFreeThrowY {
-            return .freeThrow
-        }
-
-        // Paint: horizontally within paint, below free throw line
-        if inPaintX && courtY <= HoopTrack.CourtGeometry.paintHeightFraction {
-            return .paint
-        }
-
-        // Distance from basket (basket modelled at x=0.5, y=0.0 in normalised space)
-        let dx = courtX - 0.5
-        let dy = courtY
-        let distanceFromBasket = (dx * dx + dy * dy).squareRoot()
-
-        // Corner three: outside paint width, below corner depth, AND outside the arc
-        let outsidePaintX = abs(courtX - 0.5) > paintHalfWidth
-        if outsidePaintX
-            && courtY <= HoopTrack.CourtGeometry.cornerThreeDepthFraction
-            && distanceFromBasket >= HoopTrack.CourtGeometry.threePointArcRadiusFraction {
-            return .cornerThree
-        }
-
-        // Above-break three: beyond arc radius
-        if distanceFromBasket >= HoopTrack.CourtGeometry.threePointArcRadiusFraction {
+        // Beyond the line: below the break it's a straight corner line,
+        // above the break it's the arc.
+        if yFromBaseline <= CourtGeometry.cornerBreakFt(threePointDistanceFt: threePointDistanceFt) {
+            if abs(dx) >= cornerDistance { return .cornerThree }
+        } else if distance >= threePointDistanceFt {
             return .aboveBreakThree
         }
 
+        let inLane = abs(dx) <= CourtGeometry.paintHalfWidthFt
+        if inLane && abs(yFromBaseline - CourtGeometry.freeThrowLineFt) <= 2 {
+            return .freeThrow
+        }
+        if inLane && yFromBaseline < CourtGeometry.freeThrowLineFt {
+            return .paint
+        }
         return .midRange
     }
 }

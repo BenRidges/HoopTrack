@@ -84,13 +84,18 @@ struct KeychainAuthStorage: AuthLocalStorage, Sendable {
 /// @MainActor) because Supabase calls storage hooks from arbitrary actors.
 nonisolated enum KeychainRawStorage {
     static func store(_ account: String, data: Data) throws {
-        let query: [CFString: Any] = [
-            kSecClass:          kSecClassGenericPassword,
-            kSecAttrAccount:    account,
-            kSecValueData:      data,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        // Delete by identity only. Matching on kSecValueData as well (as this
+        // used to) never finds the old item once the token changes, so the
+        // add below failed with errSecDuplicateItem and refreshed sessions
+        // were never persisted.
+        let identity: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrAccount: account
         ]
-        SecItemDelete(query as CFDictionary)
+        SecItemDelete(identity as CFDictionary)
+        var query = identity
+        query[kSecValueData] = data
+        query[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw NSError(domain: "KeychainRawStorage", code: Int(status))

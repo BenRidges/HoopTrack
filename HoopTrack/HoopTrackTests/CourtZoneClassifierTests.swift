@@ -1,86 +1,73 @@
 // HoopTrackTests/CourtZoneClassifierTests.swift
+// Positions are written in feet (from the left sideline, from the baseline)
+// on a 50 × 47 ft half court, then normalised — the same model the shot
+// chart draws, with the basket centre at (25, 5.25).
 import XCTest
 @testable import HoopTrack
 
 final class CourtZoneClassifierTests: XCTestCase {
 
-    // Paint: centred horizontally, below free throw line
-    func testPaintCentre() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: 0.15), .paint)
+    private func zone(_ xFt: Double, _ yFt: Double, arc: Double = 23.75) -> CourtZone {
+        CourtZoneClassifier.classify(courtX: xFt / 50, courtY: yFt / 47, threePointDistanceFt: arc)
     }
 
-    func testPaintLeftEdge() {
-        // Just inside paint width (32% of court = ±16% from centre = 0.34–0.66)
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.35, courtY: 0.20), .paint)
+    func test_underTheBasket_isPaint() {
+        XCTAssertEqual(zone(25, 6), .paint)
     }
 
-    func testPaintRightEdge() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.65, courtY: 0.20), .paint)
+    func test_laneEdges_arePaint_justOutsideIsMidRange() {
+        XCTAssertEqual(zone(17.5, 10), .paint)
+        XCTAssertEqual(zone(32.5, 10), .paint)
+        XCTAssertEqual(zone(16.5, 10), .midRange)
     }
 
-    // Free throw: centre horizontally, at free throw line Y ± 5%
-    func testFreeThrowExact() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: 0.38), .freeThrow)
+    func test_freeThrowLine_isFreeThrow() {
+        XCTAssertEqual(zone(25, 19), .freeThrow)
+        XCTAssertEqual(zone(25, 20.5), .freeThrow)
+        XCTAssertEqual(zone(25, 17.5), .freeThrow)
     }
 
-    func testFreeThrowWithinTolerance() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: 0.40), .freeThrow)
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: 0.36), .freeThrow)
+    func test_elbowAndTopOfKey_areMidRange() {
+        XCTAssertEqual(zone(15, 19), .midRange)
+        XCTAssertEqual(zone(25, 24), .midRange)
     }
 
-    // Corner three: outside paint width, below corner depth threshold (28% from baseline)
-    func testCornerThreeLeft() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.05, courtY: 0.15), .cornerThree)
+    func test_corners_areCornerThree() {
+        XCTAssertEqual(zone(1.5, 4), .cornerThree)
+        XCTAssertEqual(zone(48.5, 10), .cornerThree)
     }
 
-    func testCornerThreeRight() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.95, courtY: 0.15), .cornerThree)
+    func test_shortCorner_isMidRange() {
+        XCTAssertEqual(zone(6, 4), .midRange)
     }
 
-    // Mid-range: inside 3pt arc, outside paint
-    // (0.20, 0.45) would be outside the arc; use (0.30, 0.35) which is clearly elbow mid-range
-    func testMidRangeLeft() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.30, courtY: 0.35), .midRange)
+    func test_topOfArc_isAboveBreakThree() {
+        XCTAssertEqual(zone(25, 5.25 + 24.5), .aboveBreakThree)
+        XCTAssertEqual(zone(25, 5.25 + 23), .midRange)
     }
 
-    func testMidRangeRight() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.70, courtY: 0.35), .midRange)
+    func test_wing_isAboveBreakThree() {
+        // 45° wing, 25 ft out.
+        let d = 25.0 / 2.0.squareRoot()
+        XCTAssertEqual(zone(25 + d, 5.25 + d), .aboveBreakThree)
     }
 
-    // Above-break three: outside 3pt arc radius, above corner depth
-    func testAboveBreakThreeLeft() {
-        // Arc radius = 0.47. Distance from (0.5, 0.0):
-        // x=0.05, y=0.50 → dist = sqrt(0.45²+0.50²) ≈ 0.67 > 0.47
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.05, courtY: 0.50), .aboveBreakThree)
+    func test_shorterArc_movesTheLineIn() {
+        // 21 ft straight out: a two on an NBA court, a three on a casual court.
+        XCTAssertEqual(zone(25, 5.25 + 21), .midRange)
+        XCTAssertEqual(zone(25, 5.25 + 21, arc: CourtType.halfCourt.threePointDistanceFt), .aboveBreakThree)
     }
 
-    func testAboveBreakThreeCentre() {
-        // Straight on: x=0.5, y=0.50 → dist = 0.50 > 0.47
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: 0.50), .aboveBreakThree)
+    func test_invalidInput_isUnknown() {
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: .nan, courtY: 0.5), .unknown)
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: -0.1), .unknown)
+        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 1.2, courtY: 0.5), .unknown)
     }
 
-    // Boundary: just outside paint → mid-range, not paint
-    func testJustOutsidePaintX() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.33, courtY: 0.20), .midRange)
-    }
-
-    // Phase 7 — Security: out-of-range inputs must return .midRange (safe default), not crash
-    func testOutOfRange_NaN_returnsMidRange() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: Double.nan, courtY: 0.5), .midRange)
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: Double.nan), .midRange)
-    }
-
-    func testOutOfRange_negative_returnsMidRange() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: -0.1, courtY: 0.5), .midRange)
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: -0.1), .midRange)
-    }
-
-    func testOutOfRange_greaterThanOne_returnsMidRange() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 1.1, courtY: 0.5), .midRange)
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: 0.5, courtY: 1.1), .midRange)
-    }
-
-    func testOutOfRange_infinity_returnsMidRange() {
-        XCTAssertEqual(CourtZoneClassifier.classify(courtX: Double.infinity, courtY: 0.5), .midRange)
+    func test_normalisedRoundTrip_matchesOffsets() {
+        let p = CourtGeometry.normalised(lateralFt: -6, depthFt: 10)
+        let back = CourtGeometry.offsetFromBasket(courtX: p.courtX, courtY: p.courtY)
+        XCTAssertEqual(back.lateralFt, -6, accuracy: 1e-9)
+        XCTAssertEqual(back.depthFt, 10, accuracy: 1e-9)
     }
 }

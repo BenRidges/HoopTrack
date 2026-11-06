@@ -1,381 +1,303 @@
 // ProfileTabView.swift
-// Player profile, session history log, settings, and data export.
+// You, your career numbers, and settings. Every control here does
+// something — the old iCloud toggle and notification switches were stubs.
 
 import SwiftUI
+import UIKit
 import SwiftData
 
 struct ProfileTabView: View {
 
-    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var dataService: DataService
+    @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
     @EnvironmentObject private var notificationService: NotificationService
-    @EnvironmentObject private var hapticService: HapticService
     @EnvironmentObject private var authViewModel: AuthViewModel
+    @EnvironmentObject private var appLock: AppLock
+    @Query(sort: \PlayerProfile.createdAt) private var profiles: [PlayerProfile]
 
-    @StateObject private var viewModel: ProfileViewModel = {
-        ProfileViewModel(dataService: DataService(modelContext: ModelContext(try! ModelContainer(for: PlayerProfile.self, TrainingSession.self, ShotRecord.self, GoalRecord.self))))
-    }()
+    @AppStorage(AppPreferences.Key.healthKitEnabled) private var healthKitEnabled = false
+    @AppStorage(AppPreferences.Key.appLockEnabled) private var appLockEnabled = false
+    @AppStorage(AppPreferences.Key.shareTrainingData) private var shareTrainingData = false
+    @AppStorage(AppPreferences.Key.showDetectionBoxes) private var showDetectionBoxes = false
+    @AppStorage(AppPreferences.Key.trainingReminderEnabled) private var reminderEnabled = false
+    @AppStorage(AppPreferences.Key.trainingReminderHour) private var reminderHour = 17
 
+    @State private var editingName = false
+    @State private var draftName = ""
+    @State private var showAccount = false
+    @State private var confirmDeleteAll = false
     @State private var exportURL: URL?
+    @State private var exportError: String?
     @State private var isExporting = false
-    @State private var exportErrorMessage: String?
-    @State private var reminderEnabled: Bool = UserDefaults.standard.bool(forKey: "trainingReminderEnabled")
-    @State private var reminderHour: Int     = UserDefaults.standard.integer(forKey: "trainingReminderHour") == 0
-                                                ? 9
-                                                : UserDefaults.standard.integer(forKey: "trainingReminderHour")
 
-    private var reminderTimeBinding: Binding<Date> {
-        Binding(
-            get: {
-                var components = DateComponents()
-                components.hour = reminderHour
-                components.minute = 0
-                return Calendar.current.date(from: components) ?? .now
-            },
-            set: { date in
-                reminderHour = Calendar.current.component(.hour, from: date)
-            }
-        )
-    }
+    private var profile: PlayerProfile? { profiles.first }
 
     var body: some View {
         List {
+            if let profile {
+                Section { header(profile) }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
 
-            // MARK: Profile Header
-            Section {
-                profileHeader
-            }
+                Section("Career") { career(profile) }
+                    .listRowBackground(Color.panel)
 
-            // MARK: Career Stats
-            Section("Career Stats") {
-                LabeledContent("Total Sessions",  value: "\(viewModel.totalSessions)")
-                LabeledContent("Total Minutes",   value: String(format: "%.0f min", viewModel.totalMinutes))
-                LabeledContent("Career FG%",      value: viewModel.careerFG)
-            }
-
-            // MARK: Session History
-            Section {
-                // Filter chips
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        historyFilterChip(label: "All", filter: nil)
-                        ForEach(DrillType.allCases) { type in
-                            historyFilterChip(label: type.rawValue, filter: type)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-
-                ForEach(viewModel.filteredSessions) { session in
-                    NavigationLink {
-                        SessionSummaryView(session: session, onDone: {})
-                    } label: {
-                        SessionHistoryRow(session: session)
-                    }
-                }
-                .onDelete { indexSet in
-                    indexSet.map { viewModel.filteredSessions[$0] }
-                            .forEach { viewModel.deleteSession($0) }
-                }
-            } header: {
-                HStack {
-                    Text("Session History")
-                    Spacer()
-                    Button {
-                        hapticService.tap()
-                        viewModel.historySortAscending.toggle()
-                    } label: {
-                        Label(viewModel.historySortAscending ? "Oldest first" : "Newest first",
-                              systemImage: viewModel.historySortAscending
-                                ? "arrow.up" : "arrow.down")
-                        .font(.caption)
-                        .tint(.orange)
-                    }
-                }
-            }
-
-            // MARK: Badges
-            Section("Badges") {
-                if let profile = viewModel.profile {
-                    NavigationLink {
-                        BadgeBrowserView(viewModel: BadgeBrowserViewModel(profile: profile))
-                    } label: {
-                        LabeledContent("Earned", value: "\(viewModel.badgeCount) / 25")
-                    }
-                }
-            }
-
-            // MARK: Settings
-            Section("Settings") {
-                // Notifications
-                NavigationLink {
-                    NotificationSettingsView()
-                } label: {
-                    Label("Notifications", systemImage: "bell")
-                }
-
-                // iCloud
-                if let profile = viewModel.profile {
-                    Toggle(isOn: Binding(
-                        get: { profile.iCloudSyncEnabled },
-                        set: { viewModel.toggleICloudSync($0) }
-                    )) {
-                        Label("iCloud Sync", systemImage: "icloud")
-                    }
-                    .tint(.orange)
-
-                    Picker(selection: Binding(
-                        get: { profile.videosAutoDeleteDays },
-                        set: { viewModel.setVideoRetentionDays($0) }
-                    )) {
-                        Text("7 days").tag(7)
-                        Text("14 days").tag(14)
-                        Text("30 days").tag(30)
-                        Text("Never").tag(0)
-                    } label: {
-                        Label("Delete Videos After", systemImage: "film")
-                    }
-                }
-
-                // Preferred court
-                if let profile = viewModel.profile {
-                    Picker(selection: Binding(
-                        get: { profile.preferredCourtType },
-                        set: { profile.preferredCourtType = $0 }
-                    )) {
-                        ForEach(CourtType.allCases) { ct in
-                            Text(ct.rawValue).tag(ct)
-                        }
-                    } label: {
-                        Label("Default Court", systemImage: "mappin.circle")
-                    }
-                }
-
-                // Training Reminder
-                Toggle("Daily Training Reminder", isOn: $reminderEnabled)
-                    .tint(.orange)
-                    .onChange(of: reminderEnabled) { _, on in
-                        if on {
-                            notificationService.scheduleTrainingReminder(hour: reminderHour)
-                        } else {
-                            notificationService.cancelTrainingReminder()
-                        }
-                        UserDefaults.standard.set(on, forKey: "trainingReminderEnabled")
-                    }
-
-                if reminderEnabled {
-                    DatePicker("Reminder Time",
-                               selection: reminderTimeBinding,
-                               displayedComponents: .hourAndMinute)
-                        .onChange(of: reminderHour) { _, hour in
-                            notificationService.scheduleTrainingReminder(hour: hour)
-                            UserDefaults.standard.set(hour, forKey: "trainingReminderHour")
-                        }
-                }
-            }
-
-            // MARK: Data & Export
-            Section("Data") {
-                Button {
-                    guard !isExporting, let profile = viewModel.profile else { return }
-                    isExporting = true
-                    Task {
-                        do {
-                            exportURL   = try await ExportService().exportJSON(for: profile)
-                        } catch {
-                            exportErrorMessage = error.localizedDescription
-                        }
-                        isExporting = false
-                    }
-                } label: {
-                    HStack {
-                        Label("Export Data (JSON)", systemImage: "square.and.arrow.up")
-                            .foregroundStyle(.orange)
-                        if isExporting {
-                            Spacer()
-                            ProgressView()
-                                .tint(.orange)
-                        }
-                    }
-                }
-                .disabled(isExporting)
-            }
-
-            // MARK: Account (Phase 8 — Auth)
-            Section("Account") {
-                if let email = authViewModel.state.user?.email {
-                    LabeledContent("Signed in as", value: email)
-                        .lineLimit(1)
-                }
-                Button("Sign Out", role: .destructive) {
-                    Task { await authViewModel.signOut() }
-                }
-            }
-
-            // MARK: Delete Account (Phase 7 — GDPR right to delete)
-            Section {
-                Button(role: .destructive) {
-                    viewModel.isShowingDeleteConfirm = true
-                } label: {
-                    Label("Delete All My Data", systemImage: "trash")
-                }
-            } footer: {
-                Text("Permanently deletes all sessions, shots, goals, and profile data from this device. This cannot be undone. HealthKit workout records are not deleted — remove them in the Health app if desired.")
-                    .font(.caption)
-            }
-        }
-        .navigationTitle("Profile")
-        .navigationBarTitleDisplayMode(.large)
-        .task { viewModel.load() }
-        .sheet(item: $exportURL) { url in
-            ShareSheet(items: [url])
-                .presentationDetents([.medium, .large])
-        }
-        .alert("Export Failed", isPresented: Binding(
-            get: { exportErrorMessage != nil },
-            set: { if !$0 { exportErrorMessage = nil } }
-        )) {
-            Button("OK") {}
-        } message: {
-            Text(exportErrorMessage ?? "")
-        }
-        // Phase 7 — GDPR delete confirmation
-        .alert("Delete All Data?", isPresented: $viewModel.isShowingDeleteConfirm) {
-            Button("Delete Everything", role: .destructive) {
-                Task { await viewModel.deleteAllData() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will permanently erase all your sessions, shots, goals, and profile data from this device. HealthKit workout records must be removed separately in the Health app.")
-        }
-    }
-
-    // MARK: - Profile Header
-
-    private var profileHeader: some View {
-        HStack(spacing: 16) {
-            // Avatar placeholder
-            ZStack {
-                Circle()
-                    .fill(Color.orange.opacity(0.15))
-                    .frame(width: 64, height: 64)
-                Image(systemName: "person.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.orange)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                if viewModel.isEditingName {
-                    TextField("Your name", text: $viewModel.editingName)
-                        .font(.title2.bold())
-                        .onSubmit { viewModel.saveName() }
-                } else {
-                    Text(viewModel.profile?.name ?? "Player")
-                        .font(.title2.bold())
-                }
-
-                Text("Member since \(viewModel.profile?.createdAt.formatted(.dateTime.month().year()) ?? "—")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Button {
-                hapticService.tap()
-                viewModel.isEditingName
-                    ? viewModel.saveName()
-                    : viewModel.beginEditName()
-            } label: {
-                Image(systemName: viewModel.isEditingName ? "checkmark.circle.fill" : "pencil")
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-
-    // MARK: - History Filter Chip
-
-    private func historyFilterChip(label: String, filter: DrillType?) -> some View {
-        Button {
-            hapticService.tap()
-            viewModel.historyFilter = filter
-        } label: {
-            Text(label)
-                .font(.caption.weight(viewModel.historyFilter == filter ? .semibold : .regular))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    viewModel.historyFilter == filter
-                        ? AnyShapeStyle(Color.orange)
-                        : AnyShapeStyle(Color.secondary.opacity(0.15)),
-                    in: Capsule()
-                )
-                .foregroundStyle(viewModel.historyFilter == filter ? .white : .primary)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - SessionHistoryRow
-private struct SessionHistoryRow: View {
-    let session: TrainingSession
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: session.drillType.systemImage)
-                .font(.title3)
-                .foregroundStyle(.orange)
-                .frame(width: 36)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.namedDrill?.rawValue ?? session.drillType.rawValue)
-                    .font(.subheadline.bold())
-                Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.0f%%", session.fgPercent))
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.orange)
-                Text(session.formattedDuration)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-// MARK: - NotificationSettingsView (stub)
-private struct NotificationSettingsView: View {
-    @EnvironmentObject private var notificationService: NotificationService
-
-    var body: some View {
-        Form {
-            Section("Streak Reminder") {
-                Toggle("Daily Reminder", isOn: .constant(true))
-                    .tint(.orange)
-                    .disabled(notificationService.authorizationStatus != .authorized)
-            }
-            Section("Goal Milestones") {
-                Toggle("Goal Achieved", isOn: .constant(true))
-                    .tint(.orange)
-            }
-            if notificationService.authorizationStatus == .denied {
                 Section {
-                    Button("Open Settings to Allow Notifications") {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(url)
-                        }
-                    }
-                    .foregroundStyle(.orange)
+                    training(profile)
+                } header: {
+                    Text("Training")
+                }
+                .listRowBackground(Color.panel)
+            }
+
+            Section {
+                account
+            } header: {
+                Text("Cloud backup")
+            } footer: {
+                Text("Optional. Your sessions are always saved on this phone.")
+            }
+            .listRowBackground(Color.panel)
+
+            Section {
+                privacy
+            } header: {
+                Text("Privacy & data")
+            } footer: {
+                Text("When on, a sample of frames from your session videos (not the full videos) is uploaded so the shot detector can be retrained. Needs a cloud account. Off by default.")
+            }
+            .listRowBackground(Color.panel)
+
+            Section {
+                Toggle("Show detection boxes", isOn: $showDetectionBoxes)
+            } header: {
+                Text("Developer")
+            } footer: {
+                Text(versionText)
+            }
+            .listRowBackground(Color.panel)
+        }
+        .courtList()
+        .navigationTitle("Profile")
+        .tint(.leather)
+        .onAppear { _ = try? dataService.fetchOrCreateProfile() }
+        .sheet(isPresented: $showAccount) { AccountSheet() }
+        .sheet(item: $exportURL) { url in
+            ShareSheet(items: [url]).presentationDetents([.medium, .large])
+        }
+        .alert("Your name", isPresented: $editingName) {
+            TextField("Name", text: $draftName)
+            Button("Save") { dataService.setPlayerName(draftName) }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Export failed", isPresented: Binding(get: { exportError != nil },
+                                                    set: { if !$0 { exportError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportError ?? "")
+        }
+        .confirmationDialog("Delete everything?", isPresented: $confirmDeleteAll, titleVisibility: .visible) {
+            Button("Delete all my data", role: .destructive) {
+                Task {
+                    await dataService.deleteAllUserData()
+                    await authViewModel.signOut()
+                    notificationService.cancelAll()
+                    _ = try? dataService.fetchOrCreateProfile()
                 }
             }
+        } message: {
+            Text("Every session, shot, goal, badge, game and video on this phone is erased, and you're signed out. Workouts already saved to Apple Health stay there. This can't be undone.")
         }
-        .navigationTitle("Notifications")
+    }
+
+    // MARK: - Header
+
+    private func header(_ profile: PlayerProfile) -> some View {
+        HStack(spacing: 16) {
+            Text(initials(profile.name))
+                .font(.system(size: 26, weight: .heavy).width(.compressed))
+                .foregroundStyle(Color.onLeather)
+                .frame(width: 64, height: 64)
+                .background(Color.leather, in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    draftName = profile.name == "Player" ? "" : profile.name
+                    editingName = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(profile.name)
+                            .font(.title2.bold())
+                            .foregroundStyle(.primary)
+                        Image(systemName: "pencil")
+                            .font(.footnote)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Edit your name")
+                Text("Training since \(profile.createdAt.formatted(.dateTime.month(.wide).year()))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func initials(_ name: String) -> String {
+        let letters = name.split(separator: " ").prefix(2).compactMap(\.first)
+        return letters.isEmpty ? "?" : String(letters).uppercased()
+    }
+
+    // MARK: - Career
+
+    @ViewBuilder
+    private func career(_ profile: PlayerProfile) -> some View {
+        LabeledContent("Field goal", value: profile.careerShotsAttempted > 0
+                       ? "\(Int(profile.careerFGPercent.rounded()))%  ·  \(profile.careerShotsMade)/\(profile.careerShotsAttempted)"
+                       : "–")
+        LabeledContent("Sessions", value: "\(profile.totalSessionCount)")
+        LabeledContent("Time trained", value: hoursText(profile.totalTrainingMinutes))
+        LabeledContent("Best session", value: profile.prBestFGPercentSession > 0
+                       ? "\(Int(profile.prBestFGPercentSession.rounded()))%" : "–")
+        LabeledContent("Most makes", value: "\(profile.prMostMakesSession)")
+        LabeledContent("Longest streak", value: "\(profile.longestStreakDays) days")
+    }
+
+    private func hoursText(_ minutes: Double) -> String {
+        minutes < 60 ? "\(Int(minutes)) min" : String(format: "%.1f h", minutes / 60)
+    }
+
+    // MARK: - Training settings
+
+    @ViewBuilder
+    private func training(_ profile: PlayerProfile) -> some View {
+        Picker("Three-point line", selection: Binding(
+            get: { profile.preferredCourtType },
+            set: { profile.preferredCourtType = $0; try? dataService.modelContext.save() }
+        )) {
+            ForEach(CourtType.allCases) { Text($0.displayName).tag($0) }
+        }
+        Picker("Keep videos", selection: Binding(
+            get: { profile.videosAutoDeleteDays },
+            set: { profile.videosAutoDeleteDays = $0; try? dataService.modelContext.save() }
+        )) {
+            Text("7 days").tag(7)
+            Text("14 days").tag(14)
+            Text("30 days").tag(30)
+            Text("Forever").tag(0)
+        }
+        Toggle("Daily reminder", isOn: $reminderEnabled)
+            .onChange(of: reminderEnabled) { _, on in
+                Task {
+                    if on {
+                        if notificationService.authorizationStatus == .notDetermined {
+                            await notificationService.requestPermission()
+                        }
+                        guard notificationService.authorizationStatus == .authorized else {
+                            reminderEnabled = false
+                            return
+                        }
+                        notificationService.scheduleTrainingReminders(hour: reminderHour,
+                                                                      trainedToday: dataService.hasTrainedToday)
+                    } else {
+                        notificationService.cancelTrainingReminder()
+                    }
+                }
+            }
+        if reminderEnabled {
+            Picker("Remind me at", selection: $reminderHour) {
+                ForEach(6..<23) { hour in
+                    Text(hourLabel(hour)).tag(hour)
+                }
+            }
+            .onChange(of: reminderHour) { _, hour in
+                notificationService.scheduleTrainingReminders(hour: hour,
+                                                              trainedToday: dataService.hasTrainedToday)
+            }
+        }
+        Toggle("Save workouts to Apple Health", isOn: $healthKitEnabled)
+            .onChange(of: healthKitEnabled) { _, on in
+                if on { Task { await coordinator.requestHealthKitPermission() } }
+            }
+    }
+
+    private func hourLabel(_ hour: Int) -> String {
+        var components = DateComponents()
+        components.hour = hour
+        let date = Calendar.current.date(from: components) ?? .now
+        return date.formatted(date: .omitted, time: .shortened)
+    }
+
+    // MARK: - Account
+
+    @ViewBuilder
+    private var account: some View {
+        switch authViewModel.state {
+        case .authenticated(let user) where user.emailVerified:
+            LabeledContent("Signed in", value: user.email)
+            Button("Sign out", role: .destructive) {
+                Task { await authViewModel.signOut() }
+            }
+        case .authenticated:
+            Button("Confirm your email") { showAccount = true }
+        case .authenticating:
+            HStack {
+                Text("Checking…")
+                Spacer()
+                ProgressView()
+            }
+        case .unauthenticated, .error:
+            Button("Sign in or create an account") { showAccount = true }
+        }
+    }
+
+    // MARK: - Privacy
+
+    @ViewBuilder
+    private var privacy: some View {
+        Toggle("Lock with Face ID", isOn: Binding(
+            get: { appLockEnabled },
+            set: { on in
+                if on {
+                    Task { appLockEnabled = await appLock.confirmEnable() }
+                } else {
+                    appLockEnabled = false
+                }
+            }
+        ))
+        Toggle("Help improve shot tracking", isOn: $shareTrainingData)
+        Button {
+            export()
+        } label: {
+            HStack {
+                Text("Export my data")
+                Spacer()
+                if isExporting { ProgressView() }
+            }
+        }
+        .disabled(isExporting || profile == nil)
+        Button("Delete all my data", role: .destructive) { confirmDeleteAll = true }
+    }
+
+    private func export() {
+        guard let profile, !isExporting else { return }
+        isExporting = true
+        Task {
+            do {
+                exportURL = try await ExportService().exportJSON(for: profile)
+            } catch {
+                exportError = error.localizedDescription
+            }
+            isExporting = false
+        }
+    }
+
+    private var versionText: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "–"
+        let build = info?["CFBundleVersion"] as? String ?? "–"
+        return "HoopTrack \(version) (\(build)) · \(HoopTrack.MLModel.modelVersion)"
     }
 }
 
@@ -389,4 +311,3 @@ struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
-

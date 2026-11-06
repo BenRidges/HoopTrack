@@ -17,13 +17,25 @@ struct BadgeBrowserView: View {
                             .contentShape(Rectangle())
                             .onTapGesture { selectedBadgeID = item.id }
                     }
+                    .listRowBackground(Color.panel)
                 } header: {
                     Label(dimension.rawValue, systemImage: dimension.systemImage)
                 }
             }
         }
-        .navigationTitle("Badges  ·  \(viewModel.earnedCount) / 25")
+        .courtList()
+        .navigationTitle("Badges")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text("Badges").font(.headline)
+                    Text("\(viewModel.earnedCount) of \(BadgeID.allCases.count) earned")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
         .sheet(item: $selectedBadgeID) { badgeID in
             BadgeDetailSheet(badgeID: badgeID, viewModel: viewModel)
                 .presentationDetents([.medium])
@@ -50,7 +62,7 @@ private struct BadgeRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.id.displayName)
                     .font(.subheadline)
-                    .foregroundStyle(item.rank == nil ? .secondary : .primary)
+                    .foregroundStyle(item.rank == nil ? Color.secondary : Color.primary)
             }
             Spacer()
             if let rank = item.rank {
@@ -85,7 +97,7 @@ private struct BadgeDetailSheet: View {
                     VStack(spacing: 8) {
                         Image(systemName: badgeID.skillDimension.systemImage)
                             .font(.system(size: 48))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.leather)
                         Text(badgeID.displayName)
                             .font(.title2.bold())
                     }

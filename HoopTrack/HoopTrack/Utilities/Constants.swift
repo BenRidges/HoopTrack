@@ -2,84 +2,68 @@
 // App-wide constants. All magic numbers and configuration live here.
 
 import Foundation
-import CoreGraphics
 
 nonisolated enum HoopTrack {
 
     // MARK: - App Info
     static let appName    = "HoopTrack"
     static let bundleID   = "com.hooptrack.app"
-    static let minIOSVersion = 16.0
 
     // MARK: - Camera / CV
     enum Camera {
-        static let targetFPS: Double        = 60
-        static let sessionPreset            = "AVCaptureSessionPreset1280x720"
-        static let maxProcessingLatencyMs   = 20.0  // < 20ms per frame target
-        static let shotDetectionLatencyMs   = 500.0 // < 0.5s from release to confirm
-        static let ballDetectionConfidenceThreshold: Float = 0.55
+        static let targetFPS: Double = 60
     }
 
     // MARK: - ML Model
     enum MLModel {
-        /// Resource name of the bundled .mlpackage (without extension).
-        static let bundledModelName  = "BallDetector"
-        /// Target label for COCO-trained models (YOLOv8n, YOLOv5n, etc.)
-        static let cocoTargetLabel   = "sports ball"
-        /// Target label for basketball-specific models (Roboflow basketball-xil7x).
-        /// Classes: ball, human, rim. Pipeline filters by substring so "ball"
-        /// is the ball class and "rim" is queried separately in CoreMLBallDetector.
-        static let customTargetLabel = "ball"
+        /// Resource name of the bundled model (without extension). Xcode compiles
+        /// `ML/BallDetector.mlmodel` to `BallDetector.mlmodelc`.
+        static let bundledModelName = "BallDetector"
+        /// Label substrings accepted for each class. The shipped model says
+        /// "basket"; newer Roboflow exports say "rim". Accept both so a model
+        /// swap can't silently switch hoop detection off again.
+        static let ballLabels: [String] = ["ball"]
+        static let hoopLabels: [String] = ["basket", "rim", "hoop"]
 
-        /// Human-readable version string written into telemetry manifests so
-        /// future retrains can correlate data with the model that was in use.
-        /// Update whenever BallDetector.mlmodel is retrained/replaced.
-        static let modelVersion = "BallDetector-yolo11m-2026-04-19"
+        /// Written into telemetry manifests so retrains can be matched to the
+        /// model that produced the data. Update whenever BallDetector.mlmodel changes.
+        static let modelVersion = "BallDetector-yolov8s-640-2026-04-18"
     }
 
-    // MARK: - Court Geometry (normalised 0–1 half-court space)
-    // These drive zone classification in the CV pipeline (Phase 2).
-    enum CourtGeometry {
-        // Paint box: centered horizontally, extends from baseline
-        static let paintWidthFraction:  Double = 0.32
-        static let paintHeightFraction: Double = 0.38
-
-        // Free throw line Y (from baseline = 0)
-        static let freeThrowLineFraction: Double = 0.38
-
-        // Three-point arc radius as fraction of half-court width
-        static let threePointArcRadiusFraction: Double = 0.47
-
-        // Corner 3 depth from baseline
-        static let cornerThreeDepthFraction: Double = 0.28
+    // MARK: - Shot detection
+    enum CV {
+        /// Per-class minimum confidence. The ball threshold is low on purpose:
+        /// ShotTracker's temporal gating rejects one-frame false positives,
+        /// and a blurred ball in flight often scores 0.3–0.5.
+        static let ballConfidence: Float = 0.30
+        static let hoopConfidence: Float = 0.45
+        /// Shots below this confidence are flagged for review in the summary.
+        static let lowConfidence: Double = 0.6
+        /// While a shot is in flight, detect in a crop around the hoop and the
+        /// ball (DetectionRegion) instead of the letterboxed full frame.
+        /// Switch off here if boxes ever look misplaced with detection boxes on.
+        static let focusDuringShots = true
+        /// When the phone is this hot or hotter, detect on every other frame
+        /// (recording continues at full rate) before iOS throttles for us.
+        static let throttleAtThermalState = 2   // ProcessInfo.ThermalState.serious
     }
 
     // MARK: - Shot Science (Phase 3 thresholds)
     enum ShotScience {
-        static let optimalReleaseAngleMin: Double = 43  // degrees
+        /// Launch-angle band coaches teach for jump shots, degrees.
+        static let optimalReleaseAngleMin: Double = 43
         static let optimalReleaseAngleMax: Double = 57
-        static let consistencyThreshold:   Double = 3.0 // degrees variance — "good" below this
     }
 
     // MARK: - Dribble (Phase 4 thresholds)
     enum Dribble {
-        /// Minimum wrist Y displacement (normalised 0–1) to count as a dribble bounce.
-        static let minWristDisplacementFrac: Double = 0.03
-        /// Frames a wrist velocity must sustain a direction change to avoid noise triggers.
-        static let velocityConfirmFrames: Int = 2
-        /// Optimal dribbles-per-second range for ball-handling drills.
+        /// Wrist push needed to count a dribble, as a fraction of torso length.
+        static let bounceThresholdTorso: Double = 0.12
+        /// Comfortable dribbles-per-second band for the live speed readout.
         static let optimalBPSMin: Double = 3.0
         static let optimalBPSMax: Double = 7.0
-        /// Max seconds between two dribble events to count as a hand-switch combo.
-        static let comboWindowSec: Double = 1.5
-        /// Ball diameter in cm — used as scale reference.
-        static let ballDiameterCm: Double = 24.0
-        /// Rolling window duration (seconds) used for current BPS calculation.
+        /// Rolling window (seconds) for the live BPS readout.
         static let bpsWindowSec: Double = 3.0
-        /// Number of AR floor targets per dribble drill.
-        static let arTargetCount: Int = 3
-        /// Radius of each AR floor target (metres).
-        static let arTargetRadiusM: Float = 0.25
     }
 
     // MARK: - Skill Rating Algorithm
@@ -142,41 +126,13 @@ nonisolated enum HoopTrack {
     // MARK: - Storage
     enum Storage {
         static let sessionVideoDirectory  = "Sessions"
-        static let maxSessionVideoMB      = 300       // per 30-min session
         static let defaultVideoRetainDays = 7
-        static let allowedVideoRetainDays = [7, 14, 30]
     }
 
-    // MARK: - Game Mode (SP1)
+    // MARK: - Game Mode
     enum Game {
-        /// How long a valid body lock must hold before registration auto-advances.
-        static let registrationLockDurationSec: Double = 3.0
-
-        /// Minimum Vision body-pose keypoint confidence (shoulders + hips) to count as "valid lock".
-        /// Was 0.7 — lowered to 0.5 after real-device testing revealed that Vision body-pose
-        /// confidences typically sit in 0.3–0.7 even for clearly visible joints; requiring 0.7
-        /// on all 4 joints simultaneously made the lock practically unachievable.
-        static let registrationMinBodyConfidence: Float = 0.5
-
-        /// How many consecutive bad frames the capture service coasts on a cached
-        /// good reading before giving up and breaking the lock. At 30fps this is
-        /// ~165ms — long enough for motion blur / AE shifts, short enough that
-        /// a player actually walking away breaks the lock.
-        static let registrationMaxStaleFrames: Int = 5
-
-        /// Display hints for the user during registration (informational only).
-        static let registrationMinDistanceFeet: Double = 6.0
-        static let registrationMaxDistanceFeet: Double = 8.0
-
-        /// Hard cap on team size — matches max `GameFormat` (3v3).
-        static let maxPlayersPerTeam: Int = 3
-
-        /// AppearanceDescriptor histogram dimensions.
-        static let histogramHueBins: Int = 8
-        static let histogramValueBins: Int = 4
-
-        /// AppearanceDescriptor schema version — bump on breaking field changes.
-        static let appearanceDescriptorSchemaVersion: Int = 1
+        /// Default first-to score for pickup games (nil = no limit).
+        static let defaultTargetScore: Int = 21
     }
 
     // MARK: - Telemetry (CV-A)
@@ -213,14 +169,6 @@ nonisolated enum HoopTrack {
         static let retrainTargetSessions: Int = 10
     }
 
-    // MARK: - Performance Targets
-    enum Performance {
-        static let makeDetectionAccuracy:    Double = 0.92  // 92% under good indoor lighting
-        static let poseEstimationErrorDeg:   Double = 3.0   // degrees
-        static let maxMemoryFootprintMB:     Double = 300
-        static let maxBatteryPerHourPercent: Double = 20
-    }
-
     // Phase 7 — Security
     enum KeychainKey {
         static let accessToken    = "com.hooptrack.keychain.accessToken"
@@ -250,11 +198,4 @@ nonisolated enum HoopTrack {
         static let redirectURL = URL(string: "hooptrack://auth/callback")!
     }
 
-    // MARK: - UI
-    enum UI {
-        static let cornerRadius: Double         = 16
-        static let cardPadding: Double          = 14
-        static let animationDuration: Double    = 0.3
-        static let makeAnimationDuration: Double = 1.0
-    }
 }

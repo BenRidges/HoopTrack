@@ -1,76 +1,60 @@
 // HoldToEndButton.swift
-// Reusable hold-to-confirm button with visual progress feedback.
+// Press and hold to finish a session, so a stray tap mid-drill can't end it.
+// Built on the system long-press gesture: the confirm fires once, and
+// letting go afterwards can't cancel the save (the old drag-gesture version
+// cancelled the finishing task on release).
 
 import SwiftUI
 
 struct HoldToEndButton: View {
-    let onConfirm: () async -> Void
+    var title: String = "Hold to end"
+    var holdDuration: Double = 0.8
+    /// Shows "Saving…" and ignores presses while the parent finishes up.
+    var isBusy: Bool = false
+    let onConfirm: () -> Void
 
     @EnvironmentObject private var hapticService: HapticService
-
-    @State private var isHolding = false
-    @State private var progress: Double = 0
-    @State private var task: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var progress: CGFloat = 0
 
     var body: some View {
-        Text(isHolding ? "HOLD..." : "END SESSION")
-            .font(.system(size: 9, weight: .heavy))
-            .tracking(1.5)
-            .frame(maxWidth: .infinity)
-            .frame(height: 34)
-            .accessibilityLabel("End session")
-            .accessibilityHint("Hold to confirm ending the current training session")
-            .accessibilityAddTraits(.isButton)
-            .background(
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(
-                            LinearGradient(colors: [Color(red: 0.83, green: 0.13, blue: 0.13),
-                                                    Color(red: 1.0, green: 0.23, blue: 0.19)],
-                                           startPoint: .topLeading, endPoint: .bottomTrailing)
-                        )
-                    GeometryReader { geo in
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white.opacity(0.2))
-                            .frame(width: max(0, progress) * geo.size.width)
-                            .animation(.linear(duration: 0.05), value: progress)
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .shadow(color: .red.opacity(0.25), radius: 8, y: 2)
-            )
-            .foregroundStyle(.white)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard !isHolding else { return }
-                        isHolding = true
-                        progress = 0
-                        withAnimation(.linear(duration: 1.5)) {
-                            progress = 1
-                        }
-                        task = Task {
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            guard !Task.isCancelled else { return }
-                            hapticService.longPress()
-                            await onConfirm()
-                        }
-                    }
-                    .onEnded { _ in
-                        task?.cancel()
-                        task = nil
-                        isHolding = false
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            progress = 0
-                        }
-                    }
-            )
+        ZStack(alignment: .leading) {
+            Capsule().fill(Color.black.opacity(0.55))
+            GeometryReader { geo in
+                Capsule()
+                    .fill(Color.miss)
+                    .frame(width: max(geo.size.height, geo.size.width * progress))
+                    .opacity(progress > 0 ? 1 : 0)
+            }
+            Text(isBusy ? "Saving…" : title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(width: 150, height: 48)
+        .contentShape(Capsule())
+        .onLongPressGesture(minimumDuration: holdDuration, maximumDistance: 40) {
+            guard !isBusy else { return }
+            hapticService.longPress()
+            onConfirm()
+        } onPressingChanged: { pressing in
+            guard !isBusy else { return }
+            if pressing {
+                withAnimation(reduceMotion ? nil : .linear(duration: holdDuration)) { progress = 1 }
+            } else {
+                withAnimation(.easeOut(duration: 0.2)) { progress = 0 }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("End session")
+        .accessibilityHint("Touch and hold to finish and save")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            guard !isBusy else { return }
+            onConfirm()
+        }
+        .onChange(of: isBusy) { _, busy in
+            if !busy { progress = 0 }
+        }
     }
-}
-
-#Preview {
-    HoldToEndButton {
-        print("Confirmed!")
-    }
-    .environmentObject(HapticService())
 }

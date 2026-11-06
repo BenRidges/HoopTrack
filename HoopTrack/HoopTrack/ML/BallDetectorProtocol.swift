@@ -2,7 +2,7 @@
 import AVFoundation
 import CoreGraphics
 
-/// A single detection from one camera frame — used for both ball and basket.
+/// A single detection from one camera frame — used for both ball and hoop.
 /// Vision-normalised coordinates: origin bottom-left, 0–1 range.
 nonisolated struct BallDetection: Sendable {
     let boundingBox: CGRect
@@ -10,19 +10,28 @@ nonisolated struct BallDetection: Sendable {
     let frameTimestamp: CMTime
 }
 
-/// All detections of interest from a single frame inference. Either field
-/// may be nil — no ball in frame, or hoop out of view — but the detector
-/// always returns a `SceneDetection` when the frame was processed, so the
-/// caller can distinguish "no detection this frame" from "frame skipped".
+/// Everything of interest from one frame. `balls` holds every ball candidate
+/// (highest confidence first) so the tracker can follow the right one when
+/// there are several balls on court.
 nonisolated struct SceneDetection: Sendable {
-    let ball: BallDetection?
+    let balls: [BallDetection]
     let basket: BallDetection?
     let frameTimestamp: CMTime
+
+    /// Most confident ball, for logging and the debug overlay.
+    var ball: BallDetection? { balls.first }
 }
 
-/// Protocol that both the real Core ML wrapper and the debug stub conform to.
-/// Kept on the background session queue — must NOT touch the main actor.
+/// Implemented by the Core ML wrapper and the debug stub. Called on the
+/// camera's session queue — must not touch the main actor.
 nonisolated protocol BallDetectorProtocol: Sendable {
-    /// Single inference per frame, returns every class of interest.
-    func detectScene(buffer: CMSampleBuffer) -> SceneDetection?
+    /// Detects in `region` (Vision-normalised; nil = whole frame). Boxes in
+    /// the result are always full-frame coordinates.
+    func detectScene(buffer: CMSampleBuffer, region: CGRect?) -> SceneDetection?
+}
+
+nonisolated extension BallDetectorProtocol {
+    func detectScene(buffer: CMSampleBuffer) -> SceneDetection? {
+        detectScene(buffer: buffer, region: nil)
+    }
 }

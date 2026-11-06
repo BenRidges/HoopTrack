@@ -10,12 +10,7 @@ final class DataServiceExportTests: XCTestCase {
     private var sut: DataService!
 
     override func setUp() async throws {
-        let schema = Schema([
-            PlayerProfile.self, TrainingSession.self,
-            ShotRecord.self, GoalRecord.self, EarnedBadge.self
-        ])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try ModelContainer(for: schema, configurations: config)
+        container = try HoopTrackStore.makeInMemoryContainer()
         sut = DataService(modelContext: container.mainContext)
     }
 

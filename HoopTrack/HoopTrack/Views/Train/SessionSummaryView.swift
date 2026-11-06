@@ -1,342 +1,529 @@
 // SessionSummaryView.swift
-// Post-session summary — FG%, shot chart, zone breakdown,
-// and Shot Science highlights (Phase 3 fields shown if available).
+// The report for one session — shown as a sheet right after training
+// (SessionSummaryView) and pushed from history (SessionDetailView).
+//
+// Shooting reports lead with FG%, then where the shots came from, then the
+// shot list. Any shot can be flipped make ↔ miss with one tap; calls the
+// tracker wasn't sure about are flagged so they get checked first.
 
 import SwiftUI
-import SwiftData
 
+/// Post-session sheet.
 struct SessionSummaryView: View {
-
-    let session: TrainingSession
-    var badgeChanges: [BadgeTierChange] = []
-    var badgeSkipReason: String? = nil
-    let onDone: () -> Void
-
-    @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject private var hapticService: HapticService
-    @Query private var profiles: [PlayerProfile]
-    @State private var showShareSheet = false
-    @State private var selectedShotForReview: ShotRecord? = nil
-    @State private var showReplay = false
-    @State private var animatedFG: Double = 0
-    @State private var isPinned: Bool = false
+    let result: SessionResult
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-
-                    // MARK: Hero stats
-                    heroSection
-
-                    // MARK: Video retention (Phase 10)
-                    if session.videoFileName != nil {
-                        videoSection
-                    }
-
-                    // MARK: Shot chart
-                    shotChartSection
-
-                    // MARK: Zone breakdown
-                    zoneSection
-
-                    // MARK: Shot Science (Phase 3 — shown when data is available)
-                    if hasShotScienceData {
-                        shotScienceSection
-                    }
-
-                    // MARK: Shot-by-shot review
-                    shotListSection
-
-                    // MARK: Badges Updated (Phase 5B)
-                    BadgesUpdatedSection(changes: badgeChanges, skipReason: badgeSkipReason)
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 24)
-            }
-            .navigationTitle("Session Summary")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        hapticService.tap()
-                        showShareSheet = true
-                    } label: {
-                        Label("Share", systemImage: "square.and.arrow.up")
+            SessionReport(session: result.session,
+                          badgeChanges: result.badgeChanges,
+                          badgeSkipReason: result.badgeSkipReason)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }.bold()
                     }
                 }
-                if session.videoFileName != nil {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            hapticService.tap()
-                            showReplay = true
-                        } label: {
-                            Label("Replay", systemImage: "play.rectangle.fill")
-                        }
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        hapticService.tap()
-                        onDone()
-                    }
-                    .bold()
-                    .tint(.orange)
-                }
-            }
-            .onAppear {
-                hapticService.milestone()
-            }
-            .fullScreenCover(isPresented: $showReplay) {
-                SessionReplayView(session: session)
-            }
         }
-    }
-
-    // MARK: - Sections
-
-    private var heroSection: some View {
-        VStack(spacing: 8) {
-            EmptyView()
-                .modifier(AnimatedCounterModifier(currentValue: animatedFG, format: "%.0f%%"))
-                .font(.system(size: 72, weight: .black, design: .rounded))
-                .foregroundStyle(.orange)
-                .animation(.easeOut(duration: 0.6), value: animatedFG)
-
-            Text("\(session.shotsMade) makes / \(session.shotsAttempted) attempts")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 20) {
-                Label(session.formattedDuration, systemImage: "clock")
-                Label(session.drillType.rawValue,  systemImage: session.drillType.systemImage)
-                if !session.locationTag.isEmpty {
-                    Label(session.locationTag, systemImage: "location")
-                }
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.top, 8)
-        .onAppear {
-            animatedFG = session.fgPercent
-            isPinned = session.videoPinnedByUser
-        }
-    }
-
-    private var retentionDays: Int {
-        profiles.first?.videosAutoDeleteDays ?? HoopTrack.Storage.defaultVideoRetainDays
-    }
-
-    private var expiryText: String {
-        retentionDays == 0 ? "Never auto-deletes." : "Auto-deletes in \(retentionDays) days."
-    }
-
-    private var videoSection: some View {
-        HStack(spacing: 12) {
-            Image(systemName: isPinned ? "bookmark.fill" : "bookmark")
-                .font(.title3)
-                .foregroundStyle(isPinned ? Color.orange : .secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Save video")
-                    .font(.subheadline.bold())
-                Text(isPinned ? "Kept on this device until you unpin." : expiryText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Toggle("", isOn: $isPinned)
-                .labelsHidden()
-                .tint(.orange)
-                .onChange(of: isPinned) { _, newValue in
-                    session.videoPinnedByUser = newValue
-                    try? modelContext.save()
-                    hapticService.tap()
-                }
-        }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(isPinned ? "Video saved" : "Video \(expiryText.lowercased())")
-        .accessibilityHint("Toggle to keep or auto-delete this session's video")
-    }
-
-    private var shotChartSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Shot Chart")
-                .font(.headline)
-
-            CourtMapView(shots: session.shots,
-                         highlightedShot: selectedShotForReview)
-            CourtMapLegend()
-                .frame(maxWidth: .infinity, alignment: .center)
-        }
-    }
-
-    private var zoneSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Zone Breakdown")
-                .font(.headline)
-
-            ForEach(session.zoneStats, id: \.zone.rawValue) { stat in
-                HStack {
-                    Text(stat.zone.rawValue)
-                        .font(.subheadline)
-                        .frame(width: 120, alignment: .leading)
-
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.secondary.opacity(0.2))
-                            Capsule()
-                                .fill(Color.orange.gradient)
-                                .frame(width: geo.size.width * (stat.fgPercent / 100))
-                        }
-                    }
-                    .frame(height: 8)
-
-                    Text(String(format: "%.0f%%", stat.fgPercent))
-                        .font(.subheadline.bold())
-                        .frame(width: 48, alignment: .trailing)
-                        .foregroundStyle(.orange)
-
-                    Text("\(stat.made)/\(stat.attempted)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, alignment: .trailing)
-                }
-            }
-
-            if session.zoneStats.isEmpty {
-                Text("No zone data (shot positions not mapped)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var shotScienceSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Shot Science", systemImage: "waveform.path.ecg")
-                .font(.headline)
-
-            StatCardGrid {
-                if let angle = session.avgReleaseAngleDeg {
-                    StatCard(title: "Release Angle",
-                             value: String(format: "%.1f°", angle),
-                             subtitle: "Optimal: 43–57°",
-                             accent: angle >= HoopTrack.ShotScience.optimalReleaseAngleMin
-                                 && angle <= HoopTrack.ShotScience.optimalReleaseAngleMax ? .green : .red)
-                }
-                if let time = session.avgReleaseTimeMs {
-                    StatCard(title: "Release Time",
-                             value: String(format: "%.0f ms", time),
-                             accent: .blue)
-                }
-                if let jump = session.avgVerticalJumpCm {
-                    StatCard(title: "Avg Vertical",
-                             value: String(format: "%.0f cm", jump),
-                             accent: .purple)
-                }
-                if let consistency = session.consistencyScore {
-                    StatCard(title: "Consistency",
-                             value: String(format: "%.1f°", consistency),
-                             subtitle: "Lower = more consistent",
-                             accent: consistency < 3 ? .green : .orange)
-                }
-            }
-        }
-    }
-
-    private var shotListSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Shot Review")
-                .font(.headline)
-
-            LazyVStack(spacing: 8) {
-                ForEach(session.shots.sorted { $0.sequenceIndex < $1.sequenceIndex }) { shot in
-                    ShotReviewRow(shot: shot, isSelected: shot.id == selectedShotForReview?.id)
-                        .onTapGesture {
-                            hapticService.tap()
-                            selectedShotForReview = selectedShotForReview?.id == shot.id
-                                ? nil : shot
-                        }
-                }
-            }
-        }
-    }
-
-    // MARK: - Helpers
-
-    private var hasShotScienceData: Bool {
-        session.avgReleaseAngleDeg != nil
-        || session.avgReleaseTimeMs != nil
-        || session.avgVerticalJumpCm != nil
+        .presentationDragIndicator(.visible)
     }
 }
 
-// MARK: - ShotReviewRow
-private struct ShotReviewRow: View {
-    let shot: ShotRecord
-    let isSelected: Bool
+/// History entry, pushed onto a navigation stack.
+struct SessionDetailView: View {
+    let session: TrainingSession
+    @EnvironmentObject private var dataService: DataService
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmDelete = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Shot number
-            Text("#\(shot.sequenceIndex)")
-                .font(.caption.bold().monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 30)
-
-            // Make/miss indicator
-            Image(systemName: shot.isMake ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(shot.isMake ? .green : .red)
-                .font(.title3)
-
-            // Zone + type
-            VStack(alignment: .leading, spacing: 2) {
-                Text(shot.zone.rawValue)
-                    .font(.subheadline)
-                Text(shot.shotType.rawValue)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        SessionReport(session: session)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("Delete session", systemImage: "trash", role: .destructive) {
+                            confirmDelete = true
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
             }
-
-            Spacer()
-
-            if let angle = shot.releaseAngleDeg {
-                Text(String(format: "%.0f°", angle))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(
-                        angle >= HoopTrack.ShotScience.optimalReleaseAngleMin
-                        && angle <= HoopTrack.ShotScience.optimalReleaseAngleMax
-                            ? .green : .orange
-                    )
+            .confirmationDialog("Delete this session?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    // Pop first: a view still reading a deleted SwiftData
+                    // object can crash, so delete once the transition is done.
+                    dismiss()
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(450))
+                        try? dataService.deleteSession(session)
+                    }
+                }
+            } message: {
+                Text("Its shots and video are removed and your career stats are updated.")
             }
+    }
+}
 
-            // Correction badge
-            if shot.isUserCorrected {
-                Image(systemName: "pencil.circle")
-                    .foregroundStyle(.orange)
-                    .font(.caption)
+// MARK: - Report
+
+struct SessionReport: View {
+    let session: TrainingSession
+    var badgeChanges: [BadgeTierChange] = []
+    var badgeSkipReason: String? = nil
+
+    @EnvironmentObject private var dataService: DataService
+    @EnvironmentObject private var hapticService: HapticService
+    @State private var highlighted: ShotRecord.ID?
+    @State private var showReplay = false
+
+    private var shots: [ShotRecord] { session.orderedShots.filter { $0.result != .pending } }
+    private var flagged: [ShotRecord] { shots.filter(\.needsReview) }
+    private var isShooting: Bool { session.drillType == .freeShoot || session.drillType == .fullWorkout }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
+                header
+                hero
+                if isShooting {
+                    if !flagged.isEmpty { reviewBanner }
+                    if shots.contains(where: { $0.zone != .unknown }) { chart }
+                    if !session.zoneStats.isEmpty { zones }
+                    if session.avgReleaseAngleDeg != nil { arc }
+                    if !shots.isEmpty { shotList }
+                }
+                if session.drillType == .dribble { dribbleDetails }
+                if session.drillType == .agility { agilityDetails }
+                if !badgeChanges.isEmpty || badgeSkipReason != nil { badges }
+                if hasVideo { video }
             }
-
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            .padding(.horizontal, Metrics.screenPadding)
+            .padding(.bottom, 32)
         }
-        .padding(10)
-        .background(
-            isSelected
-                ? AnyShapeStyle(Color.orange.opacity(0.12))
-                : AnyShapeStyle(Color(.systemBackground).opacity(0.01)),
-            in: RoundedRectangle(cornerRadius: 10)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? Color.orange.opacity(0.4) : .clear, lineWidth: 1)
-        )
+        .courtBackground()
+        .fullScreenCover(isPresented: $showReplay) {
+            SessionReplayView(session: session)
+        }
+    }
+
+    // MARK: Header & hero
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(session.title)
+                .font(.title2.bold())
+            Text("\(session.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(session.formattedDuration)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private var hero: some View {
+        switch session.drillType {
+        case .dribble:
+            heroNumber("\(session.totalDribbles ?? 0)", caption: "dribbles", color: .primary)
+        case .agility:
+            if let best = session.bestShuttleRunSeconds ?? session.bestLaneAgilitySeconds {
+                heroNumber(String(format: "%.2f", best) + "s", caption: "best time", color: .primary)
+            } else {
+                heroNumber("–", caption: "no timed runs", color: .secondary)
+            }
+        case .freeShoot, .fullWorkout:
+            if session.shotsAttempted > 0 {
+                HStack(alignment: .lastTextBaseline, spacing: 18) {
+                    heroNumber("\(Int(session.fgPercent.rounded()))%", caption: "field goal",
+                               color: .shooting(session.fgPercent))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(session.shotsMade) of \(session.shotsAttempted)")
+                            .font(.title3.weight(.semibold))
+                        if session.longestMakeStreak >= 3 {
+                            Text("\(session.longestMakeStreak) in a row at best")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.bottom, 22)
+                }
+            } else {
+                heroNumber("–", caption: "no shots logged", color: .secondary)
+            }
+        }
+    }
+
+    private func heroNumber(_ value: String, caption: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(value)
+                .font(.score(96))
+                .foregroundStyle(color)
+                .contentTransition(.numericText())
+            Text(caption)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Review
+
+    private var reviewBanner: some View {
+        Panel {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.leather)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(flagged.count == 1 ? "1 call to check" : "\(flagged.count) calls to check")
+                        .font(.headline)
+                    Text("The tracker wasn't sure about these. Tap a shot below to flip it.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Button("They're all right") {
+                        hapticService.tap()
+                        flagged.forEach { dataService.updateShot($0, result: $0.result) }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.leather)
+                    .padding(.top, 4)
+                }
+            }
+        }
+    }
+
+    // MARK: Chart & zones
+
+    private var chart: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Shot chart")
+            Panel {
+                VStack(spacing: 12) {
+                    ShotChart(shots: shots,
+                              threePointFt: session.courtType.threePointDistanceFt,
+                              highlighted: highlighted)
+                    ShotChartKey()
+                }
+            }
+        }
+    }
+
+    private var zones: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("By zone")
+            Panel {
+                VStack(spacing: 14) {
+                    ForEach(session.zoneStats) { stat in
+                        ZoneRow(name: stat.zone.displayName, made: stat.made,
+                                attempted: stat.attempted, percent: stat.fgPercent)
+                    }
+                }
+            }
+        }
+    }
+
+    private var arc: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Arc")
+            Panel {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let angle = session.avgReleaseAngleDeg {
+                        HStack(alignment: .firstTextBaseline) {
+                            StatValue(value: "\(Int(angle.rounded()))°", caption: "average launch angle")
+                            Spacer()
+                            if let spread = session.consistencyScore {
+                                StatValue(value: "±\(String(format: "%.1f", spread))°", caption: "shot to shot", size: 26)
+                            }
+                        }
+                        ArcGauge(angle: angle)
+                        Text(arcAdvice(angle))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func arcAdvice(_ angle: Double) -> String {
+        if angle < HoopTrack.ShotScience.optimalReleaseAngleMin {
+            return "On the flat side. A little more arc gives the ball a bigger target."
+        }
+        if angle > HoopTrack.ShotScience.optimalReleaseAngleMax {
+            return "Very high arc. Good for touch, but it costs range."
+        }
+        return "Right in the 43–57° window most shooters aim for."
+    }
+
+    // MARK: Shot list
+
+    private var shotList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Shots", trailing: "Tap to flip")
+            VStack(spacing: 0) {
+                ForEach(Array(shots.enumerated()), id: \.element.id) { index, shot in
+                    if index > 0 { Hairline(inset: 56) }
+                    ShotListRow(shot: shot, number: index + 1, isHighlighted: shot.id == highlighted) {
+                        hapticService.tap()
+                        highlighted = shot.id
+                        dataService.updateShot(shot, result: shot.isMake ? .miss : .make)
+                    }
+                    .contextMenu {
+                        Button("Remove shot", systemImage: "trash", role: .destructive) {
+                            dataService.deleteShot(shot)
+                        }
+                    }
+                }
+            }
+            .background(Color.panel, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        }
+    }
+
+    // MARK: Other drill types
+
+    private var dribbleDetails: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    StatValue(value: String(format: "%.1f", session.avgDribblesPerSec ?? 0), caption: "per second")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    StatValue(value: String(format: "%.1f", session.maxDribblesPerSec ?? 0), caption: "fastest")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    StatValue(value: "\(session.dribbleCombosDetected ?? 0)", caption: "hand switches")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let balance = session.handBalanceFraction {
+                    HandBalanceBar(leftFraction: balance)
+                }
+            }
+        }
+    }
+
+    private var agilityDetails: some View {
+        Panel {
+            HStack {
+                StatValue(value: session.bestShuttleRunSeconds.map { String(format: "%.2fs", $0) } ?? "–",
+                          caption: "best shuttle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                StatValue(value: session.bestLaneAgilitySeconds.map { String(format: "%.2fs", $0) } ?? "–",
+                          caption: "best lane agility")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    // MARK: Badges
+
+    private var badges: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Badges")
+            Panel {
+                if badgeChanges.isEmpty, let reason = badgeSkipReason {
+                    Text(reason)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 12) {
+                        ForEach(badgeChanges, id: \.badgeID) { change in
+                            HStack(spacing: 12) {
+                                Image(systemName: change.badgeID.skillDimension.systemImage)
+                                    .foregroundStyle(Color.leather)
+                                    .frame(width: 24)
+                                Text(change.badgeID.displayName)
+                                    .font(.body.weight(.medium))
+                                Spacer()
+                                Text(change.previousRank == nil ? "New" : "Up")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                BadgeRankPill(rank: change.newRank)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Video
+
+    private var hasVideo: Bool {
+        guard let name = session.videoFileName else { return false }
+        return FileManager.default.fileExists(atPath: SessionRecorder.directory.appendingPathComponent(name).path)
+    }
+
+    private var video: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Video")
+            Panel {
+                VStack(spacing: 14) {
+                    Button {
+                        showReplay = true
+                    } label: {
+                        Label("Watch replay", systemImage: "play.rectangle.fill")
+                    }
+                    .buttonStyle(.secondary)
+                    Toggle(isOn: Binding(
+                        get: { session.videoPinnedByUser },
+                        set: { pinned in
+                            session.videoPinnedByUser = pinned
+                            try? dataService.modelContext.save()
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Keep this video")
+                            Text("Otherwise it's deleted automatically after a while.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Pieces
+
+struct ZoneRow: View {
+    let name: String
+    let made: Int
+    let attempted: Int
+    let percent: Double
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(name).font(.subheadline.weight(.medium))
+                Spacer()
+                Text("\(made)/\(attempted)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text("\(Int(percent.rounded()))%")
+                    .font(.score(20))
+                    .foregroundStyle(Color.shooting(percent))
+                    .frame(width: 52, alignment: .trailing)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.panelRaised)
+                    Capsule()
+                        .fill(Color.shooting(percent))
+                        .frame(width: max(4, geo.size.width * percent / 100))
+                }
+            }
+            .frame(height: 4)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(name): \(made) of \(attempted), \(Int(percent.rounded())) percent")
+    }
+}
+
+private struct ShotListRow: View {
+    let shot: ShotRecord
+    let number: Int
+    let isHighlighted: Bool
+    let onFlip: () -> Void
+
+    var body: some View {
+        Button(action: onFlip) {
+            HStack(spacing: 14) {
+                Image(systemName: shot.isMake ? "checkmark" : "xmark")
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundStyle(Color.onLeather)
+                    .frame(width: 28, height: 28)
+                    .background(shot.result.color, in: Circle())
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Shot \(number)")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if shot.needsReview {
+                    Text("Check")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.leather)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.leather.opacity(0.15), in: Capsule())
+                } else if shot.isUserCorrected {
+                    Image(systemName: "pencil")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, Metrics.cardPadding)
+            .padding(.vertical, 10)
+            .background(isHighlighted ? Color.white.opacity(0.04) : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Shot \(number), \(shot.isMake ? "make" : "miss"), \(detail)")
+        .accessibilityHint("Double-tap to change to \(shot.isMake ? "miss" : "make")")
+    }
+
+    private var detail: String {
+        var parts = [shot.zone.displayName]
+        if let angle = shot.releaseAngleDeg { parts.append("\(Int(angle.rounded()))° arc") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// Horizontal gauge from 25° to 75° with the 43–57° window shaded.
+struct ArcGauge: View {
+    let angle: Double
+    private let range = 25.0...75.0
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let x = { (a: Double) -> CGFloat in
+                CGFloat((a.clamped(to: range) - range.lowerBound) / (range.upperBound - range.lowerBound)) * w
+            }
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.panelRaised).frame(height: 6)
+                Capsule()
+                    .fill(Color.make.opacity(0.35))
+                    .frame(width: x(HoopTrack.ShotScience.optimalReleaseAngleMax) - x(HoopTrack.ShotScience.optimalReleaseAngleMin),
+                           height: 6)
+                    .offset(x: x(HoopTrack.ShotScience.optimalReleaseAngleMin))
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 14, height: 14)
+                    .offset(x: x(angle) - 7)
+            }
+            .frame(height: 14)
+        }
+        .frame(height: 14)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Left / right split bar for dribble sessions.
+struct HandBalanceBar: View {
+    let leftFraction: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Left \(Int((leftFraction * 100).rounded()))%")
+                Spacer()
+                Text("Right \(Int(((1 - leftFraction) * 100).rounded()))%")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    Capsule().fill(Color.leather)
+                        .frame(width: max(4, geo.size.width * leftFraction))
+                    Capsule().fill(Color.panelRaised)
+                }
+            }
+            .frame(height: 6)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Left hand \(Int((leftFraction * 100).rounded())) percent")
     }
 }

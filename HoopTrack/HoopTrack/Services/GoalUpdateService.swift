@@ -1,4 +1,9 @@
 // GoalUpdateService.swift
+// Refreshes goal progress after a session. A goal only moves when the
+// session actually measured its metric — a dribble session no longer
+// resets a shooting goal to 0%, and an agility session without a shuttle
+// run no longer writes infinity into a shuttle goal.
+
 import Foundation
 import SwiftData
 
@@ -10,9 +15,11 @@ import SwiftData
 
     func update(after session: TrainingSession, profile: PlayerProfile) throws {
         for goal in profile.goals where !goal.isAchieved {
-            let value = currentValue(for: goal.metric, session: session, profile: profile)
+            guard let value = Self.currentValue(for: goal.metric, session: session, profile: profile),
+                  value.isFinite else { continue }
             goal.currentValue = value
-            if isAchieved(metric: goal.metric, current: value, target: goal.targetValue) {
+            let reached = goal.metric.lowerIsBetter ? value <= goal.targetValue : value >= goal.targetValue
+            if reached {
                 goal.isAchieved = true
                 goal.achievedAt = .now
             }
@@ -20,36 +27,31 @@ import SwiftData
         try modelContext.save()
     }
 
-    // MARK: - Private
-
-    private func currentValue(for metric: GoalMetric,
-                               session: TrainingSession,
-                               profile: PlayerProfile) -> Double {
+    /// The metric's value as of this session, or nil when the session
+    /// didn't measure it.
+    static func currentValue(for metric: GoalMetric,
+                             session: TrainingSession,
+                             profile: PlayerProfile) -> Double? {
         switch metric {
         case .fgPercent:
-            return session.fgPercent
+            return session.shotsAttempted > 0 ? session.fgPercent : nil
         case .threePointPercent:
-            return session.threePointPercentage ?? 0
+            return session.threePointPercentage
         case .freeThrowPercent:
-            return session.freeThrowPercentage ?? 0
+            return session.freeThrowPercentage
         case .verticalJumpCm:
-            return session.avgVerticalJumpCm ?? 0
+            return session.avgVerticalJumpCm
         case .dribbleSpeedHz:
-            return session.avgDribblesPerSec ?? 0
+            return session.avgDribblesPerSec
         case .shuttleRunSeconds:
-            return session.bestShuttleRunSeconds ?? Double.infinity
+            return session.bestShuttleRunSeconds
         case .overallRating:
             return profile.ratingOverall
         case .shootingRating:
             return profile.ratingShooting
         case .sessionsPerWeek:
-            let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: .now)!
+            let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .distantPast
             return Double(profile.sessions.filter { $0.startedAt >= cutoff && $0.isComplete }.count)
         }
-    }
-
-    /// shuttle run is lower-is-better; all other metrics are higher-is-better.
-    private func isAchieved(metric: GoalMetric, current: Double, target: Double) -> Bool {
-        metric == .shuttleRunSeconds ? current <= target : current >= target
     }
 }

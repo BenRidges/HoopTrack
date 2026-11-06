@@ -1,334 +1,280 @@
 // TrainTabView.swift
-// Drill picker — browse by category, then launch a live session.
+// Home screen. One big way to start shooting, a quiet look at the week,
+// and the drill library. Everything here starts something.
 
 import SwiftUI
 
 struct TrainTabView: View {
 
-    @EnvironmentObject private var hapticService:       HapticService
-    @EnvironmentObject private var cameraService:       CameraService
-    @EnvironmentObject private var notificationService: NotificationService
-    @EnvironmentObject private var coordinator:         SessionFinalizationCoordinator
-    @EnvironmentObject private var dataService:         DataService
+    @EnvironmentObject private var dataService: DataService
+    @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var hapticService: HapticService
     @StateObject private var viewModel = TrainViewModel()
-    @State private var isShowingLiveSession = false
-    @State private var drillToLaunch: NamedDrill? = nil
-    @State private var isShowingPreSessionSheet = false
-    @State private var pendingSessionLaunch = false
-
-    // MARK: - Game Mode (SP1)
-    @State private var isShowingGameFlow = false
-    @State private var gameFormat: GameFormat = .twoOnTwo
-    @State private var gameType: GameType = .pickup
+    @State private var openedSession: TrainingSession?
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-
-                // MARK: Quick Start Banner
-                quickStartBanner
-
-                // MARK: Game Mode entry (SP1)
-                GameEntryCard { format, type in
-                    gameFormat = format
-                    gameType = type
-                    isShowingGameFlow = true
+            VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
+                header
+                hero
+                if viewModel.hasHistory {
+                    weekStrip
+                } else {
+                    setupTip
                 }
-
-                // MARK: Category Filter
-                categoryFilter
-
-                // MARK: Drill Grid
-                drillGrid
+                drills
+                if let last = viewModel.lastSession {
+                    lastSessionRow(last)
+                }
             }
-            .padding(.horizontal)
-            .padding(.bottom, 24)
+            .padding(.horizontal, Metrics.screenPadding)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
         }
-        .navigationTitle("Train")
-        .navigationBarTitleDisplayMode(.large)
-        // Pre-session config sheet — defer the fullScreenCover until the sheet
-        // has fully dismissed; presenting both in the same callback causes a
-        // visible flash of TrainTabView between the two modal transitions.
-        .sheet(isPresented: $isShowingPreSessionSheet, onDismiss: {
-            guard pendingSessionLaunch else { return }
-            pendingSessionLaunch = false
-            let needsLandscape = drillToLaunch == nil
-                || (drillToLaunch?.drillType != .dribble
-                    && drillToLaunch?.drillType != .agility)
-            if needsLandscape {
-                OrientationLock.allowLandscape = true
-            }
-            isShowingLiveSession = true
-        }) {
-            PreSessionSheetView(drill: drillToLaunch, viewModel: viewModel) {
-                pendingSessionLaunch = true
-                isShowingPreSessionSheet = false
-            }
+        .courtBackground()
+        .toolbar(.hidden, for: .navigationBar)
+        .onAppear { viewModel.load(from: dataService) }
+        .onChange(of: dataService.revision) { _, _ in viewModel.load(from: dataService) }
+        .navigationDestination(item: $openedSession) { session in
+            SessionDetailView(session: session)
         }
-        // Full-screen live session — routes by drill type
-        .fullScreenCover(isPresented: $isShowingLiveSession, onDismiss: {
-            // Reset orientation to portrait when session ends
-            OrientationLock.allowLandscape = false
-            requestOrientationChange(to: .portrait)
-        }) {
-            if let drill = drillToLaunch, drill.drillType == .dribble {
-                DribbleDrillView(namedDrill: drill) {
-                    isShowingLiveSession = false
-                    drillToLaunch        = nil
-                }
-            } else if let drill = drillToLaunch, drill.drillType == .agility {
-                AgilitySessionView(namedDrill: drill) {
-                    isShowingLiveSession = false
-                    drillToLaunch        = nil
-                }
-            } else {
-                LandscapeContainer {
-                    LiveSessionView(
-                        drillType: drillToLaunch?.drillType ?? .freeShoot,
-                        namedDrill: drillToLaunch
-                    ) {
-                        isShowingLiveSession = false
-                        drillToLaunch        = nil
-                    }
-                    .environmentObject(cameraService)
-                    .environmentObject(hapticService)
-                    .environmentObject(notificationService)
-                    .environmentObject(coordinator)
-                    .environmentObject(dataService)
-                }
-                .ignoresSafeArea()
-                .onAppear {
-                    requestOrientationChange(to: .landscapeRight)
-                }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewModel.greeting)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("Train")
+                    .font(.largeTitle.bold())
             }
-        }
-        // MARK: - Game Mode flow (SP1)
-        .fullScreenCover(isPresented: $isShowingGameFlow, onDismiss: {
-            OrientationLock.mode = .portraitOnly
-            requestOrientationChange(to: .portrait)
-        }) {
-            GameFlowContainer(
-                format: gameFormat,
-                gameType: gameType,
-                onDismiss: { isShowingGameFlow = false }
-            )
-            .environmentObject(cameraService)
-            .environmentObject(dataService)
-            .onAppear {
-                // Registration works in any orientation — unlock all four
-                // so the user can hold the phone however they want during
-                // the lineup scan. LandscapeHostingController flips this to
-                // .landscapeOnly for LiveGameView when that screen opens.
-                OrientationLock.mode = .all
+            Spacer()
+            if viewModel.streak > 0 {
+                Label("\(viewModel.streak)-day streak", systemImage: "flame.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.leather)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.leather.opacity(0.14), in: Capsule())
             }
         }
     }
 
-    // MARK: - Orientation Helpers
+    // MARK: - Hero
 
-    private func requestOrientationChange(to orientation: UIInterfaceOrientation) {
-        guard let windowScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene }).first else { return }
-        let mask: UIInterfaceOrientationMask = orientation.isLandscape ? .landscapeRight : .portrait
-        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
-    }
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            HalfCourtShape()
+                .stroke(Color.leather.opacity(0.28), lineWidth: 2)
+                .aspectRatio(CourtGeometry.widthFt / CourtGeometry.depthFt, contentMode: .fit)
+                .frame(width: 330)
+                .offset(x: 130, y: -70)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .accessibilityHidden(true)
 
-    // MARK: - Quick Start
-
-    private var quickStartBanner: some View {
-        Button {
-            hapticService.tap()
-            drillToLaunch            = nil
-            isShowingPreSessionSheet = true
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Free Shoot")
-                        .font(.title3.bold())
-                        .foregroundStyle(.white)
-                    Text("Open court — automatic shot tracking")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.8))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("SHOOT")
+                    .font(.score(64))
+                    .foregroundStyle(.primary)
+                Text("Automatic make, miss and shot position.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Button {
+                    hapticService.tap()
+                    appState.activeLaunch = .shooting(nil)
+                } label: {
+                    Label("Start shooting", systemImage: "play.fill")
                 }
-                Spacer()
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.white)
+                .buttonStyle(.primary)
+                .padding(.top, 14)
             }
             .padding(20)
-            .background(
-                LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
         }
-        .accessibilityLabel("Free Shoot — Quick Start")
-        .accessibilityHint("Open court session with automatic shot tracking. Double-tap to begin.")
-        .accessibilityInputLabels(["Quick Start", "Play", "Start session"])
+        .frame(height: 250)
+        .background(Color.panel)
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
     }
 
-    // MARK: - Category Filter
+    // MARK: - This week
 
-    private var categoryFilter: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                // "All" chip
-                FilterChip(
-                    label: "All",
-                    systemImage: "square.grid.2x2",
-                    isSelected: viewModel.selectedDrillType == nil
-                ) {
-                    hapticService.tap()
-                    viewModel.selectedDrillType = nil
+    private var weekStrip: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("This week")
+            HStack(spacing: 0) {
+                StatValue(value: "\(viewModel.week.shots)", caption: "shots")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                StatValue(value: viewModel.week.fgPercent.map { "\(Int($0.rounded()))%" } ?? "–",
+                          caption: "field goal",
+                          color: viewModel.week.fgPercent.map(Color.shooting) ?? .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                StatValue(value: "\(viewModel.week.sessions)", caption: viewModel.week.sessions == 1 ? "session" : "sessions")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var setupTip: some View {
+        Panel {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "iphone.gen3")
+                    .font(.title2)
+                    .foregroundStyle(Color.leather)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Set up in ten seconds")
+                        .font(.headline)
+                    Text("Stand the phone sideways behind where you shoot, about chest height, with the whole rim in view. HoopTrack does the rest.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+        }
+    }
 
-                ForEach(DrillType.allCases) { type in
-                    FilterChip(
-                        label: type.rawValue,
-                        systemImage: type.systemImage,
-                        isSelected: viewModel.selectedDrillType == type
-                    ) {
+    // MARK: - Drills
+
+    private var drills: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Drills")
+            VStack(spacing: 0) {
+                ForEach(Array(NamedDrill.library.enumerated()), id: \.element) { index, drill in
+                    if index > 0 { Hairline(inset: 64) }
+                    DrillRow(icon: drill.drillType.systemImage,
+                             title: drill.rawValue,
+                             detail: drill.summary) {
                         hapticService.tap()
-                        viewModel.selectedDrillType =
-                            viewModel.selectedDrillType == type ? nil : type
+                        appState.activeLaunch = .forDrill(drill)
                     }
                 }
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    // MARK: - Drill Grid
-
-    private var drillGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-            ForEach(viewModel.filteredDrills) { drill in
-                DrillCard(drill: drill, description: viewModel.description(for: drill)) {
+                Hairline(inset: 64)
+                DrillRow(icon: "person.2.fill",
+                         title: "Pickup game",
+                         detail: "Keep score from 1v1 to 3v3, with a box score at the end.") {
                     hapticService.tap()
-                    drillToLaunch            = drill
-                    isShowingPreSessionSheet = true
+                    appState.activeLaunch = .game
                 }
             }
+            .background(Color.panel, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        }
+    }
+
+    // MARK: - Last session
+
+    private func lastSessionRow(_ session: TrainingSession) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Last session")
+            Button {
+                openedSession = session
+            } label: {
+                SessionRow(session: session)
+                    .padding(Metrics.cardPadding)
+                    .background(Color.panel, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+            }
+            .buttonStyle(.pressable)
         }
     }
 }
 
-// MARK: - FilterChip
-private struct FilterChip: View {
-    let label: String
-    let systemImage: String
-    let isSelected: Bool
+// MARK: - Rows
+
+private struct DrillRow: View {
+    let icon: String
+    let title: String
+    let detail: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Label(label, systemImage: systemImage)
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(
-                    isSelected
-                        ? AnyShapeStyle(Color.orange)
-                        : AnyShapeStyle(.ultraThinMaterial),
-                    in: Capsule()
-                )
-                .foregroundStyle(isSelected ? .white : .primary)
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.leather)
+                    .frame(width: 34, height: 34)
+                    .background(Color.panelRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, Metrics.cardPadding)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
         }
-        .accessibilityLabel("\(label) filter")
-        .accessibilityValue(isSelected ? "selected" : "not selected")
-        .accessibilityHint(isSelected ? "Double-tap to remove filter" : "Double-tap to filter drills")
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .buttonStyle(.pressable)
+        .accessibilityHint("Starts this drill")
     }
 }
 
-// MARK: - DrillCard
-private struct DrillCard: View {
-    let drill: NamedDrill
-    let description: String
-    let action: () -> Void
+/// One-line session summary used in lists: title, when, headline number.
+struct SessionRow: View {
+    let session: TrainingSession
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: drill.drillType.systemImage)
-                    .font(.title2)
-                    .foregroundStyle(.orange)
-
-                Text(drill.rawValue)
-                    .font(.subheadline.bold())
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-
-                Text(description)
+        HStack(spacing: 14) {
+            Image(systemName: session.drillType.systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("\(session.startedAt.relativeDayLabel) · \(session.formattedDuration)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(headline)
+                    .font(.score(26))
+                    .foregroundStyle(headlineColor)
+                Text(caption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-
-                Spacer(minLength: 0)
-
-                Text(drill.drillType.rawValue)
-                    .font(.caption2)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(.orange.opacity(0.12), in: Capsule())
-                    .foregroundStyle(.orange)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(14)
-            .background(.ultraThinMaterial,
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(drill.rawValue), drill. Double-tap to configure and start.")
-        .accessibilityHint("Double-tap to open session setup")
-        .accessibilityAddTraits(.isButton)
+        .accessibilityElement(children: .combine)
     }
-}
 
-// MARK: - Pre-Session Config Sheet
-struct PreSessionSheetView: View {
-    let drill: NamedDrill?
-    @ObservedObject var viewModel: TrainViewModel
-    let onLaunch: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Session Setup") {
-                    if let drill {
-                        LabeledContent("Drill", value: drill.rawValue)
-                    } else {
-                        LabeledContent("Mode", value: "Free Shoot")
-                    }
-
-                    Picker("Court Type", selection: $viewModel.selectedCourtType) {
-                        ForEach(CourtType.allCases) { ct in
-                            Text(ct.rawValue).tag(ct)
-                        }
-                    }
-
-                    TextField("Location (optional)", text: $viewModel.locationTag)
-                }
-
-                Section {
-                    Button("Start Session") {
-                        onLaunch()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .foregroundStyle(.orange)
-                    .bold()
-                }
+    private var headline: String {
+        switch session.drillType {
+        case .dribble:
+            return "\(session.totalDribbles ?? 0)"
+        case .agility:
+            if let best = session.bestShuttleRunSeconds ?? session.bestLaneAgilitySeconds {
+                return String(format: "%.2fs", best)
             }
-            .navigationTitle("Session Setup")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
+            return "–"
+        case .freeShoot, .fullWorkout:
+            return session.shotsAttempted > 0 ? "\(Int(session.fgPercent.rounded()))%" : "–"
         }
-        .presentationDetents([.medium])
+    }
+
+    private var caption: String {
+        switch session.drillType {
+        case .dribble:              return "dribbles"
+        case .agility:              return "best"
+        case .freeShoot, .fullWorkout: return "\(session.shotsMade)/\(session.shotsAttempted)"
+        }
+    }
+
+    private var headlineColor: Color {
+        let shooting = session.drillType == .freeShoot || session.drillType == .fullWorkout
+        guard shooting, session.shotsAttempted > 0 else { return .primary }
+        return .shooting(session.fgPercent)
     }
 }

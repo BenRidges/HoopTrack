@@ -66,3 +66,44 @@ final class DribbleCalculatorTests: XCTestCase {
         XCTAssertEqual(DribbleCalculator.comboCount(handHistory: []), 0)
     }
 }
+
+// MARK: - WristBounceDetector
+
+final class WristBounceDetectorTests: XCTestCase {
+
+    /// Wrist oscillating `amplitude` torso-lengths at `hz`, sampled at 30 fps for `seconds`.
+    private func count(amplitude: Double, hz: Double = 3, seconds: Double = 4,
+                       noise: Double = 0) -> Int {
+        var detector = WristBounceDetector()
+        let torso = 0.3
+        var bounces = 0
+        var i = 0
+        while Double(i) / 30 < seconds {
+            let t = Double(i) / 30
+            let jitter = noise * (i.isMultiple(of: 2) ? 1 : -1)
+            let y = 0.4 + amplitude * torso * 0.5 * cos(2 * .pi * hz * t) + jitter * torso
+            if detector.update(y: y, torso: torso) { bounces += 1 }
+            i += 1
+        }
+        return bounces
+    }
+
+    func test_realDribbles_areCounted() {
+        // 3 dribbles/s for 4 s → 12, give or take the first half-cycle.
+        let n = count(amplitude: 0.5)
+        XCTAssertTrue((11...12).contains(n), "got \(n)")
+    }
+
+    func test_smallWobble_isIgnored() {
+        XCTAssertEqual(count(amplitude: 0.06), 0)
+    }
+
+    func test_frameJitter_isIgnored() {
+        XCTAssertEqual(count(amplitude: 0, noise: 0.04), 0)
+    }
+
+    func test_jitterOnTopOfRealDribbles_doesNotDoubleCount() {
+        let n = count(amplitude: 0.5, noise: 0.03)
+        XCTAssertTrue((11...12).contains(n), "got \(n)")
+    }
+}

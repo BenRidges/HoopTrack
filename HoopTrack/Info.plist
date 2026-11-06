@@ -30,24 +30,25 @@
         </dict>
     </array>
     <key>NSCameraUsageDescription</key>
-    <string>HoopTrack uses your camera to automatically detect makes and misses, map shot locations, and analyse your shooting form in real time. All video stays on your device.</string>
+    <string>HoopTrack watches the ball and hoop to log your makes, misses and where you shot from. Session videos are saved on this phone.</string>
     <key>NSFaceIDUsageDescription</key>
-    <string>HoopTrack uses Face ID to unlock the app after it's been in the background.</string>
+    <string>HoopTrack uses Face ID to unlock your training history when the app lock is on.</string>
     <key>NSHealthUpdateUsageDescription</key>
     <string>HoopTrack logs your basketball sessions as workouts in the Health app, including active time and estimated calories.</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>HoopTrack uses the microphone for optional voice coaching feedback during sessions.</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
-        <true/>
+        <false/>
         <key>UISceneConfigurations</key>
         <dict/>
     </dict>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
     <key>UILaunchScreen</key>
-    <dict/>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBackground</string>
+    </dict>
     <key>UISupportedInterfaceOrientations~ipad</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>

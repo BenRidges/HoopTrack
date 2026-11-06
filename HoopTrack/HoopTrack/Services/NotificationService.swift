@@ -1,6 +1,7 @@
 // NotificationService.swift
-// Manages UNUserNotificationCenter for streak reminders, goal milestones,
-// and daily mission suggestions.
+// Local notifications: the optional daily training reminder (Profile →
+// Training) and goal milestones. Permission is only asked for when the
+// reminder is switched on.
 
 import UserNotifications
 import Combine
@@ -38,51 +39,51 @@ final class NotificationService: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Streak Reminder
-
-    /// Schedules a daily streak reminder at the given hour (24h, default 18 = 6pm).
-    func scheduleStreakReminder(hour: Int = 18) {
-        center.removePendingNotificationRequests(withIdentifiers: [NotificationID.streakReminder])
-
-        let content          = UNMutableNotificationContent()
-        content.title        = "Keep Your Streak Alive 🏀"
-        content.body         = "You haven't trained today. Lace up and log a session!"
-        content.sound        = .default
-        content.categoryIdentifier = NotificationID.streakReminder
-
-        var components       = DateComponents()
-        components.hour      = hour
-        components.minute    = 0
-        let trigger          = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-
-        let request = UNNotificationRequest(identifier: NotificationID.streakReminder,
-                                            content: content,
-                                            trigger: trigger)
-        center.add(request)
-    }
-
-    func cancelStreakReminder() {
-        center.removePendingNotificationRequests(withIdentifiers: [NotificationID.streakReminder])
-    }
-
     // MARK: - Training Reminder
 
-    func scheduleTrainingReminder(hour: Int) {
-        center.removePendingNotificationRequests(withIdentifiers: [NotificationID.trainingReminder])
-        let content       = UNMutableNotificationContent()
-        content.title     = "Time to Train"
-        content.body      = "Your daily training session is waiting. Make it count."
-        content.sound     = .default
-        var components    = DateComponents()
-        components.hour   = hour
-        components.minute = 0
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-        center.add(UNNotificationRequest(identifier: NotificationID.trainingReminder,
-                                         content: content, trigger: trigger))
+    /// A nudge at `hour` on each of the next two weeks, skipping today if
+    /// you've already trained. Re-run at launch and after every session so
+    /// the window keeps rolling and a session silences that day's nudge.
+    /// (The old repeating trigger went off even after you'd trained.)
+    func scheduleTrainingReminders(hour: Int, trainedToday: Bool) {
+        cancelTrainingReminder()
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        for offset in 0..<14 where !(offset == 0 && trainedToday) {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today),
+                  let fire = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day),
+                  fire > .now else { continue }
+            let content = UNMutableNotificationContent()
+            content.title = "Get some shots up"
+            content.body = "Nothing logged today yet. Even ten minutes counts."
+            content.sound = .default
+            let when = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+            center.add(UNNotificationRequest(
+                identifier: Self.reminderID(for: day, calendar: calendar),
+                content: content,
+                trigger: UNCalendarNotificationTrigger(dateMatching: when, repeats: false)))
+        }
+    }
+
+    /// Reschedules from the saved preference, if the reminder is on.
+    func refreshTrainingReminders(trainedToday: Bool) {
+        guard AppPreferences.trainingReminderEnabled else { return }
+        scheduleTrainingReminders(hour: AppPreferences.trainingReminderHour, trainedToday: trainedToday)
     }
 
     func cancelTrainingReminder() {
-        center.removePendingNotificationRequests(withIdentifiers: [NotificationID.trainingReminder])
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        // IDs are per date, so today's window covers everything still pending
+        // from earlier windows. The bare ID is the old repeating reminder.
+        let ids = (0..<14).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
+            .map { Self.reminderID(for: $0, calendar: calendar) }
+        center.removePendingNotificationRequests(withIdentifiers: ids + [NotificationID.trainingReminder])
+    }
+
+    private static func reminderID(for day: Date, calendar: Calendar) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: day)
+        return "\(NotificationID.trainingReminder).\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
     }
 
     // MARK: - Milestone Alerts
@@ -113,42 +114,6 @@ final class NotificationService: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Goal Milestone
-
-    func sendGoalAchievedNotification(goalTitle: String) {
-        let content      = UNMutableNotificationContent()
-        content.title    = "Goal Achieved! 🎯"
-        content.body     = "You've hit your goal: \(goalTitle)"
-        content.sound    = .defaultRingtone
-
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-        let id      = "\(NotificationID.goalAchieved).\(UUID().uuidString)"
-        let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-        center.add(request)
-    }
-
-    // MARK: - Daily Mission
-
-    /// Schedules a morning mission push at 8am with the suggested drill name.
-    func scheduleDailyMission(drillName: String, weakestSkill: SkillDimension) {
-        center.removePendingNotificationRequests(withIdentifiers: [NotificationID.dailyMission])
-
-        let content      = UNMutableNotificationContent()
-        content.title    = "Today's Mission 💪"
-        content.body     = "Focus on your \(weakestSkill.rawValue.lowercased()). Try: \(drillName)"
-        content.sound    = .default
-
-        var components   = DateComponents()
-        components.hour  = 8
-        components.minute = 0
-        let trigger      = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-
-        let request = UNNotificationRequest(identifier: NotificationID.dailyMission,
-                                            content: content,
-                                            trigger: trigger)
-        center.add(request)
-    }
-
     // MARK: - Cancel All
 
     func cancelAll() {
@@ -168,9 +133,6 @@ extension NotificationService: UNUserNotificationCenterDelegate {
 
 // MARK: - Notification Identifiers
 private enum NotificationID {
-    static let streakReminder   = "com.hooptrack.notification.streak"
     static let trainingReminder = "com.hooptrack.notification.training"
-    static let goalAchieved     = "com.hooptrack.notification.goal"
     static let goalMilestone    = "com.hooptrack.notification.milestone"
-    static let dailyMission     = "com.hooptrack.notification.mission"
 }

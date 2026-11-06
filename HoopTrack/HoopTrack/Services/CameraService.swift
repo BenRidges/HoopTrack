@@ -2,9 +2,8 @@
 // Manages the AVCaptureSession lifecycle, permission requests, and raw frame output.
 //
 // Phase 1: Permission flow + session setup.
-// Phase 2: Hook CVPipeline.processBuffer(_:) into the sample buffer delegate.
-// Phase 3: Route frames to VNDetectHumanBodyPoseRequest (Shot Science).
-// Phase 4: Switch to front camera + ARKit for dribble drills.
+// Phase 2: Frames fan out through `framePublisher` to CVPipeline + SessionRecorder.
+// Phase 4: Front camera (portrait) for dribble drills.
 
 @preconcurrency import AVFoundation
 import Combine
@@ -36,6 +35,11 @@ final class CameraService: NSObject, ObservableObject {
         frameSubject.eraseToAnyPublisher()
     }
 
+    /// Horizontal field of view of the active camera format, in degrees.
+    /// Written on the session queue during configuration; read by the CV
+    /// pipeline to turn apparent object sizes into distances.
+    nonisolated(unsafe) private(set) var horizontalFieldOfView: Double = CourtPositionEstimator.defaultHorizontalFOV
+
     // MARK: - Initialisation
     override init() {
         permissionStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -44,11 +48,15 @@ final class CameraService: NSObject, ObservableObject {
 
     // MARK: - Permission
 
-    /// Request camera access. Updates `permissionStatus` on main thread.
+    /// Request camera access. Callers configure the session themselves once granted.
     func requestPermission() async {
         let granted = await AVCaptureDevice.requestAccess(for: .video)
         permissionStatus = granted ? .authorized : .denied
-        if granted { configureSession(mode: currentMode) }
+    }
+
+    /// Re-reads the system permission (e.g. after returning from Settings).
+    func refreshPermission() {
+        permissionStatus = AVCaptureDevice.authorizationStatus(for: .video)
     }
 
     // MARK: - Session Configuration
@@ -80,7 +88,7 @@ final class CameraService: NSObject, ObservableObject {
         captureSession.inputs.forEach  { captureSession.removeInput($0)  }
         captureSession.outputs.forEach { captureSession.removeOutput($0) }
 
-        captureSession.sessionPreset = .hd1280x720   // 720p @ 60fps on iPhone 14
+        captureSession.sessionPreset = .hd1280x720
 
         // MARK: Camera Input
         let position: AVCaptureDevice.Position = mode == .rear ? .back : .front
@@ -94,8 +102,11 @@ final class CameraService: NSObject, ObservableObject {
         }
         captureSession.addInput(input)
 
-        // Request 60 fps for smooth CV processing
-        configureFPS(device: device, fps: 60)
+        // 60 fps gives the shot tracker twice the samples per flight. The
+        // 720p preset only offers 30 fps formats, so pick the format directly.
+        selectFormat(device: device, fps: HoopTrack.Camera.targetFPS)
+        let fov = Double(device.activeFormat.videoFieldOfView)
+        if fov > 10 { horizontalFieldOfView = fov }
 
         // MARK: Video Output
         videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -114,34 +125,54 @@ final class CameraService: NSObject, ObservableObject {
         // build completes, on the main actor — see applyVideoOutputRotation.
     }
 
-    nonisolated private func configureFPS(device: AVCaptureDevice, fps: Double) {
-        guard let range = device.activeFormat.videoSupportedFrameRateRanges
-            .first(where: { $0.maxFrameRate >= fps }) else { return }
+    /// Switches to a 1280×720 format that can run at `fps` and locks the
+    /// frame rate there. Leaves the preset's format (usually 30 fps) alone
+    /// when no such format exists. Must run after the input is added, or the
+    /// preset overrides it.
+    ///
+    /// The old version set the max frame duration to 1/maxFrameRate, which
+    /// is shorter than the min duration on 120 fps formats — AVFoundation
+    /// throws on that.
+    nonisolated private func selectFormat(device: AVCaptureDevice, fps: Double) {
+        let candidates = device.formats.filter { format in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            return dims.width == 1280 && dims.height == 720
+                && format.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= fps && $0.maxFrameRate >= fps }
+        }
+        let fullRange = candidates.first {
+            CMFormatDescriptionGetMediaSubType($0.formatDescription) == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        }
+        guard let format = fullRange ?? candidates.first else { return }
         do {
             try device.lockForConfiguration()
-            device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: CMTimeScale(fps))
-            device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: CMTimeScale(range.maxFrameRate))
+            device.activeFormat = format
+            let duration = CMTime(value: 1, timescale: CMTimeScale(fps))
+            device.activeVideoMinFrameDuration = duration
+            device.activeVideoMaxFrameDuration = duration
             device.unlockForConfiguration()
         } catch {
-            // Non-fatal; continue at default frame rate
+            // Non-fatal; stay on the preset's frame rate.
         }
     }
 
     // MARK: - Start / Stop
 
+    // The running check happens on the queue: checking first on the main
+    // actor skipped the stop when it came before startRunning had finished,
+    // leaving the camera on after a quick dismiss.
     func startSession() {
-        guard !captureSession.isRunning else { return }
         let session = captureSession
         sessionQueue.async { [weak self] in
+            guard !session.isRunning else { return }
             session.startRunning()
             Task { @MainActor [weak self] in self?.isSessionRunning = true }
         }
     }
 
     func stopSession() {
-        guard captureSession.isRunning else { return }
         let session = captureSession
         sessionQueue.async { [weak self] in
+            guard session.isRunning else { return }
             session.stopRunning()
             Task { @MainActor [weak self] in self?.isSessionRunning = false }
         }

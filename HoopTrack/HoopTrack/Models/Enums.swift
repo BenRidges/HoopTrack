@@ -3,12 +3,14 @@
 // Adding a new variant here is the single-source change needed for the whole app.
 
 import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 
 // MARK: - Drill / Session Types
 
 /// Top-level drill categories that appear in the Drill Picker.
-enum DrillType: String, Codable, CaseIterable, Identifiable {
+nonisolated enum DrillType: String, Codable, CaseIterable, Identifiable {
     case freeShoot      = "Free Shoot"
     case dribble        = "Dribble"
     case agility        = "Agility"
@@ -16,27 +18,28 @@ enum DrillType: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var systemImage: String {
+    /// UI label. `rawValue` is a persistence/sync key and must not change.
+    var displayName: String {
         switch self {
-        case .freeShoot:    return "basketball.fill"
-        case .dribble:      return "hand.point.up.fill"
-        case .agility:      return "figure.run"
-        case .fullWorkout:  return "bolt.fill"
+        case .freeShoot:    return "Shooting"
+        case .dribble:      return "Ball handling"
+        case .agility:      return "Agility"
+        case .fullWorkout:  return "Workout"
         }
     }
 
-    var description: String {
+    var systemImage: String {
         switch self {
-        case .freeShoot:    return "Open-court shooting with automatic make/miss detection."
-        case .dribble:      return "Ball-handling drills with AR targets and combo tracking."
-        case .agility:      return "Shuttle runs, lane agility, and sprint-speed tests."
-        case .fullWorkout:  return "Combined shooting, dribbling, and agility session."
+        case .freeShoot:    return "basketball.fill"
+        case .dribble:      return "hand.raised.fill"
+        case .agility:      return "figure.run"
+        case .fullWorkout:  return "bolt.fill"
         }
     }
 }
 
 /// Specific named drills from the Drill Library (Section 4 of spec).
-enum NamedDrill: String, Codable, CaseIterable, Identifiable {
+nonisolated enum NamedDrill: String, Codable, CaseIterable, Identifiable {
     case aroundTheArc        = "Around the Arc"
     case freethrowChallenge  = "Free Throw Challenge"
     case midSideMid          = "Mid-Side-Mid"
@@ -49,6 +52,32 @@ enum NamedDrill: String, Codable, CaseIterable, Identifiable {
     case verticalJumpTest    = "Vertical Jump Test"
 
     var id: String { rawValue }
+
+    /// Drills offered in the library. The vertical jump test needs a jump
+    /// measurement the app doesn't do yet; old sessions keep the case.
+    static var library: [NamedDrill] { allCases.filter { $0 != .verticalJumpTest } }
+
+    /// One-line explainer shown under the drill name.
+    var summary: String {
+        switch self {
+        case .aroundTheArc:       return "Five spots around the line, five shots each."
+        case .freethrowChallenge: return "Sets of ten from the line."
+        case .midSideMid:         return "Elbow, baseline, elbow. Pull-up range."
+        case .fiveMinEndurance:   return "As many makes as you can in five minutes."
+        case .mikanDrill:         return "Alternating hook layups under the rim."
+        case .crossoverSeries:    return "Crossovers between your hands, as fast as you can."
+        case .twoBallDribble:     return "Two balls at once. Keep both hands even."
+        case .shuttleRun:         return "Sprint out and back. Best of three."
+        case .laneAgility:        return "Slide the lane box. Timed."
+        case .verticalJumpTest:   return "Three attempts, best height counts."
+        }
+    }
+
+    /// Fixed length for timed drills, nil for open-ended ones.
+    var timeLimitSec: Double? {
+        self == .fiveMinEndurance ? 300 : nil
+    }
+
     var drillType: DrillType {
         switch self {
         case .aroundTheArc, .freethrowChallenge, .midSideMid, .fiveMinEndurance:
@@ -66,13 +95,27 @@ enum NamedDrill: String, Codable, CaseIterable, Identifiable {
 // MARK: - Shot Classification
 
 /// Broad court zone for shot mapping and heat map rendering.
-enum CourtZone: String, Codable, CaseIterable {
+nonisolated enum CourtZone: String, Codable, CaseIterable {
     case paint          = "Paint"
     case midRange       = "Mid-Range"
     case cornerThree    = "Corner 3"
     case aboveBreakThree = "Above-Break 3"
     case freeThrow      = "Free Throw"
     case unknown        = "Unknown"
+
+    /// UI label (rawValue is a persistence/sync key).
+    var displayName: String {
+        switch self {
+        case .paint:           return "Paint"
+        case .midRange:        return "Mid-range"
+        case .cornerThree:     return "Corner 3"
+        case .aboveBreakThree: return "Above the break 3"
+        case .freeThrow:       return "Free throw"
+        case .unknown:         return "Unplaced"
+        }
+    }
+
+    var isThree: Bool { self == .cornerThree || self == .aboveBreakThree }
 
     /// Stable camelCase key used in JSON exports (e.g. "midRange", "cornerThree").
     /// Distinct from `rawValue` (human-readable label) so UI labels can change
@@ -90,7 +133,7 @@ enum CourtZone: String, Codable, CaseIterable {
 }
 
 /// How the shot was generated (influences difficulty weighting in skill rating).
-enum ShotType: String, Codable, CaseIterable {
+nonisolated enum ShotType: String, Codable, CaseIterable {
     case catchAndShoot   = "Catch & Shoot"
     case offDribble      = "Off Dribble"
     case pullUp          = "Pull-Up"
@@ -101,32 +144,30 @@ enum ShotType: String, Codable, CaseIterable {
 }
 
 /// Make or miss result, plus a pending state used before CV confirms the call.
-enum ShotResult: String, Codable {
+nonisolated enum ShotResult: String, Codable {
     case make    = "Make"
     case miss    = "Miss"
     case pending = "Pending"  // CV not yet confirmed
 }
 
-extension ShotResult {
-    /// Semantic colour name for the recent-shots HUD dot.
-    var dotColorName: String {
-        switch self {
-        case .make:    return "shotDotGreen"
-        case .miss:    return "shotDotRed"
-        case .pending: return "shotDotGray"
-        }
-    }
-}
-
 // MARK: - Court Type (affects 3-pt line distance)
 
-enum CourtType: String, Codable, CaseIterable, Identifiable {
+nonisolated enum CourtType: String, Codable, CaseIterable, Identifiable {
     case nba        = "NBA"
     case ncaa       = "NCAA"
     case fiba       = "FIBA"
     case halfCourt  = "Half-Court (Casual)"
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .nba:       return "NBA"
+        case .ncaa:      return "College"
+        case .fiba:      return "FIBA"
+        case .halfCourt: return "High school"
+        }
+    }
     /// Three-point distance in feet from the basket.
     var threePointDistanceFt: Double {
         switch self {
@@ -140,7 +181,7 @@ enum CourtType: String, Codable, CaseIterable, Identifiable {
 
 // MARK: - Skill Dimensions (radar chart axes)
 
-enum SkillDimension: String, Codable, CaseIterable, Identifiable {
+nonisolated enum SkillDimension: String, Codable, CaseIterable, Identifiable {
     case shooting     = "Shooting"
     case ballHandling = "Ball Handling"
     case athleticism  = "Athleticism"
@@ -185,40 +226,27 @@ nonisolated enum CameraOrientation: Sendable {
         }
     }
 
-    /// Map a live UIDevice orientation to the matching camera rotation so the
-    /// preview visually tracks the phone. Falls back to `.portrait` when the
-    /// device reports an ambiguous orientation (face-up, face-down, unknown).
-    @MainActor
-    static func matching(_ device: UIDeviceOrientation) -> CameraOrientation {
-        switch device {
-        case .portrait:           return .portrait
-        case .portraitUpsideDown: return .portraitUpsideDown
-        case .landscapeLeft:      return .landscape
-        case .landscapeRight:     return .landscapeRight
-        default:                  return .portrait
-        }
-    }
 }
 
 // MARK: - Game Mode (SP1)
 
 /// What kind of game session this is. Pickup = casual 2v2/3v3.
 /// `bo7Playoff` is the solo BO7 mode added in SP3.
-enum GameType: String, Codable, CaseIterable, Identifiable {
+nonisolated enum GameType: String, Codable, CaseIterable, Identifiable {
     case pickup     = "Pickup"
     case bo7Playoff = "BO7 Playoff"
     var id: String { rawValue }
 }
 
 /// Lifecycle of a GameSession.
-enum GameState: String, Codable {
+nonisolated enum GameState: String, Codable {
     case registering
     case inProgress
     case completed
 }
 
 /// Which team a GamePlayer belongs to within their GameSession.
-enum TeamAssignment: String, Codable, CaseIterable, Identifiable {
+nonisolated enum TeamAssignment: String, Codable, CaseIterable, Identifiable {
     case teamA = "Team A"
     case teamB = "Team B"
     var id: String { rawValue }
@@ -227,18 +255,20 @@ enum TeamAssignment: String, Codable, CaseIterable, Identifiable {
 /// Point value of a shot in Game Mode — 2PT vs 3PT, derived from court position.
 /// Named GameShotType to avoid colliding with the existing ShotType enum
 /// (catch-and-shoot / pull-up / etc) used by solo training sessions.
-enum GameShotType: String, Codable {
+nonisolated enum GameShotType: String, Codable {
     case twoPoint   = "2PT"
     case threePoint = "3PT"
 }
 
-/// Number of players per team for registration. 2v2 or 3v3.
-enum GameFormat: Int, Codable, CaseIterable, Identifiable {
-    case twoOnTwo   = 2
+/// Players per team.
+nonisolated enum GameFormat: Int, Codable, CaseIterable, Identifiable {
+    case oneOnOne     = 1
+    case twoOnTwo     = 2
     case threeOnThree = 3
     var id: Int { rawValue }
     var displayName: String {
         switch self {
+        case .oneOnOne:     return "1v1"
         case .twoOnTwo:     return "2v2"
         case .threeOnThree: return "3v3"
         }
@@ -249,7 +279,7 @@ enum GameFormat: Int, Codable, CaseIterable, Identifiable {
 // MARK: - Telemetry (CV-A)
 
 /// Lifecycle of a telemetry upload for one session. Used by `TelemetryUpload.state`.
-enum UploadState: String, Codable {
+nonisolated enum UploadState: String, Codable {
     case pending
     case uploading
     case uploaded
@@ -259,7 +289,7 @@ enum UploadState: String, Codable {
 
 /// Which session model the telemetry row refers to. Avoids a table split
 /// when looking back at the original session.
-enum SessionKind: String, Codable {
+nonisolated enum SessionKind: String, Codable {
     case training
     case game
 }

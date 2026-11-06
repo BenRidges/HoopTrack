@@ -1,8 +1,7 @@
 // DataService.swift
-// Abstraction layer over SwiftData (iOS 17+) / Core Data (iOS 16 fallback).
-//
-// All ViewModels interact with this service rather than directly with the
-// ModelContext, keeping the data layer swappable without touching the UI.
+// The single SwiftData abstraction. Views and view models go through this
+// rather than touching ModelContext directly. One instance, created at
+// launch by AppServices and injected through the environment.
 
 import Foundation
 import SwiftData
@@ -23,10 +22,11 @@ enum DataServiceError: LocalizedError {
 @MainActor
 final class DataService: ObservableObject {
 
-    // MARK: - Dependencies
-    /// Internal access for the GameSessionViewModel (SP1+) — needs direct
-    /// context for end-of-game state transitions without a bespoke helper.
     let modelContext: ModelContext
+
+    /// Bumped after any write that changes what the dashboards show, so
+    /// screens can reload without polling.
+    @Published private(set) var revision = 0
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -36,9 +36,9 @@ final class DataService: ObservableObject {
 
     /// Returns the single PlayerProfile, creating one if it doesn't exist.
     func fetchOrCreateProfile() throws -> PlayerProfile {
-        let descriptor = FetchDescriptor<PlayerProfile>()
-        let profiles   = try modelContext.fetch(descriptor)
-        if let existing = profiles.first { return existing }
+        var descriptor = FetchDescriptor<PlayerProfile>(sortBy: [SortDescriptor(\.createdAt)])
+        descriptor.fetchLimit = 1
+        if let existing = try modelContext.fetch(descriptor).first { return existing }
 
         let profile = PlayerProfile()
         modelContext.insert(profile)
@@ -46,9 +46,15 @@ final class DataService: ObservableObject {
         return profile
     }
 
-    /// Associates the active PlayerProfile with a Supabase user id. Safe to
-    /// call with the same id repeatedly — no-ops if the value matches.
-    /// Phase 9 backend sync reads this field to key RLS on auth.uid().
+    func setPlayerName(_ raw: String) {
+        // Phase 7 — Security: sanitise before writing to SwiftData.
+        guard let name = InputValidator.sanitisedProfileName(raw),
+              let profile = try? fetchOrCreateProfile() else { return }
+        profile.name = name
+        save()
+    }
+
+    /// Associates the profile with a Supabase user id. No-op if unchanged.
     func linkSupabaseUser(id: String) throws {
         let profile = try fetchOrCreateProfile()
         if profile.supabaseUserID != id {
@@ -57,419 +63,389 @@ final class DataService: ObservableObject {
         }
     }
 
+    func unlinkSupabaseUser() {
+        guard let profile = try? fetchOrCreateProfile(), profile.supabaseUserID != nil else { return }
+        profile.supabaseUserID = nil
+        save()
+    }
+
     // MARK: - Sessions
 
     func fetchSessions(sortBy: SortDescriptor<TrainingSession> =
                            SortDescriptor(\.startedAt, order: .reverse),
                        limit: Int? = nil) throws -> [TrainingSession] {
-        var descriptor = FetchDescriptor<TrainingSession>(sortBy: [sortBy])
+        var descriptor = FetchDescriptor<TrainingSession>(
+            predicate: #Predicate { $0.endedAt != nil },
+            sortBy: [sortBy])
         descriptor.fetchLimit = limit
         return try modelContext.fetch(descriptor)
     }
 
-    func fetchSessions(drillType: DrillType) throws -> [TrainingSession] {
-        let predicate = #Predicate<TrainingSession> { $0.drillType == drillType }
-        let descriptor = FetchDescriptor(predicate: predicate,
-                                         sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
-        return try modelContext.fetch(descriptor)
-    }
-
-    /// Fetches sessions that started on or after `date`, most recent first.
-    /// Pass a `limit` to avoid full-table scans when only recent data is needed.
+    /// Completed sessions that started on or after `date`, most recent first.
     func fetchSessions(since date: Date, limit: Int? = nil) throws -> [TrainingSession] {
-        let predicate  = #Predicate<TrainingSession> { $0.startedAt >= date }
-        var descriptor = FetchDescriptor(predicate: predicate,
-                                         sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
+        var descriptor = FetchDescriptor<TrainingSession>(
+            predicate: #Predicate { $0.startedAt >= date && $0.endedAt != nil },
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
         descriptor.fetchLimit = limit
         return try modelContext.fetch(descriptor)
     }
 
-    /// Total shots attempted across all sessions that started today.
-    /// Used by ShotsTodayIntent for the background spoken response.
+    /// Whether any session has been completed today (reminder scheduling).
+    var hasTrainedToday: Bool {
+        !((try? fetchSessions(since: Calendar.current.startOfDay(for: .now), limit: 1)) ?? []).isEmpty
+    }
+
+    /// Total shots attempted across sessions that started today (Siri).
     func fetchShotsTodayCount() throws -> Int {
-        let startOfDay = Calendar.current.startOfDay(for: .now)
-        let predicate  = #Predicate<TrainingSession> { $0.startedAt >= startOfDay }
-        let descriptor = FetchDescriptor(predicate: predicate)
-        let todaySessions = try modelContext.fetch(descriptor)
-        return todaySessions.reduce(0) { $0 + $1.shotsAttempted }
+        try fetchSessions(since: Calendar.current.startOfDay(for: .now))
+            .reduce(0) { $0 + $1.shotsAttempted }
     }
 
     func startSession(drillType: DrillType,
                       namedDrill: NamedDrill? = nil,
                       courtType: CourtType = .nba,
                       locationTag: String = "") throws -> TrainingSession {
-        // Phase 7 — Security: sanitise free-text location tag before persisting
-        let safeTag: String
-        if locationTag.isEmpty {
-            safeTag = ""
-        } else {
-            let stripped = locationTag.unicodeScalars
-                .filter { !CharacterSet.controlCharacters.union(.illegalCharacters).contains($0) }
-                .reduce("") { $0 + String($1) }
-            safeTag = String(stripped.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
-        }
+        // Phase 7 — Security: sanitise free-text location tag before persisting.
+        let safeTag = String(locationTag.unicodeScalars
+            .filter { !CharacterSet.controlCharacters.union(.illegalCharacters).contains($0) }
+            .map(String.init).joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(100))
         let session = TrainingSession(drillType: drillType,
-                                     namedDrill: namedDrill,
-                                     courtType: courtType,
-                                     locationTag: safeTag)
+                                      namedDrill: namedDrill,
+                                      courtType: courtType,
+                                      locationTag: safeTag)
         let profile = try fetchOrCreateProfile()
         session.profile = profile
-        profile.sessions.append(session)
         modelContext.insert(session)
         try modelContext.save()
         return session
     }
 
-    func finaliseSession(_ session: TrainingSession) throws {
-        session.endedAt          = .now
-        session.durationSeconds  = session.endedAt!.timeIntervalSince(session.startedAt)
-        session.recalculateStats()
-        try modelContext.save()
-
-        // Update profile aggregate stats
-        let profile = try fetchOrCreateProfile()
-        updateProfileStats(profile, with: session)
-        try modelContext.save()
-    }
-
-    /// Finalises a dribble drill session. Applies live dribble metrics to the session model,
-    /// stamps endedAt, and updates the player profile's ball-handling rating.
-    func finaliseDribbleSession(_ session: TrainingSession,
-                                metrics: DribbleLiveMetrics) throws {
+    /// Stamps the end of a shooting/agility session and folds it into career stats.
+    /// - Parameter activeDuration: time actually spent training (pauses excluded).
+    ///   Defaults to wall-clock time since the session started.
+    func finaliseSession(_ session: TrainingSession, activeDuration: TimeInterval? = nil) throws {
         let now = Date.now
         session.endedAt         = now
-        session.durationSeconds = now.timeIntervalSince(session.startedAt)
+        session.durationSeconds = activeDuration ?? now.timeIntervalSince(session.startedAt)
+        // An unresolved in-flight shot when the session ends is noise.
+        let pending = session.shots.filter { $0.result == .pending }
+        session.shots.removeAll { $0.result == .pending }
+        pending.forEach(modelContext.delete)
+        session.recalculateStats()
+        try modelContext.save()
+        try recomputeCareerStats()
+    }
+
+    /// Finalises a dribble session with the live metrics from the pipeline.
+    func finaliseDribbleSession(_ session: TrainingSession,
+                                metrics: DribbleLiveMetrics,
+                                activeDuration: TimeInterval? = nil) throws {
+        let now = Date.now
+        session.endedAt         = now
+        session.durationSeconds = activeDuration ?? now.timeIntervalSince(session.startedAt)
         session.applyDribbleMetrics(metrics, durationSec: session.durationSeconds)
         try modelContext.save()
+        try recomputeCareerStats()
+    }
 
-        let profile = try fetchOrCreateProfile()
-        updateProfileStats(profile, with: session)
-        try modelContext.save()
+    /// Throws away a session that was started but never meaningfully used.
+    func discardSession(_ session: TrainingSession) {
+        modelContext.delete(session)
+        save()
     }
 
     func deleteSession(_ session: TrainingSession) throws {
+        if let file = session.videoFileName {
+            try? FileManager.default.removeItem(at: SessionRecorder.directory.appendingPathComponent(file))
+        }
         modelContext.delete(session)
         try modelContext.save()
+        try recomputeCareerStats()
     }
 
     // MARK: - Shots
 
+    @discardableResult
     func addShot(to session: TrainingSession,
                  result: ShotResult,
                  zone: CourtZone,
                  shotType: ShotType,
                  courtX: Double,
                  courtY: Double,
-                 science: ShotScienceMetrics? = nil) throws -> ShotRecord {
-        // Phase 7 — Security: validate sensor inputs before persistence
+                 science: ShotScienceMetrics? = nil,
+                 videoOffset: Double? = nil,
+                 needsReview: Bool = false) throws -> ShotRecord {
+        // Phase 7 — Security: validate sensor inputs before persistence.
         guard InputValidator.isValidCourtCoordinate(courtX),
               InputValidator.isValidCourtCoordinate(courtY) else {
             throw DataServiceError.invalidSensorValue("Court coordinates out of 0–1 range: (\(courtX), \(courtY))")
         }
 
-        let shot = ShotRecord(
-            sequenceIndex: session.shots.count + 1,
-            result: result,
-            zone: zone,
-            shotType: shotType,
-            courtX: courtX,
-            courtY: courtY
-        )
+        let nextIndex = (session.shots.map(\.sequenceIndex).max() ?? 0) + 1
+        let shot = ShotRecord(sequenceIndex: nextIndex,
+                              result: result,
+                              zone: zone,
+                              shotType: shotType,
+                              courtX: courtX,
+                              courtY: courtY)
+        shot.videoTimestampSeconds = videoOffset ?? shot.timestamp.timeIntervalSince(session.startedAt)
+        shot.needsReview = needsReview
+        apply(science, to: shot)
+
+        modelContext.insert(shot)
         shot.session = session
         session.shots.append(shot)
-
-        // Set video timestamp so the replay view can seek to this shot
-        shot.videoTimestampSeconds = shot.timestamp.timeIntervalSince(session.startedAt)
-
-        // Apply Shot Science metrics if available (validate ranges before persisting)
-        if let s = science {
-            if let angle = s.releaseAngleDeg {
-                shot.releaseAngleDeg = InputValidator.isValidReleaseAngle(angle) ? angle : nil
-            }
-            shot.releaseTimeMs   = s.releaseTimeMs
-            if let jump = s.verticalJumpCm {
-                shot.verticalJumpCm = InputValidator.isValidJumpHeight(jump) ? jump : nil
-            }
-            shot.legAngleDeg     = s.legAngleDeg
-            shot.shotSpeedMph    = s.shotSpeedMph
-        }
-
         session.recalculateStats()
-        modelContext.insert(shot)
         try modelContext.save()
         return shot
     }
 
-    func updateShot(_ shot: ShotRecord,
-                    result: ShotResult? = nil,
-                    courtX: Double? = nil,
-                    courtY: Double? = nil) throws {
-        if let result  = result  { shot.result  = result  }
-        // Phase 7 — Security: validate court coordinates before persisting user corrections
-        if let x = courtX {
-            guard InputValidator.isValidCourtCoordinate(x) else {
-                throw DataServiceError.invalidSensorValue("courtX out of 0–1 range: \(x)")
-            }
-            shot.courtX = x
+    /// User correction from the summary or the live HUD.
+    /// Sets a shot's result. Passing the current result just confirms a
+    /// flagged call: the flag clears but the shot isn't marked as edited.
+    func updateShot(_ shot: ShotRecord, result: ShotResult) {
+        guard shot.result != result || shot.needsReview else { return }
+        if shot.result != result {
+            shot.result = result
+            shot.isUserCorrected = true
         }
-        if let y = courtY {
-            guard InputValidator.isValidCourtCoordinate(y) else {
-                throw DataServiceError.invalidSensorValue("courtY out of 0–1 range: \(y)")
-            }
-            shot.courtY = y
-        }
-        shot.isUserCorrected = true
+        shot.needsReview = false
         shot.session?.recalculateStats()
-        try modelContext.save()
+        save()
+        refreshCareerStatsIfFinished(shot.session)
     }
 
-    /// Called by CVPipeline to resolve a pending shot with its final make/miss result.
-    /// Does NOT set isUserCorrected — only user-initiated edits set that flag.
-    func resolveShot(_ shot: ShotRecord,
-                     result: ShotResult,
-                     zone: CourtZone,
-                     courtX: Double,
-                     courtY: Double) throws {
-        // Phase 7 — Security: validate CV-produced court coordinates before persisting
-        guard InputValidator.isValidCourtCoordinate(courtX),
-              InputValidator.isValidCourtCoordinate(courtY) else {
-            throw DataServiceError.invalidSensorValue("CV court coordinates out of 0–1 range: (\(courtX), \(courtY))")
-        }
-        shot.result  = result
-        shot.zone    = zone
-        shot.courtX  = courtX
-        shot.courtY  = courtY
-        shot.session?.recalculateStats()
-        try modelContext.save()
+    /// Removes a shot that never happened (live "undo" or summary delete).
+    func deleteShot(_ shot: ShotRecord) {
+        let session = shot.session
+        session?.shots.removeAll { $0.id == shot.id }
+        modelContext.delete(shot)
+        session?.recalculateStats()
+        save()
+        refreshCareerStatsIfFinished(session)
     }
 
     // MARK: - Goals
 
     func addGoal(_ goal: GoalRecord, to profile: PlayerProfile) throws {
+        modelContext.insert(goal)
         goal.profile = profile
         profile.goals.append(goal)
-        modelContext.insert(goal)
         try modelContext.save()
-    }
-
-    func updateGoalProgress(_ goal: GoalRecord, currentValue: Double) throws {
-        goal.currentValue = currentValue
-        if !goal.isAchieved && currentValue >= goal.targetValue {
-            goal.isAchieved  = true
-            goal.achievedAt  = .now
-        }
-        try modelContext.save()
+        revision += 1
     }
 
     func deleteGoal(_ goal: GoalRecord) throws {
         modelContext.delete(goal)
         try modelContext.save()
+        revision += 1
     }
 
-    // Phase 7 — Security / GDPR right-to-delete
+    // MARK: - Analytics Helpers
+
+    /// FG% across shooting sessions in the last `days` days.
+    func fgPercent(lastDays days: Int) throws -> Double {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now) ?? .distantPast
+        let sessions = try fetchSessions(since: cutoff)
+        let attempted = sessions.reduce(0) { $0 + $1.shotsAttempted }
+        let made      = sessions.reduce(0) { $0 + $1.shotsMade }
+        return attempted > 0 ? Double(made) / Double(attempted) * 100 : 0
+    }
+
+    /// Shot attempts per calendar day for the last `days` days, oldest first,
+    /// including zero days so charts keep a steady x-axis.
+    func dailyVolume(lastDays days: Int) throws -> [(date: Date, attempts: Int)] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        guard let first = calendar.date(byAdding: .day, value: -(days - 1), to: today) else { return [] }
+        var byDay: [Date: Int] = [:]
+        for session in try fetchSessions(since: first) {
+            byDay[calendar.startOfDay(for: session.startedAt), default: 0] += session.shotsAttempted
+        }
+        return (0..<days).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: first).map { ($0, byDay[$0] ?? 0) }
+        }
+    }
+
+    // MARK: - Career stats
+
+    /// Rebuilds career totals, records and streaks from the sessions on
+    /// disk. Running totals drifted whenever a session was deleted or a shot
+    /// corrected; recomputing keeps them honest.
+    func recomputeCareerStats() throws {
+        let profile = try fetchOrCreateProfile()
+        let sessions = try fetchSessions()
+
+        profile.careerShotsAttempted = sessions.reduce(0) { $0 + $1.shotsAttempted }
+        profile.careerShotsMade      = sessions.reduce(0) { $0 + $1.shotsMade }
+        profile.totalSessionCount    = sessions.count
+        profile.totalTrainingMinutes = sessions.reduce(0) { $0 + $1.durationSeconds } / 60
+
+        let shooting = sessions.filter { $0.shotsAttempted >= 10 }
+        profile.prBestFGPercentSession = shooting.map(\.fgPercent).max() ?? 0
+        profile.prMostMakesSession     = sessions.map(\.shotsMade).max() ?? 0
+        profile.prBestConsistencyScore = sessions.compactMap(\.consistencyScore).min() ?? .infinity
+
+        let days = sessions.map(\.startedAt)
+        profile.currentStreakDays = StreakCalculator.current(trainingDays: days)
+        profile.longestStreakDays = StreakCalculator.longest(trainingDays: days)
+        profile.lastSessionDate   = sessions.first?.startedAt
+        try modelContext.save()
+        revision += 1
+    }
+
+    // MARK: - Video Cleanup
+
+    /// Deletes videos older than `days` days unless pinned.
+    func purgeOldVideos(olderThanDays days: Int) throws {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now) ?? .distantPast
+        let directory = SessionRecorder.directory
+
+        let staleTraining = try modelContext.fetch(FetchDescriptor<TrainingSession>(
+            predicate: #Predicate { $0.startedAt < cutoff && !$0.videoPinnedByUser }))
+        for session in staleTraining {
+            guard let filename = session.videoFileName else { continue }
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(filename))
+            session.videoFileName = nil
+        }
+
+        // Phase 10 — game sessions follow the same retention policy.
+        let staleGames = try modelContext.fetch(FetchDescriptor<GameSession>(
+            predicate: #Predicate { $0.startTimestamp < cutoff && !$0.videoPinnedByUser }))
+        for game in staleGames {
+            guard let filename = game.videoFileName else { continue }
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(filename))
+            game.videoFileName = nil
+        }
+        try modelContext.save()
+    }
+
+    // MARK: - Game Mode
+
+    /// Logs a scorekeeper shot and updates the team score.
+    func addGameShot(to game: GameSession,
+                     shooter: GamePlayer?,
+                     result: ShotResult,
+                     courtX: Double = 0.5,
+                     courtY: Double = 0.5,
+                     shotType: GameShotType,
+                     attributionConfidence: Double = 1.0) throws {
+        guard InputValidator.isValidCourtCoordinate(courtX),
+              InputValidator.isValidCourtCoordinate(courtY) else {
+            throw DataServiceError.invalidSensorValue("court coordinate out of range")
+        }
+        let shot = GameShotRecord(shooter: shooter,
+                                  result: result,
+                                  courtX: courtX, courtY: courtY,
+                                  shotType: shotType,
+                                  attributionConfidence: attributionConfidence)
+        modelContext.insert(shot)
+        game.shots.append(shot)
+        if result == .make { adjustScore(of: game, for: shot, by: 1) }
+        try modelContext.save()
+    }
+
+    /// Removes the most recent shot from a game, reversing its points.
+    func undoLastGameShot(in game: GameSession) {
+        guard let last = game.shots.max(by: { $0.timestamp < $1.timestamp }) else { return }
+        if last.result == .make { adjustScore(of: game, for: last, by: -1) }
+        game.shots.removeAll { $0.id == last.id }
+        modelContext.delete(last)
+        save()
+    }
+
+    func endGame(_ game: GameSession) {
+        game.gameState = .completed
+        game.endTimestamp = .now
+        save()
+        revision += 1
+    }
+
+    // MARK: - Delete everything (Phase 7 — GDPR right-to-delete)
+
     /// Permanently removes all user data: SwiftData records, session videos,
-    /// Keychain entries, app-level UserDefaults keys, and any exported JSON
-    /// temp files written by ExportService.
-    /// Call this when the user deletes their account.
+    /// telemetry, exported files, Keychain entries and app preferences.
     func deleteAllUserData() async {
-        // 1. Delete all SwiftData model instances (EarnedBadge included — cascade from
-        //    PlayerProfile handles it, but we delete explicitly first for safety)
         do {
-            let sessions = try modelContext.fetch(FetchDescriptor<TrainingSession>())
-            sessions.forEach { modelContext.delete($0) }
-
-            let goals = try modelContext.fetch(FetchDescriptor<GoalRecord>())
-            goals.forEach { modelContext.delete($0) }
-
-            // Phase 7 — Security: EarnedBadge records must be deleted explicitly;
-            // they are cascade-deleted from PlayerProfile but the cascade only fires
-            // when the profile is deleted. Deleting here first avoids orphan risk
-            // if the profile fetch/delete fails.
-            let badges = try modelContext.fetch(FetchDescriptor<EarnedBadge>())
-            badges.forEach { modelContext.delete($0) }
-
-            let profiles = try modelContext.fetch(FetchDescriptor<PlayerProfile>())
-            profiles.forEach { modelContext.delete($0) }
-
+            // Children before parents, one object at a time — SwiftData's
+            // batch delete is unreliable across relationships.
+            try deleteEvery(ShotRecord.self)
+            try deleteEvery(TrainingSession.self)
+            try deleteEvery(GoalRecord.self)
+            try deleteEvery(EarnedBadge.self)
+            try deleteEvery(GameShotRecord.self)
+            try deleteEvery(GamePlayer.self)
+            try deleteEvery(GameSession.self)
+            try deleteEvery(TelemetryUpload.self)
+            try deleteEvery(PlayerProfile.self)
             try modelContext.save()
         } catch {
             print("[DataService] deleteAllUserData: SwiftData error: \(error)")
         }
 
-        // 2. Delete session video files from Documents/Sessions/
-        let sessionsDir = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
-
-        if let contents = try? FileManager.default.contentsOfDirectory(
-            at: sessionsDir,
-            includingPropertiesForKeys: nil
-        ) {
-            contents.forEach { try? FileManager.default.removeItem(at: $0) }
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        for folder in [HoopTrack.Storage.sessionVideoDirectory, HoopTrack.Telemetry.telemetryDirectoryName] {
+            let dir = docs.appendingPathComponent(folder)
+            for url in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] {
+                try? fm.removeItem(at: url)
+            }
         }
 
-        // 3. Delete any exported JSON files written by ExportService to the temp directory.
-        //    Pattern: hooptrack-export-<datestamp>.json
-        let tmpDir = FileManager.default.temporaryDirectory
-        if let tmpContents = try? FileManager.default.contentsOfDirectory(
-            at: tmpDir,
-            includingPropertiesForKeys: nil
-        ) {
-            tmpContents
-                .filter { $0.lastPathComponent.hasPrefix("hooptrack-export-") && $0.pathExtension == "json" }
-                .forEach { try? FileManager.default.removeItem(at: $0) }
+        // Exported JSON files: hooptrack-export-<datestamp>.json in tmp.
+        for url in (try? fm.contentsOfDirectory(at: fm.temporaryDirectory, includingPropertiesForKeys: nil)) ?? []
+        where url.lastPathComponent.hasPrefix("hooptrack-export-") && url.pathExtension == "json" {
+            try? fm.removeItem(at: url)
         }
 
-        // 4. Wipe Keychain
         KeychainService().deleteAll()
-
-        // 5. Remove app-level UserDefaults keys
-        let appDefaults: [String] = [
-            "hasCompletedOnboarding",
-            "preferredCameraPosition",
-            "selectedDrillType",
-            "onboardingPlayerName",
-            "trainingReminderEnabled",
-            "trainingReminderHour"
-        ]
-        appDefaults.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        AppPreferences.removeAll()
+        revision += 1
     }
 
-    // MARK: - Analytics Helpers
+    // MARK: - Private
 
-    /// FG% for the last `days` days.
-    func fgPercent(lastDays days: Int) throws -> Double {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now)!
-        let predicate = #Predicate<TrainingSession> { $0.startedAt >= cutoff }
-        let descriptor = FetchDescriptor(predicate: predicate)
-        let sessions = try modelContext.fetch(descriptor)
-        let attempted = sessions.reduce(0) { $0 + $1.shotsAttempted }
-        let made      = sessions.reduce(0) { $0 + $1.shotsMade      }
-        return attempted > 0 ? Double(made) / Double(attempted) * 100 : 0
+    private func apply(_ science: ShotScienceMetrics?, to shot: ShotRecord) {
+        guard let science else { return }
+        // Phase 7 — Security: validate ranges before persisting.
+        if let angle = science.releaseAngleDeg, InputValidator.isValidReleaseAngle(angle) {
+            shot.releaseAngleDeg = angle
+        }
+        if let jump = science.verticalJumpCm, InputValidator.isValidJumpHeight(jump) {
+            shot.verticalJumpCm = jump
+        }
+        if let speed = science.shotSpeedMph, speed.isFinite, (5...60).contains(speed) {
+            shot.shotSpeedMph = speed
+        }
+        shot.releaseTimeMs = science.releaseTimeMs
+        shot.legAngleDeg   = science.legAngleDeg
     }
 
-    /// Shot attempts per day for the last `days` days (for volume bar chart).
-    func dailyVolume(lastDays days: Int) throws -> [(date: Date, attempts: Int)] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now)!
-        let predicate = #Predicate<TrainingSession> { $0.startedAt >= cutoff }
-        let descriptor = FetchDescriptor(predicate: predicate)
-        let sessions = try modelContext.fetch(descriptor)
-
-        var byDay: [Date: Int] = [:]
-        for session in sessions {
-            let day = Calendar.current.startOfDay(for: session.startedAt)
-            byDay[day, default: 0] += session.shotsAttempted
+    private func deleteEvery<T: PersistentModel>(_ type: T.Type) throws {
+        for object in try modelContext.fetch(FetchDescriptor<T>()) {
+            modelContext.delete(object)
         }
-        return byDay
-            .map { (date: $0.key, attempts: $0.value) }
-            .sorted { $0.date < $1.date }
     }
 
-    // MARK: - Video Cleanup
-
-    /// Deletes video files older than `days` days for sessions not pinned by the user.
-    func purgeOldVideos(olderThanDays days: Int) throws {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now)!
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let sessionsDir = docs.appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)
-
-        // Training sessions
-        let trainingPred = #Predicate<TrainingSession> {
-            $0.startedAt < cutoff && !$0.videoPinnedByUser
+    private func adjustScore(of game: GameSession, for shot: GameShotRecord, by sign: Int) {
+        let points = (shot.shotType == .threePoint ? 3 : 2) * sign
+        switch shot.shooter?.teamAssignment {
+        case .teamA: game.teamAScore = max(0, game.teamAScore + points)
+        case .teamB: game.teamBScore = max(0, game.teamBScore + points)
+        case .none:  break   // unattributed — no team credit
         }
-        let staleTraining = try modelContext.fetch(FetchDescriptor(predicate: trainingPred))
-        for session in staleTraining {
-            guard let filename = session.videoFileName else { continue }
-            try? FileManager.default.removeItem(at: sessionsDir.appendingPathComponent(filename))
-            session.videoFileName = nil
-        }
-
-        // Game sessions (Phase 10 — same retention policy)
-        let gamePred = #Predicate<GameSession> {
-            $0.startTimestamp < cutoff && !$0.videoPinnedByUser
-        }
-        let staleGame = try modelContext.fetch(FetchDescriptor(predicate: gamePred))
-        for session in staleGame {
-            guard let filename = session.videoFileName else { continue }
-            try? FileManager.default.removeItem(at: sessionsDir.appendingPathComponent(filename))
-            session.videoFileName = nil
-        }
-
-        try modelContext.save()
     }
 
-    // MARK: - Game Mode (SP1)
-
-    /// Append a shot to an existing game session and update the team score.
-    /// In SP1 this is called from the manual make/miss buttons in LiveGameView.
-    /// SP2 upgrades to CV-attributed shots via GameScoringCoordinator.
-    func addGameShot(
-        to session: GameSession,
-        shooter: GamePlayer?,
-        result: ShotResult,
-        courtX: Double,
-        courtY: Double,
-        shotType: GameShotType,
-        attributionConfidence: Double = 1.0
-    ) throws {
-        guard InputValidator.isValidCourtCoordinate(courtX),
-              InputValidator.isValidCourtCoordinate(courtY) else {
-            throw DataServiceError.invalidSensorValue("court coordinate out of range")
-        }
-        let shot = GameShotRecord(
-            shooter: shooter,
-            result: result,
-            courtX: courtX, courtY: courtY,
-            shotType: shotType,
-            attributionConfidence: attributionConfidence
-        )
-        session.shots.append(shot)
-        if result == .make {
-            let points = (shotType == .threePoint) ? 3 : 2
-            switch shooter?.teamAssignment {
-            case .teamA: session.teamAScore += points
-            case .teamB: session.teamBScore += points
-            case .none:  break   // unattributed — no team credit
-            }
-        }
-        try modelContext.save()
+    private func refreshCareerStatsIfFinished(_ session: TrainingSession?) {
+        guard session?.isComplete == true else { return }
+        try? recomputeCareerStats()
     }
 
-    // MARK: - Private Helpers
-
-    private func updateProfileStats(_ profile: PlayerProfile, with session: TrainingSession) {
-        profile.careerShotsAttempted += session.shotsAttempted
-        profile.careerShotsMade      += session.shotsMade
-        profile.totalSessionCount    += 1
-        profile.totalTrainingMinutes += session.durationSeconds / 60
-
-        // Personal Records
-        if session.fgPercent > profile.prBestFGPercentSession {
-            profile.prBestFGPercentSession = session.fgPercent
+    private func save() {
+        do { try modelContext.save() } catch {
+            print("[DataService] save failed: \(error)")
         }
-        if session.shotsMade > profile.prMostMakesSession {
-            profile.prMostMakesSession = session.shotsMade
-        }
-        if let score = session.consistencyScore,
-           score < profile.prBestConsistencyScore {
-            profile.prBestConsistencyScore = score
-        }
-
-        // Streak
-        let today = Calendar.current.startOfDay(for: .now)
-        if let lastDate = profile.lastSessionDate {
-            let lastDay = Calendar.current.startOfDay(for: lastDate)
-            let diff    = Calendar.current.dateComponents([.day], from: lastDay, to: today).day ?? 0
-            if diff == 1 {
-                profile.currentStreakDays += 1
-            } else if diff > 1 {
-                profile.currentStreakDays  = 1
-            }
-        } else {
-            profile.currentStreakDays = 1
-        }
-        profile.longestStreakDays = max(profile.longestStreakDays, profile.currentStreakDays)
-        profile.lastSessionDate   = .now
     }
-
 }

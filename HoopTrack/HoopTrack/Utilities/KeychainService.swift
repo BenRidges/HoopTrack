@@ -56,15 +56,11 @@ final class KeychainService {
         SecItemDelete(query as CFDictionary)
     }
 
-    /// Deletes all keys managed by this app. Called during GDPR account deletion.
+    /// Deletes every generic-password item this app owns — the named keys
+    /// below and the Supabase session items stored by KeychainAuthStorage.
+    /// Called during GDPR account deletion.
     func deleteAll() {
-        let allKeys = [
-            HoopTrack.KeychainKey.accessToken,
-            HoopTrack.KeychainKey.refreshToken,
-            HoopTrack.KeychainKey.userID,
-            HoopTrack.KeychainKey.biometricToken
-        ]
-        allKeys.forEach { delete(forKey: $0) }
+        SecItemDelete([kSecClass: kSecClassGenericPassword] as CFDictionary)
     }
 
     // MARK: - Biometric-protected storage (Phase 9)

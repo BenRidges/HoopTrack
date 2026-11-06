@@ -11,11 +11,7 @@ final class GoalUpdateServiceTests: XCTestCase {
     private var sut: GoalUpdateService!
 
     override func setUp() async throws {
-        container = try ModelContainer(
-            for: PlayerProfile.self, TrainingSession.self,
-                 ShotRecord.self, GoalRecord.self, EarnedBadge.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
+        container = try HoopTrackStore.makeInMemoryContainer()
         context = container.mainContext
         sut = GoalUpdateService(modelContext: context)
     }
@@ -38,6 +34,10 @@ final class GoalUpdateServiceTests: XCTestCase {
     private func makeSession(drillType: DrillType = .freeShoot,
                               fgPercent: Double = 50) throws -> TrainingSession {
         let s = TrainingSession(drillType: drillType)
+        if drillType == .freeShoot {
+            s.shotsAttempted = 20
+            s.shotsMade      = Int(fgPercent / 5)
+        }
         s.fgPercent = fgPercent
         s.endedAt   = .now
         context.insert(s)
@@ -93,6 +93,41 @@ final class GoalUpdateServiceTests: XCTestCase {
         try sut.update(after: session, profile: profile)
 
         XCTAssertEqual(goal.achievedAt, originalDate)
+    }
+
+    func test_update_dribbleSession_leavesShootingGoalAlone() throws {
+        let profile = try makeProfile()
+        let goal    = try makeGoal(metric: .fgPercent, target: 50, baseline: 40, for: profile)
+        goal.currentValue = 44
+        let dribble = try makeSession(drillType: .dribble, fgPercent: 0)
+
+        try sut.update(after: dribble, profile: profile)
+
+        XCTAssertEqual(goal.currentValue, 44, accuracy: 0.01)
+    }
+
+    func test_update_shuttleGoal_withoutShuttleRun_staysFinite() throws {
+        let profile = try makeProfile()
+        let goal    = try makeGoal(metric: .shuttleRunSeconds, target: 7, baseline: 9, for: profile)
+        goal.currentValue = 8.5
+        let session = try makeSession(drillType: .agility)
+
+        try sut.update(after: session, profile: profile)
+
+        XCTAssertEqual(goal.currentValue, 8.5, accuracy: 0.01)
+        XCTAssertFalse(goal.isAchieved)
+    }
+
+    func test_update_shuttleGoal_lowerTimeAchieves() throws {
+        let profile = try makeProfile()
+        let goal    = try makeGoal(metric: .shuttleRunSeconds, target: 7, baseline: 9, for: profile)
+        let session = try makeSession(drillType: .agility)
+        session.bestShuttleRunSeconds = 6.8
+
+        try sut.update(after: session, profile: profile)
+
+        XCTAssertTrue(goal.isAchieved)
+        XCTAssertEqual(goal.progressFraction, 1, accuracy: 0.001)
     }
 
     // MARK: - sessionsPerWeek

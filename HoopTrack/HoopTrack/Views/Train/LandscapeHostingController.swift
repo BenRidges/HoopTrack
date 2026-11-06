@@ -1,6 +1,6 @@
 // LandscapeHostingController.swift
-// UIHostingController subclass that forces landscape orientation
-// for LiveSessionView. Sets OrientationLock flag and requests rotation.
+// UIHostingController subclass that forces landscape-right for
+// LiveSessionView. Sets the OrientationLock flag and requests rotation.
 
 import SwiftUI
 import UIKit
@@ -17,25 +17,20 @@ final class LandscapeHostingController<Content: View>: UIHostingController<Conte
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        OrientationLock.allowLandscape = true
-        requestOrientationChange(to: .landscapeRight)
+        OrientationLock.mode = .landscapeRight
+        Orientation.request(.landscapeRight, from: view.window?.windowScene)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // `view.window` is often still nil in viewWillAppear for an embedded
+        // controller; ask again now that it's on screen.
+        Orientation.request(.landscapeRight, from: view.window?.windowScene)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        OrientationLock.allowLandscape = false
-        requestOrientationChange(to: .portrait)
-    }
-
-    private func requestOrientationChange(to orientation: UIInterfaceOrientation) {
-        guard let windowScene = view.window?.windowScene else { return }
-        let geometryPreferences = UIWindowScene.GeometryPreferences.iOS(
-            interfaceOrientations: orientation == .landscapeRight ? .landscapeRight : .portrait
-        )
-        windowScene.requestGeometryUpdate(geometryPreferences) { error in
-            // Non-fatal — the system may decline the request
-            print("HoopTrack: orientation change request error: \(error)")
-        }
+        Orientation.restorePortrait()
     }
 }
 

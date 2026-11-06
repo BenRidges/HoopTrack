@@ -1,19 +1,18 @@
 // HoopTrack/Models/ShotScienceMetrics.swift
-// Value-type DTO that carries biomechanics data from CVPipeline
-// through LiveSessionViewModel to DataService.
-// All fields are optional — nil means the measurement was unavailable.
+// Value type carrying per-shot biomechanics from CVPipeline to DataService.
+// All fields are optional — nil means the measurement wasn't available.
 
 import Foundation
 
-struct ShotScienceMetrics: Sendable {
-    /// Ball launch angle from horizontal at release (degrees). Optimal 43–57°.
+nonisolated struct ShotScienceMetrics: Sendable {
+    /// Launch angle above horizontal (degrees), from flight time. Optimal 43–57°.
     var releaseAngleDeg: Double?
-    /// Time from first ball detection to release peak (milliseconds).
+    /// Not measured by the current pipeline; kept for older data and sync.
     var releaseTimeMs: Double?
-    /// Estimated vertical jump height at release (centimetres). Rough approximation.
+    /// Not measured by the current pipeline; kept for older data and sync.
     var verticalJumpCm: Double?
-    /// Knee-joint angle at jump initiation (degrees). Derived from Vision body pose.
+    /// Not measured by the current pipeline; kept for older data and sync.
     var legAngleDeg: Double?
-    /// Estimated ball velocity post-release (MPH). Derived from trajectory + hoop-size scale.
+    /// Launch speed (mph), from flight time and distance.
     var shotSpeedMph: Double?
 }

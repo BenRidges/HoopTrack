@@ -12,12 +12,7 @@ final class DataServiceDeleteTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        let schema = Schema([
-            PlayerProfile.self, TrainingSession.self,
-            ShotRecord.self, GoalRecord.self, EarnedBadge.self
-        ])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try ModelContainer(for: schema, configurations: config)
+        container = try HoopTrackStore.makeInMemoryContainer()
         service = DataService(modelContext: container.mainContext)
     }
 
@@ -74,5 +69,19 @@ final class DataServiceDeleteTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: tmpURL.path),
                        "Exported JSON temp files must be deleted by deleteAllUserData()")
+    }
+
+    func test_deleteAllUserData_clearsGamesAndSessions() async throws {
+        let context = container.mainContext
+        let game = GameSession(gameType: .pickup, gameFormat: .twoOnTwo)
+        context.insert(game)
+        _ = try service.startSession(drillType: .freeShoot)
+        try context.save()
+
+        await service.deleteAllUserData()
+
+        XCTAssertTrue(try context.fetch(FetchDescriptor<GameSession>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<TrainingSession>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PlayerProfile>()).isEmpty)
     }
 }

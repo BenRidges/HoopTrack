@@ -1,5 +1,5 @@
 // TrainViewModel.swift
-// Drives the Train tab — drill catalogue, filtering, and drill launch flow.
+// The Train tab's "this week" strip and last-session row.
 
 import Foundation
 import Combine
@@ -7,72 +7,41 @@ import Combine
 @MainActor
 final class TrainViewModel: ObservableObject {
 
-    // MARK: - Published
-    @Published var selectedDrillType: DrillType? = nil   // nil = show all
-    @Published var selectedNamedDrill: NamedDrill?
-    @Published var isShowingSessionConfig: Bool = false
-    @Published var isShowingLiveSession: Bool = false
-
-    // Session config state (shown in pre-session sheet)
-    @Published var selectedCourtType: CourtType = .nba
-    @Published var locationTag: String = ""
-
-    // MARK: - Catalogue
-
-    /// All named drills, optionally filtered by type.
-    var filteredDrills: [NamedDrill] {
-        guard let filter = selectedDrillType else { return NamedDrill.allCases }
-        return NamedDrill.allCases.filter { $0.drillType == filter }
+    struct Week: Equatable {
+        var shots = 0
+        var makes = 0
+        var sessions = 0
+        var minutes = 0.0
+        var fgPercent: Double? { shots > 0 ? Double(makes) / Double(shots) * 100 : nil }
     }
 
-    var drillCategories: [DrillType] { DrillType.allCases }
+    @Published private(set) var playerName = ""
+    @Published private(set) var week = Week()
+    @Published private(set) var streak = 0
+    @Published private(set) var lastSession: TrainingSession?
+    @Published private(set) var hasHistory = false
 
-    // MARK: - Launch Flow
+    func load(from dataService: DataService) {
+        let calendar = Calendar.current
+        let weekStart = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? calendar.startOfDay(for: .now)
+        let thisWeek = (try? dataService.fetchSessions(since: weekStart)) ?? []
 
-    func selectDrill(_ drill: NamedDrill) {
-        selectedNamedDrill   = drill
-        isShowingSessionConfig = true
+        week = Week(shots: thisWeek.reduce(0) { $0 + $1.shotsAttempted },
+                    makes: thisWeek.reduce(0) { $0 + $1.shotsMade },
+                    sessions: thisWeek.count,
+                    minutes: thisWeek.reduce(0) { $0 + $1.durationSeconds } / 60)
+
+        let profile = try? dataService.fetchOrCreateProfile()
+        playerName = profile?.name ?? ""
+        streak = profile?.currentStreakDays ?? 0
+        lastSession = (try? dataService.fetchSessions(limit: 1))?.first
+        hasHistory = lastSession != nil
     }
 
-    func confirmAndLaunch() {
-        isShowingSessionConfig = false
-        isShowingLiveSession   = true
-    }
-
-    func startFreeShoot() {
-        selectedNamedDrill     = nil
-        isShowingSessionConfig = true
-    }
-
-    func sessionDidFinish() {
-        isShowingLiveSession   = false
-        selectedNamedDrill     = nil
-    }
-
-    // MARK: - Drill Metadata Helpers
-
-    func description(for drill: NamedDrill) -> String {
-        switch drill {
-        case .aroundTheArc:
-            return "5 spots around the 3-point arc, 5 shots each. Tracks zone accuracy."
-        case .freethrowChallenge:
-            return "Sets of 10 free throws. Tracks percentage and consistency over time."
-        case .midSideMid:
-            return "Mid-range triangle drill. 3 positions, timed."
-        case .fiveMinEndurance:
-            return "As many makes as possible in 5 minutes. Tracks fatigue curve."
-        case .mikanDrill:
-            return "Alternating-hand layup loop. Tracks makes per 60 seconds."
-        case .crossoverSeries:
-            return "AR targets guide dribble direction. Combo tracking enabled."
-        case .twoBallDribble:
-            return "Simultaneous dribble with both hands. Balance score output."
-        case .shuttleRun:
-            return "Lateral sprint between two AR cones. 3-rep average."
-        case .laneAgility:
-            return "Box-step footwork drill. Timed to nearest 0.01 second."
-        case .verticalJumpTest:
-            return "3 attempts. Best jump height recorded and saved to profile."
-        }
+    var greeting: String {
+        let hour = Calendar.current.component(.hour, from: .now)
+        let part = hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening"
+        let name = playerName.trimmingCharacters(in: .whitespaces)
+        return name.isEmpty || name == "Player" ? part : "\(part), \(name)"
     }
 }

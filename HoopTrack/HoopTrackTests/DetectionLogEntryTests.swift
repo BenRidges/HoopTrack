@@ -54,4 +54,23 @@ final class DetectionLogEntryTests: XCTestCase {
     func test_decode_rejectsMalformedLine() {
         XCTAssertThrowsError(try DetectionLogEntry.decode(jsonLine: "{not valid json"))
     }
+
+    func test_olderLogLine_withoutReplayFields_stillDecodes() throws {
+        let entry = try DetectionLogEntry.decode(jsonLine: #"{"t":1.5,"ci":0.8,"bb":[0.1,0.2,0.03,0.05],"st":"idle"}"#)
+        XCTAssertEqual(entry.timestampSec, 1.5)
+        XCTAssertNil(entry.balls)
+        XCTAssertNil(entry.event)
+    }
+
+    func test_replayFields_roundTrip() throws {
+        var entry = DetectionLogEntry(timestampSec: 2.0, ballConfidence: 0.7,
+                                      ballBox: [0.5, 0.6, 0.02, 0.04], rimConfidence: 0.9,
+                                      rimBox: [0.45, 0.7, 0.1, 0.1], state: "tracking")
+        entry.balls = [[0.5, 0.6, 0.02, 0.04, 0.7], [0.1, 0.1, 0.03, 0.05, 0.4]]
+        entry.region = [0.3, 0.3, 0.35, 0.62]
+        entry.event = "make"
+        entry.eventConfidence = 0.95
+        let decoded = try DetectionLogEntry.decode(jsonLine: try entry.jsonLine())
+        XCTAssertEqual(decoded, entry)
+    }
 }

@@ -15,12 +15,7 @@ struct ShotsTodayIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        let container = try ModelContainer(
-            for: PlayerProfile.self, TrainingSession.self,
-                 ShotRecord.self, GoalRecord.self, EarnedBadge.self,
-            migrationPlan: HoopTrackMigrationPlan.self
-        )
-        let dataService = DataService(modelContext: container.mainContext)
+        let dataService = DataService(modelContext: HoopTrackStore.shared.mainContext)
         let count       = try dataService.fetchShotsTodayCount()
 
         let response: String

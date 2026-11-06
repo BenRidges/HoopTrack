@@ -1,7 +1,8 @@
 // GamePlayer.swift
-// A player registered to a specific GameSession. Ephemeral — cascade-deleted
-// with the parent GameSession. `appearanceEmbedding` carries a JSON-encoded
-// AppearanceDescriptor.
+// A player in a specific GameSession. Ephemeral — cascade-deleted with the
+// parent GameSession. `appearanceEmbedding` is left over from the removed
+// camera-registration flow; it stays in the schema (empty) so existing
+// stores open without a migration.
 
 import Foundation
 import SwiftData
@@ -19,7 +20,7 @@ final class GamePlayer {
     init(
         id: UUID = UUID(),
         name: String,
-        appearanceEmbedding: Data,
+        appearanceEmbedding: Data = Data(),
         teamAssignment: TeamAssignment,
         linkedProfile: PlayerProfile? = nil
     ) {
@@ -36,11 +37,5 @@ final class GamePlayer {
     var teamAssignment: TeamAssignment {
         get { TeamAssignment(rawValue: teamAssignmentRaw) ?? .teamA }
         set { teamAssignmentRaw = newValue.rawValue }
-    }
-
-    /// Decoded descriptor. Returns nil if the blob is malformed — caller
-    /// must guard (SP2 attribution will).
-    var appearanceDescriptor: AppearanceDescriptor? {
-        try? JSONDecoder().decode(AppearanceDescriptor.self, from: appearanceEmbedding)
     }
 }

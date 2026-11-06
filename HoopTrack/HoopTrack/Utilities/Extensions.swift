@@ -1,105 +1,30 @@
 // Extensions.swift
-// Convenience extensions on standard library and Apple framework types.
+// Small Foundation-only helpers. Kept free of UIKit/SwiftUI so the pure
+// CV and stats code that uses them can be built and tested anywhere.
 
 import Foundation
-import SwiftUI
-import AVFoundation
-
-// MARK: - Double
 
 nonisolated extension Double {
-    /// Clamps the value between `min` and `max`.
+    /// Clamps the value into `range`.
     func clamped(to range: ClosedRange<Double>) -> Double {
         Swift.max(range.lowerBound, Swift.min(range.upperBound, self))
     }
-
-    /// Rounds to `places` decimal places.
-    func rounded(toPlaces places: Int) -> Double {
-        let factor = pow(10.0, Double(places))
-        return (self * factor).rounded() / factor
-    }
-
-    /// Returns a percentage string e.g. "47.3%"
-    var fgPercentString: String { String(format: "%.1f%%", self) }
 }
-
-// MARK: - Date
 
 nonisolated extension Date {
-    /// True if the date falls on the same calendar day as `other`.
-    func isSameDay(as other: Date, calendar: Calendar = .current) -> Bool {
-        calendar.isDate(self, inSameDayAs: other)
-    }
-
-    /// Returns a "Today", "Yesterday", or abbreviated date string.
-    var relativeShortLabel: String {
-        let cal = Calendar.current
-        if cal.isDateInToday(self)     { return "Today" }
-        if cal.isDateInYesterday(self) { return "Yesterday" }
-        return self.formatted(.dateTime.month(.abbreviated).day())
+    /// "Today", "Yesterday", or an abbreviated date like "4 Nov".
+    var relativeDayLabel: String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(self)     { return "Today" }
+        if calendar.isDateInYesterday(self) { return "Yesterday" }
+        return formatted(.dateTime.day().month(.abbreviated))
     }
 }
 
-// MARK: - Array
-
-nonisolated extension Array {
-    /// Returns the element at `index` if in bounds, otherwise nil.
-    subscript(safe index: Index) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
-}
-
-// MARK: - SwiftUI Color
-
-extension Color {
-    /// HoopTrack brand orange.
-    static let hoopOrange = Color.orange
-
-    /// Returns green/orange/red based on a 0–100 FG% value.
-    static func fgPercentColor(_ percent: Double) -> Color {
-        switch percent {
-        case 50...:     return .green
-        case 35..<50:   return .orange
-        default:        return .red
-        }
-    }
-}
-
-// MARK: - View
-
-extension View {
-    /// Adds a standard HoopTrack card background.
-    func hoopCard() -> some View {
-        self
-            .padding(HoopTrack.UI.cardPadding)
-            .background(.ultraThinMaterial,
-                        in: RoundedRectangle(cornerRadius: HoopTrack.UI.cornerRadius,
-                                             style: .continuous))
-    }
-
-    /// Conditionally applies a modifier.
-    @ViewBuilder
-    func `if`<Content: View>(_ condition: Bool,
-                              transform: (Self) -> Content) -> some View {
-        if condition { transform(self) } else { self }
-    }
-}
-
-// MARK: - AVCaptureDevice
-
-nonisolated extension AVCaptureDevice {
-    /// Checks whether the device supports a given frame rate.
-    func supports(fps: Double) -> Bool {
-        activeFormat.videoSupportedFrameRateRanges
-            .contains { $0.maxFrameRate >= fps }
-    }
-}
-
-// MARK: - CGPoint
-
-nonisolated extension CGPoint {
-    /// Returns the Euclidean distance to another point.
-    func distance(to other: CGPoint) -> CGFloat {
-        sqrt(pow(x - other.x, 2) + pow(y - other.y, 2))
+nonisolated extension TimeInterval {
+    /// "4:07" style clock text for durations.
+    var clockText: String {
+        let total = Int(self.rounded(.down))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

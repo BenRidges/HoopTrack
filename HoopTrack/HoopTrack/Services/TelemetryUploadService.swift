@@ -21,6 +21,8 @@ final class TelemetryUploadService {
     /// Walk pending/failed rows and attempt upload for each. Safe to call
     /// repeatedly; rows already in `.uploading` are skipped.
     func uploadPending(userID: UUID) async {
+        // Uploads are strictly opt-in (Profile → Help improve shot tracking).
+        guard AppPreferences.shareTrainingData else { return }
         let rows = (try? fetchEligible()) ?? []
         for row in rows {
             await upload(row: row, userID: userID)

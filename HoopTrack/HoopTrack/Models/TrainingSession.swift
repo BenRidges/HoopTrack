@@ -107,6 +107,16 @@ final class TrainingSession {
 
     var isComplete: Bool { endedAt != nil }
 
+    /// SwiftData relationship arrays have no defined order; always sort.
+    var orderedShots: [ShotRecord] {
+        shots.sorted { $0.sequenceIndex < $1.sequenceIndex }
+    }
+
+    /// Shown in lists and headers: the named drill, else the drill type.
+    var title: String { namedDrill?.rawValue ?? drillType.displayName }
+
+    var shotsMissed: Int { shotsAttempted - shotsMade }
+
     var threePointPercentage: Double? {
         let shots3 = shots.filter {
             ($0.zone == .cornerThree || $0.zone == .aboveBreakThree) && $0.result != .pending
@@ -121,16 +131,12 @@ final class TrainingSession {
         return Double(ftShots.filter { $0.result == .make }.count) / Double(ftShots.count) * 100
     }
 
-    var formattedDuration: String {
-        let mins = Int(durationSeconds) / 60
-        let secs = Int(durationSeconds) % 60
-        return String(format: "%d:%02d", mins, secs)
-    }
+    var formattedDuration: String { durationSeconds.clockText }
 
     /// Re-derives and caches aggregate stats from the shots array.
     /// Call after adding/editing shot records, and before saving context.
     func recalculateStats() {
-        let completedShots = shots.filter { $0.result != .pending }
+        let completedShots = orderedShots.filter { $0.result != .pending }
         shotsAttempted = completedShots.count
         shotsMade      = completedShots.filter { $0.result == .make }.count
         fgPercent      = shotsAttempted > 0
@@ -148,7 +154,7 @@ final class TrainingSession {
         avgVerticalJumpCm  = avg(completedShots.map { $0.verticalJumpCm  })
         avgShotSpeedMph    = avg(completedShots.map { $0.shotSpeedMph    })
 
-        // Consistency score = population std dev of release angles
+        // Consistency score = population std dev of launch angles
         let angles = completedShots.compactMap { $0.releaseAngleDeg }
         consistencyScore = ShotScienceCalculator.consistencyScore(releaseAngles: angles)
 
@@ -186,7 +192,8 @@ final class TrainingSession {
 
     // MARK: - Zone Breakdown
 
-    struct ZoneStat {
+    struct ZoneStat: Identifiable {
+        var id: CourtZone { zone }
         let zone: CourtZone
         let attempted: Int
         let made: Int
@@ -196,7 +203,7 @@ final class TrainingSession {
     }
 
     var zoneStats: [ZoneStat] {
-        CourtZone.allCases.compactMap { zone -> ZoneStat? in
+        CourtZone.allCases.filter { $0 != .unknown }.compactMap { zone -> ZoneStat? in
             let zoneShots = shots.filter { $0.zone == zone && $0.result != .pending }
             guard !zoneShots.isEmpty else { return nil }
             return ZoneStat(

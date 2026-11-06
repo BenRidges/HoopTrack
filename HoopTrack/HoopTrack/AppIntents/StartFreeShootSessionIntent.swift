@@ -10,14 +10,14 @@ struct StartFreeShootSessionIntent: AppIntent, ForegroundContinuableIntent {
 
     static let title: LocalizedStringResource = "Start a free shoot session"
     static let description = IntentDescription(
-        "Opens HoopTrack and navigates to the Train tab.",
+        "Opens HoopTrack and starts a shooting session.",
         categoryName: "Training"
     )
 
     @MainActor
     func perform() async throws -> some IntentResult {
         try await requestToContinueInForeground()
-        guard let url = URL(string: "hooptrack://train") else { return .result() }
+        guard let url = URL(string: "hooptrack://shoot") else { return .result() }
         await UIApplication.shared.open(url)
         return .result()
     }

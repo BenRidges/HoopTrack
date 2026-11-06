@@ -1,618 +1,341 @@
 // LiveSessionView.swift
-// Full-screen landscape camera view shown during an active training session.
-//
-// Phase 1: Camera preview + manual shot logging buttons + HUD.
-// Phase 2: CV pipeline makes/misses auto-populate via LiveSessionViewModel.logShot().
-// Phase 3: Shot Science overlay during replay.
-// Landscape: Always-landscape with right sidebar layout and border glow animations.
+// Landscape, full-bleed camera. Everything you need at a glance from 20 ft
+// away: score top-left, hoop status top-centre, clock top-right. Make /
+// Miss / Undo stay within thumb reach at all times — they're the primary
+// input when there's no model, and one-tap corrections when there is.
 
 import SwiftUI
+import UIKit
 import AVFoundation
-import SwiftData
+import Combine
 
 struct LiveSessionView: View {
 
-    let drillType: DrillType
     let namedDrill: NamedDrill?
-    let onFinish: () -> Void
+    let onFinish: (SessionResult?) -> Void
 
-    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var dataService: DataService
+    @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
     @EnvironmentObject private var cameraService: CameraService
     @EnvironmentObject private var hapticService: HapticService
-    @EnvironmentObject private var notificationService: NotificationService
-    @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
-    @EnvironmentObject private var dataService: DataService
+    @AppStorage(AppPreferences.Key.showDetectionBoxes) private var showDetectionBoxes = false
 
-    @StateObject private var viewModel = LiveSessionViewModel()
-
-    @State private var showMidSessionBreakdown = false
-    @State private var isStatsExpanded = false
-    private let sidebarWidth: CGFloat = 140
-
-    // Phase 2: CV pipeline
-    @State private var cvPipeline:  CVPipeline?
-    @State private var calibration: CourtCalibrationService?
-
-    // Phase 3: video recording for Shot Science replay
-    @State private var videoRecorder: VideoRecordingService?
+    @StateObject private var holder = ViewModelHolder()
 
     var body: some View {
         ZStack {
-            HStack(spacing: 0) {
-                // MARK: Camera Area (~80%)
-                ZStack {
-                    CameraPreviewView(captureSession: cameraService.captureSession,
-                                      orientation: .landscape,
-                                      isSessionRunning: cameraService.isSessionRunning)
-                        .ignoresSafeArea()
-
-                    // Detection debug overlay — rim (green) and ball (orange)
-                    DetectionOverlay(hoopRect: viewModel.detectedHoopRect,
-                                     ballBox:  viewModel.detectedBallBox,
-                                     ballConfidence: viewModel.detectedBallConfidence)
-
-                    // Camera permission overlay
-                    if cameraService.permissionStatus != .authorized {
-                        Color.black.ignoresSafeArea()
-                        CameraPermissionView()
-                    }
-
-                    // Manual make/miss fallback — shown only when CV pipeline is not active
-                    if cvPipeline == nil {
-                        VStack {
-                            Spacer()
-                            manualShotButtons
-                                .padding(.bottom, 20)
-                                .padding(.horizontal, 20)
-                        }
-                    }
-
-                    // Phase 2: calibration prompt — shown until hoop is locked
-                    if !viewModel.isCalibrated {
-                        calibrationOverlay
-                    }
-                }
-
-                // MARK: Right Sidebar (~20%)
-                sidebar
-            }
-
-            // MARK: Shot glow overlay
-            ShotGlowOverlay(shotResult: viewModel.lastShotResult,
-                             sidebarWidth: sidebarWidth)
-                .accessibilityHidden(true)
-        }
-        .task {
-            viewModel.configure(
-                dataService:  dataService,
-                hapticService: hapticService,
-                coordinator:  coordinator
-            )
-
-            if cameraService.permissionStatus == .notDetermined {
-                await cameraService.requestPermission()
-            }
-            if cameraService.permissionStatus == .authorized {
-                cameraService.configureSession(mode: .rear, orientation: .landscape)
-                cameraService.startSession()
-            }
-
-            viewModel.start(drillType: drillType, namedDrill: namedDrill, courtType: .nba)
-
-            // Phase 2: start CV pipeline (or fall back to manual-only if no model available)
-            if let detector = BallDetectorFactory.make(BallDetectorFactory.active) {
-                let cal = CourtCalibrationService()
-                cal.onStateChange = { @Sendable [weak viewModel] state in
-                    let tracking = state.isTracking
-                    let hoopRect = state.hoopRect
-                    Task { @MainActor [weak viewModel] in
-                        viewModel?.updateCalibrationState(isCalibrated: tracking, hoopRect: hoopRect)
-                    }
-                }
-                // Calibration is now per-frame via CVPipeline → updateBasket —
-                // no explicit start step. The service is live as soon as it's
-                // constructed and the pipeline starts feeding it frames.
-
-                let poseService = PoseEstimationService()
-                let pipeline = CVPipeline(detector: detector,
-                                          calibration: cal,
-                                          poseService: poseService)
-
-                // CV-A — attach telemetry logger for this session (no-op if creation fails).
-                if let session = viewModel.session,
-                   let logger = try? DetectionLogger(sessionID: session.id) {
-                    pipeline.attachTelemetry(logger: logger)
-                }
-
-                pipeline.start(framePublisher: cameraService.framePublisher, viewModel: viewModel)
-
-                calibration = cal
-                cvPipeline  = pipeline
+            if let viewModel = holder.viewModel {
+                LiveSessionContent(viewModel: viewModel,
+                                   showDetectionBoxes: showDetectionBoxes,
+                                   onFinish: onFinish)
             } else {
-                viewModel.updateCalibrationState(isCalibrated: true)
-            }
-
-            // Phase 3: record session video for replay
-            let recorder = VideoRecordingService()
-            recorder.configure(captureSession: cameraService.captureSession,
-                               orientation: .landscape)
-            if let sessionID = viewModel.session?.id {
-                recorder.startRecording(sessionID: sessionID)
-                recorder.onRecordingFinished = { result in
-                    if case .success(let url) = result {
-                        viewModel.session?.videoFileName = url.lastPathComponent
-                    }
-                }
-            }
-            videoRecorder = recorder
-        }
-        .onDisappear {
-            cvPipeline?.stop()
-            calibration?.reset()
-            videoRecorder?.stopRecording()
-            cameraService.stopSession()
-        }
-        .sheet(isPresented: $showMidSessionBreakdown) {
-            MidSessionBreakdownView(viewModel: viewModel)
-                .presentationDetents([.medium, .large])
-        }
-        .fullScreenCover(isPresented: $viewModel.isFinished) {
-            if let session = viewModel.session {
-                SessionSummaryView(
-                    session:      session,
-                    badgeChanges: viewModel.sessionResult?.badgeChanges ?? [],
-                    badgeSkipReason: viewModel.sessionResult?.badgeSkipReason
-                ) {
-                    viewModel.isFinished = false
-                    onFinish()
-                }
+                Color.black.ignoresSafeArea()
             }
         }
         .statusBarHidden(true)
-    }
-
-    // MARK: - Right Sidebar (Sport Broadcast Style)
-
-    /// Reusable card background for sidebar sections.
-    private func sidebarCard(orangeBorder: Bool = false) -> some ShapeStyle {
-        LinearGradient(colors: [Color(red: 0.10, green: 0.10, blue: 0.18),
-                                Color(red: 0.07, green: 0.07, blue: 0.12)],
-                       startPoint: .top, endPoint: .bottom)
-    }
-
-    private var sidebar: some View {
-        VStack(spacing: 6) {
-
-            // MARK: FG% Card (tappable, expandable)
-            VStack(spacing: 4) {
-                // Header row with expand chevron
-                HStack {
-                    Text("FIELD GOAL")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Color.orange.opacity(0.6))
-                        .tracking(1.5)
-                    Spacer()
-                    Image(systemName: isStatsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.25))
-                }
-
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    Text(String(format: "%.0f", viewModel.fgPercent))
-                        .font(.system(.largeTitle, design: .rounded).weight(.black))
-                        .foregroundStyle(fgTintColor)
-                    Text("%")
-                        .font(.system(size: 16, weight: .black))
-                        .foregroundStyle(fgTintColor)
-                        .baselineOffset(10)
-                }
-                .monospacedDigit()
-
-                // Made / Miss split row
-                HStack(spacing: 0) {
-                    VStack(spacing: 1) {
-                        Text("\(viewModel.shotsMade)")
-                            .font(.system(size: 14, weight: .heavy))
-                            .foregroundStyle(.green)
-                        Text("MADE")
-                            .font(.system(size: 7, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.3))
-                            .tracking(0.5)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    Rectangle()
-                        .fill(.white.opacity(0.08))
-                        .frame(width: 1, height: 24)
-
-                    VStack(spacing: 1) {
-                        Text("\(viewModel.shotsAttempted - viewModel.shotsMade)")
-                            .font(.system(size: 14, weight: .heavy))
-                            .foregroundStyle(.red)
-                        Text("MISS")
-                            .font(.system(size: 7, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.3))
-                            .tracking(0.5)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(.white.opacity(0.04))
-                )
-                .padding(.top, 2)
-
-                // Expanded zone breakdown
-                if isStatsExpanded {
-                    VStack(spacing: 0) {
-                        Rectangle()
-                            .fill(.white.opacity(0.06))
-                            .frame(height: 1)
-                            .padding(.vertical, 6)
-
-                        if let session = viewModel.session {
-                            ForEach(zoneBreakdown(for: session), id: \.zone) { row in
-                                HStack(spacing: 0) {
-                                    Text(row.label)
-                                        .font(.system(size: 7, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.5))
-                                        .tracking(0.5)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                                    Text(row.fraction)
-                                        .font(.system(size: 8, weight: .heavy, design: .monospaced))
-                                        .foregroundStyle(.white.opacity(0.4))
-                                        .frame(width: 28, alignment: .trailing)
-
-                                    Text(row.pct)
-                                        .font(.system(size: 9, weight: .black, design: .monospaced))
-                                        .foregroundStyle(row.pctColor)
-                                        .frame(width: 32, alignment: .trailing)
-                                }
-                                .padding(.vertical, 3)
-                            }
-
-                            // Streak
-                            if session.longestMakeStreak > 0 {
-                                Rectangle()
-                                    .fill(.white.opacity(0.06))
-                                    .frame(height: 1)
-                                    .padding(.vertical, 4)
-
-                                HStack {
-                                    Text("BEST RUN")
-                                        .font(.system(size: 7, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.4))
-                                        .tracking(0.5)
-                                    Spacer()
-                                    Text("\(session.longestMakeStreak)")
-                                        .font(.system(size: 11, weight: .black, design: .monospaced))
-                                        .foregroundStyle(.orange)
-                                    + Text(" IN A ROW")
-                                        .font(.system(size: 7, weight: .bold))
-                                        .foregroundStyle(.orange.opacity(0.6))
-                                }
-                            }
-                        }
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
+        .persistentSystemOverlays(.hidden)
+        .onAppear {
+            if holder.viewModel == nil {
+                holder.viewModel = LiveSessionViewModel(namedDrill: namedDrill,
+                                                        dataService: dataService,
+                                                        coordinator: coordinator,
+                                                        camera: cameraService,
+                                                        haptics: hapticService)
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(sidebarCard())
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.orange.opacity(isStatsExpanded ? 0.25 : 0.15), lineWidth: 1)
-                    )
-            )
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Field goal percentage \(viewModel.fgPercentString), \(viewModel.shotsMade) makes out of \(viewModel.shotsAttempted) attempts")
-            .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    isStatsExpanded.toggle()
-                }
-            }
-
-            // MARK: Timer Card
-            VStack(spacing: 2) {
-                Text("TIME")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.3))
-                    .tracking(1.5)
-
-                Text(viewModel.elapsedFormatted)
-                    .font(.system(.title2, design: .monospaced).weight(.heavy))
-                    .foregroundStyle(.white)
-                    .tracking(1)
-
-                if viewModel.isPaused {
-                    Text("PAUSED")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.yellow)
-                }
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(sidebarCard())
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(.white.opacity(0.06), lineWidth: 1)
-                    )
-            )
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(viewModel.isPaused ? "Session timer \(viewModel.elapsedFormatted), paused" : "Session timer \(viewModel.elapsedFormatted)")
-
-            Spacer(minLength: 8)
-
-            // MARK: Recent Shots Card
-            VStack(spacing: 6) {
-                Text("RECENT")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.25))
-                    .tracking(1.5)
-
-                HStack(spacing: 3) {
-                    ForEach(Array(viewModel.recentShots.enumerated()), id: \.element.id) { index, shot in
-                        let isLatest = index == viewModel.recentShots.count - 1
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(dotColor(for: shot.result))
-                            .frame(width: 16, height: 5)
-                            .shadow(color: isLatest ? dotColor(for: shot.result).opacity(0.5) : .clear,
-                                    radius: isLatest ? 4 : 0)
-                    }
-                }
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(sidebarCard())
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(.white.opacity(0.06), lineWidth: 1)
-                    )
-            )
-
-            Spacer(minLength: 8)
-
-            // MARK: Controls
-            VStack(spacing: 8) {
-                HStack(spacing: 6) {
-                    // Pause / Resume
-                    Button {
-                        viewModel.isPaused ? viewModel.resume() : viewModel.pause()
-                        hapticService.tap()
-                    } label: {
-                        Image(systemName: viewModel.isPaused ? "play.fill" : "pause.fill")
-                            .font(.system(size: 14))
-                            .frame(width: 36, height: 36)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(.white.opacity(0.06))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(.white.opacity(0.1), lineWidth: 1)
-                                    )
-                            )
-                    }
-
-                    // Mid-session breakdown
-                    Button {
-                        hapticService.tap()
-                        showMidSessionBreakdown = true
-                    } label: {
-                        Image(systemName: "chart.bar.fill")
-                            .font(.system(size: 14))
-                            .frame(width: 36, height: 36)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(.white.opacity(0.06))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(.white.opacity(0.1), lineWidth: 1)
-                                    )
-                            )
-                    }
-                }
-                .foregroundStyle(.white.opacity(0.5))
-
-                // End Session
-                HoldToEndButton {
-                    await viewModel.endSession()
-                }
-            }
+            UIApplication.shared.isIdleTimerDisabled = true
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
-        .frame(width: sidebarWidth)
-        .background(
-            LinearGradient(colors: [Color(red: 0.067, green: 0.067, blue: 0.094),
-                                    Color(red: 0.031, green: 0.031, blue: 0.051)],
-                           startPoint: .top, endPoint: .bottom)
-        )
-    }
-
-    // MARK: - Calibration Overlay
-
-    private var calibrationOverlay: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "viewfinder")
-                .font(.system(size: 48))
-                .foregroundStyle(.white)
-            Text("Looking for hoop…")
-                .font(.title2.bold())
-                .foregroundStyle(.white)
-            Text("Point the camera at the rim. Tracking stays locked even if the view shifts.")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.8))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-            ProgressView()
-                .progressViewStyle(.circular)
-                .tint(.white)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black.opacity(0.55))
-    }
-
-    // MARK: - FG% Tint Colour
-
-    /// Briefly tints the FG% text green or red to match the last shot result.
-    private var fgTintColor: Color {
-        switch viewModel.lastShotResult {
-        case .make:    return .green
-        case .miss:    return .red
-        case .pending, .none: return .orange
+        .onDisappear {
+            holder.viewModel?.tearDown()
+            UIApplication.shared.isIdleTimerDisabled = false
         }
     }
 
-    // MARK: - Manual Shot Buttons
-
-    private var manualShotButtons: some View {
-        HStack(spacing: 20) {
-            Button {
-                viewModel.logShot(result: .miss)
-            } label: {
-                Label("Miss", systemImage: "xmark")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(.red.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
-                    .foregroundStyle(.white)
-            }
-            .accessibilityLabel("Miss")
-            .accessibilityHint("Log a missed shot")
-            .accessibilityInputLabels(["Miss", "Missed", "No good"])
-
-            Button {
-                viewModel.logShot(result: .make)
-            } label: {
-                Label("Make", systemImage: "checkmark")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(.green.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
-                    .foregroundStyle(.white)
-            }
-            .accessibilityLabel("Make")
-            .accessibilityHint("Log a made shot")
-            .accessibilityInputLabels(["Make", "Score", "Good shot"])
-        }
-    }
-
-    private func dotColor(for result: ShotResult) -> Color {
-        switch result {
-        case .make:    return .green
-        case .miss:    return .red
-        case .pending: return Color(.systemGray)
-        }
-    }
-
-    // MARK: - Zone Breakdown Rows
-
-    private struct ZoneBreakdownRow {
-        let zone: CourtZone
-        let label: String
-        let fraction: String
-        let pct: String
-        let pctColor: Color
-    }
-
-    private func zoneBreakdown(for session: TrainingSession) -> [ZoneBreakdownRow] {
-        session.zoneStats.map { stat in
-            let pctValue = stat.fgPercent
-            let color: Color
-            switch pctValue {
-            case 60...:  color = .green
-            case 40..<60: color = .orange
-            default:      color = .red
-            }
-            return ZoneBreakdownRow(
-                zone: stat.zone,
-                label: stat.zone.rawValue.uppercased(),
-                fraction: "\(stat.made)/\(stat.attempted)",
-                pct: String(format: "%.0f%%", pctValue),
-                pctColor: color
-            )
-        }
+    /// Lets the view model be built from environment objects on first appear.
+    final class ViewModelHolder: ObservableObject {
+        @Published var viewModel: LiveSessionViewModel?
     }
 }
 
-// MARK: - Mid-Session Breakdown Sheet
-private struct MidSessionBreakdownView: View {
+private struct LiveSessionContent: View {
+
     @ObservedObject var viewModel: LiveSessionViewModel
-    @Environment(\.dismiss) private var dismiss
+    let showDetectionBoxes: Bool
+    let onFinish: (SessionResult?) -> Void
+
+    @EnvironmentObject private var cameraService: CameraService
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    StatCardGrid {
-                        StatCard(title: "FG%",   value: viewModel.fgPercentString)
-                        StatCard(title: "Makes",  value: "\(viewModel.shotsMade)", accent: .green)
-                        StatCard(title: "Misses",
-                                 value: "\(viewModel.shotsAttempted - viewModel.shotsMade)",
-                                 accent: .red)
-                        StatCard(title: "Elapsed", value: viewModel.elapsedFormatted, accent: .blue)
-                    }
-
-                    if let session = viewModel.session, !session.shots.isEmpty {
-                        CourtMapView(shots: session.shots)
-                            .padding(.horizontal)
-                    }
-                }
-                .padding()
-            }
-            .navigationTitle("Session so far")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
+        ZStack {
+            camera
+            ShotFlashOverlay(flash: viewModel.lastShot)
+            hud
+            if viewModel.isPaused { pausedOverlay }
+            if showsHoopCoach { hoopCoach }
         }
-    }
-}
-
-// MARK: - UIViewRepresentable Camera Preview
-struct CameraPreviewView: UIViewRepresentable {
-
-    let captureSession: AVCaptureSession
-    var orientation: CameraOrientation = .landscape
-    /// Observed so updateUIView re-fires when the session actually starts
-    /// running. The preview layer's connection is nil until then, so rotation
-    /// applied in makeUIView is a no-op.
-    var isSessionRunning: Bool = false
-
-    func makeUIView(context: Context) -> PreviewUIView {
-        let view = PreviewUIView()
-        view.previewLayer.session      = captureSession
-        view.previewLayer.videoGravity  = .resizeAspectFill
-        applyRotation(to: view.previewLayer)
-        return view
-    }
-
-    func updateUIView(_ uiView: PreviewUIView, context: Context) {
-        applyRotation(to: uiView.previewLayer)
-    }
-
-    private func applyRotation(to layer: AVCaptureVideoPreviewLayer) {
-        if let connection = layer.connection {
-            let angle = orientation.videoRotationAngle
-            if connection.isVideoRotationAngleSupported(angle) {
-                connection.videoRotationAngle = angle
-            }
+        .task { await viewModel.start(showDetectionBoxes: showDetectionBoxes) }
+        .onChange(of: viewModel.timeIsUp) { _, up in
+            if up { finish() }
+        }
+        .onChange(of: cameraService.permissionStatus) { _, _ in
+            viewModel.cameraPermissionChanged()
+        }
+        .alert("Couldn't save", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.errorMessage ?? "")
         }
     }
 
-    final class PreviewUIView: UIView {
-        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-        var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    private func finish() {
+        Task {
+            let result = await viewModel.end()
+            onFinish(result)
+        }
+    }
+
+    // MARK: - Camera layer
+
+    @ViewBuilder
+    private var camera: some View {
+        if cameraService.permissionStatus == .authorized {
+            CameraPreviewView(captureSession: cameraService.captureSession,
+                              orientation: .landscape,
+                              isSessionRunning: cameraService.isSessionRunning)
+                .ignoresSafeArea()
+            HoopBracket(rect: viewModel.hoopRect, isTracking: viewModel.hoopStatus == .tracking)
+                .ignoresSafeArea()
+            if showDetectionBoxes {
+                BallBoxOverlay(box: viewModel.ballBox).ignoresSafeArea()
+            }
+        } else {
+            Color.court.ignoresSafeArea()
+            CameraPermissionView(compact: true)
+        }
+    }
+
+    // MARK: - HUD
+
+    private var hud: some View {
+        VStack {
+            HStack(alignment: .top) {
+                scoreBlock
+                Spacer()
+                statusPill
+                Spacer()
+                clockBlock
+            }
+            Spacer()
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 12) {
+                    recentStrip
+                    HoldToEndButton(isBusy: viewModel.phase == .ending) { finish() }
+                }
+                Spacer()
+                shotButtons
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+    }
+
+    private var scoreBlock: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text("\(viewModel.makes)")
+                    .font(.score(56))
+                Text("/\(viewModel.attempts)")
+                    .font(.score(32))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            if let fg = viewModel.fgPercent {
+                Text("\(Int(fg.rounded()))%")
+                    .font(.score(28))
+                    .foregroundStyle(Color.shooting(fg))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(viewModel.makes) makes from \(viewModel.attempts) shots")
+    }
+
+    private var statusPill: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+            Text(statusText)
+                .font(.footnote.weight(.semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.5), in: Capsule())
+        .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var statusText: String {
+        if viewModel.shotInFlight { return "Shot in the air" }
+        switch viewModel.hoopStatus {
+        case .manual:    return "Manual scoring"
+        case .searching: return "Finding the hoop"
+        case .tracking:  return "Tracking"
+        case .lost:      return "Hoop out of view"
+        }
+    }
+
+    private var statusColor: Color {
+        if viewModel.shotInFlight { return .leather }
+        switch viewModel.hoopStatus {
+        case .manual:    return .white.opacity(0.5)
+        case .searching: return .leather
+        case .tracking:  return .make
+        case .lost:      return .miss
+        }
+    }
+
+    private var clockBlock: some View {
+        HStack(spacing: 10) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(clockText(at: context.date))
+                    .font(.score(32))
+                    .foregroundStyle(.white)
+            }
+            Button {
+                viewModel.togglePause()
+            } label: {
+                Image(systemName: viewModel.isPaused ? "play.fill" : "pause.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Color.white.opacity(0.15), in: Circle())
+            }
+            .accessibilityLabel(viewModel.isPaused ? "Resume" : "Pause")
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.5), in: Capsule())
+    }
+
+    private func clockText(at date: Date) -> String {
+        let elapsed = viewModel.activeElapsed(at: date)
+        if let limit = viewModel.timeLimit {
+            return max(0, limit - elapsed).clockText
+        }
+        return elapsed.clockText
+    }
+
+    private var recentStrip: some View {
+        HStack(spacing: 5) {
+            ForEach(Array(viewModel.recentResults.enumerated()), id: \.offset) { _, result in
+                Circle()
+                    .fill(result.color)
+                    .frame(width: 10, height: 10)
+            }
+        }
+        .frame(height: 10)
+        .accessibilityHidden(true)
+    }
+
+    private var shotButtons: some View {
+        let manual = viewModel.hoopStatus == .manual || viewModel.skippedHoopSearch
+        let size: CGFloat = manual ? 76 : 58
+        return HStack(spacing: 14) {
+            Button {
+                viewModel.undoLast()
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 44, height: 44)
+                    .background(Color.black.opacity(0.5), in: Circle())
+            }
+            .disabled(viewModel.attempts == 0)
+            .opacity(viewModel.attempts == 0 ? 0.4 : 1)
+            .accessibilityLabel("Undo last shot")
+
+            roundButton("Miss", systemImage: "xmark", color: .miss, size: size) {
+                viewModel.logManual(.miss)
+            }
+            roundButton("Make", systemImage: "checkmark", color: .make, size: size) {
+                viewModel.logManual(.make)
+            }
+        }
+        .foregroundStyle(.white)
+        .disabled(viewModel.phase != .live || viewModel.isPaused)
+    }
+
+    private func roundButton(_ title: String, systemImage: String, color: Color,
+                             size: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.36, weight: .heavy))
+                .foregroundStyle(Color.onLeather)
+                .frame(width: size, height: size)
+                .background(color, in: Circle())
+                .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        }
+        .buttonStyle(.pressable)
+        .accessibilityLabel(title)
+        .accessibilityInputLabels([title, title == "Make" ? "Score" : "Missed"])
+    }
+
+    // MARK: - Overlays
+
+    private var showsHoopCoach: Bool {
+        viewModel.phase == .live && viewModel.hoopStatus == .searching
+            && !viewModel.skippedHoopSearch && cameraService.permissionStatus == .authorized
+    }
+
+    /// First-run guidance until the rim is found. The camera stays visible
+    /// so you can aim; dismiss to score by hand.
+    private var hoopCoach: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "viewfinder")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(Color.leather)
+            Text("Point the camera at the hoop")
+                .font(.title3.bold())
+            Text("Phone sideways and steady, behind where you shoot. The whole rim should be in view.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.75))
+                .multilineTextAlignment(.center)
+            Button("Score by hand instead") {
+                viewModel.skippedHoopSearch = true
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.leather)
+            .padding(.top, 4)
+        }
+        .foregroundStyle(.white)
+        .padding(24)
+        .frame(maxWidth: 380)
+        .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .transition(.opacity)
+    }
+
+    private var pausedOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+            VStack(spacing: 16) {
+                Text("PAUSED")
+                    .font(.score(48))
+                    .foregroundStyle(.white)
+                Button {
+                    viewModel.togglePause()
+                } label: {
+                    Label("Resume", systemImage: "play.fill")
+                        .frame(width: 200)
+                }
+                .buttonStyle(.primary)
+                .frame(width: 220)
+            }
+        }
     }
 }

@@ -1,18 +1,16 @@
 // HoopTrack/Services/CourtCalibrationService.swift
-// Tracks the basketball rim on a per-frame basis using detections from the
-// ML ball detector's `basket` class. Replaces the earlier rectangle-heuristic
-// approach (VNDetectRectanglesRequest + 10-frame lock), which couldn't tell
-// a hoop from a poster and never recovered from camera movement.
+// Tracks the rim per frame using the detector's hoop class, smoothed by
+// HoopRectSmoother (EMA, 0.5 s lost timeout). Runs on the camera queue.
 
 import AVFoundation
 import CoreGraphics
 
 nonisolated enum CalibrationState: Sendable, Equatable {
-    /// No basket has been seen yet.
+    /// No hoop has been seen yet.
     case looking
-    /// Basket is currently in-frame and the smoother has a rect.
+    /// Hoop is in frame and the smoother has a rect.
     case tracking(hoopRect: CGRect)
-    /// Recently lost tracking — last-known rect is still available as a fallback.
+    /// Briefly lost — last-known rect stays usable as a fallback.
     case lost(lastKnownHoopRect: CGRect)
 
     var isTracking: Bool {
@@ -20,42 +18,31 @@ nonisolated enum CalibrationState: Sendable, Equatable {
         return false
     }
 
-    /// Either the live tracked rect or the last-known one during a temporary drop-out.
+    /// The live rect, or the last-known one during a short drop-out.
     var hoopRect: CGRect? {
         switch self {
-        case .looking:                       return nil
-        case .tracking(let r):               return r
-        case .lost(let r):                   return r
+        case .looking:         return nil
+        case .tracking(let r): return r
+        case .lost(let r):     return r
         }
     }
 }
 
 nonisolated final class CourtCalibrationService {
 
-    // MARK: - State
     private(set) var state: CalibrationState = .looking
     private var smoother: HoopRectSmoother
-
-    /// Callback fired on main thread when state changes — observed by LiveSessionViewModel.
-    var onStateChange: (@Sendable (CalibrationState) -> Void)?
-
-    // MARK: - Init
 
     init(smoother: HoopRectSmoother = HoopRectSmoother()) {
         self.smoother = smoother
     }
 
-    // MARK: - Lifecycle
-
     func reset() {
         smoother.reset()
-        transition(to: .looking)
+        state = .looking
     }
 
-    // MARK: - Per-Frame Input
-    // Called on the camera's sessionQueue with the basket detection for this frame
-    // (nil when no basket was detected).
-
+    /// Called once per frame with that frame's hoop detection (nil if none).
     func updateBasket(_ basket: BallDetection?, timestamp: CMTime) {
         let ts = CMTimeGetSeconds(timestamp)
         if let basket {
@@ -64,47 +51,10 @@ nonisolated final class CourtCalibrationService {
             smoother.updateNoDetection(timestamp: ts)
         }
 
-        let next: CalibrationState
         switch smoother.state {
-        case .looking:
-            next = .looking
-        case .tracking:
-            next = .tracking(hoopRect: smoother.smoothedRect ?? .zero)
-        case .lost:
-            next = .lost(lastKnownHoopRect: smoother.smoothedRect ?? .zero)
-        }
-
-        if next != state { transition(to: next) }
-    }
-
-    // MARK: - Court Coordinate Mapping
-
-    /// Maps a ball bounding box (Vision normalised coords) to normalised court position (0–1).
-    /// Uses the current or last-known hoop rect. Returns nil only when no rim has ever been seen.
-    func courtPosition(for ballBox: CGRect) -> (courtX: Double, courtY: Double)? {
-        guard let hoopRect = state.hoopRect else { return nil }
-
-        let ballCX = ballBox.midX
-        let ballCY = ballBox.midY
-
-        // Horizontal: positive offset from hoop centre maps to court right
-        let rawX = (ballCX - hoopRect.midX) / hoopRect.width * 0.5 + 0.5
-        // Vertical: ball below hoop (lower Y in Vision) = closer to baseline (lower courtY)
-        let rawY = max(0, hoopRect.midY - ballCY) / hoopRect.height * 0.5
-
-        return (
-            courtX: Double(rawX).clamped(to: 0...1),
-            courtY: Double(rawY).clamped(to: 0...1)
-        )
-    }
-
-    // MARK: - Private
-
-    private func transition(to newState: CalibrationState) {
-        state = newState
-        let callback = onStateChange
-        Task { @MainActor in
-            callback?(newState)
+        case .looking:  state = .looking
+        case .tracking: state = .tracking(hoopRect: smoother.smoothedRect ?? .zero)
+        case .lost:     state = .lost(lastKnownHoopRect: smoother.smoothedRect ?? .zero)
         }
     }
 }

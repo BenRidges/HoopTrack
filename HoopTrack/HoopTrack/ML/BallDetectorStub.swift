@@ -14,7 +14,7 @@ nonisolated final class BallDetectorStub: BallDetectorProtocol {
     // Vision coords: origin bottom-left, so y = 0.73 is near the top.
     private let fakeBasket = CGRect(x: 0.45, y: 0.73, width: 0.10, height: 0.08)
 
-    func detectScene(buffer: CMSampleBuffer) -> SceneDetection? {
+    func detectScene(buffer: CMSampleBuffer, region: CGRect?) -> SceneDetection? {
         let timestamp = CMSampleBufferGetPresentationTimeStamp(buffer)
         frameCount += 1
 
@@ -40,6 +40,6 @@ nonisolated final class BallDetectorStub: BallDetectorProtocol {
             frameTimestamp: timestamp
         )
 
-        return SceneDetection(ball: ball, basket: basket, frameTimestamp: timestamp)
+        return SceneDetection(balls: ball.map { [$0] } ?? [], basket: basket, frameTimestamp: timestamp)
     }
 }

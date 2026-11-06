@@ -98,36 +98,4 @@ final class AuthViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state, .unauthenticated)
         XCTAssertEqual(mock.signOutCount, 1)
     }
-
-    // MARK: - Locking
-
-    func test_lock_movesAuthenticatedUser_toLockedState() async {
-        let user = AuthUser(id: UUID(), email: "a@b.co", emailVerified: true, createdAt: Date())
-        let mock = MockAuthProvider()
-        mock.scriptedRestoreResult = .success(user)
-        let vm = AuthViewModel(provider: mock)
-        await vm.restore()
-
-        vm.lock()
-        XCTAssertEqual(vm.state, .locked(user))
-    }
-
-    func test_lock_fromUnauthenticated_isNoop() async {
-        let vm = AuthViewModel(provider: MockAuthProvider())
-        vm.lock()
-        XCTAssertEqual(vm.state, .unauthenticated)
-    }
-
-    func test_unlock_movesLockedUser_toAuthenticated() async {
-        let user = AuthUser(id: UUID(), email: "a@b.co", emailVerified: true, createdAt: Date())
-        let mock = MockAuthProvider()
-        mock.scriptedRestoreResult = .success(user)
-        let vm = AuthViewModel(provider: mock)
-        await vm.restore()
-        vm.lock()
-
-        vm.unlock()
-
-        XCTAssertEqual(vm.state, .authenticated(user))
-    }
 }

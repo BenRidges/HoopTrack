@@ -1,80 +1,45 @@
 // CameraPermissionView.swift
-// Shown when camera access has been denied or not yet requested.
-// Provides context and a button to open Settings.
+// Shown in place of the camera when access hasn't been granted.
 
 import SwiftUI
+import UIKit
 import AVFoundation
 
 struct CameraPermissionView: View {
-
-    @EnvironmentObject var cameraService: CameraService
-    @State private var isRequesting = false
+    var compact = false
+    @EnvironmentObject private var cameraService: CameraService
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
+        VStack(spacing: 12) {
             Image(systemName: "camera.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.orange)
-
-            VStack(spacing: 8) {
-                Text("Camera Access Required")
-                    .font(.title2.bold())
-
-                Text("HoopTrack uses your camera to automatically track shots, analyse your form, and map your shooting locations in real time. No footage ever leaves your device.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-
-            switch cameraService.permissionStatus {
-
-            case .notDetermined:
-                Button {
-                    isRequesting = true
-                    Task {
-                        await cameraService.requestPermission()
-                        isRequesting = false
+                .font(.system(size: compact ? 28 : 40, weight: .semibold))
+                .foregroundStyle(Color.leather)
+            Text("Camera access is off")
+                .font(compact ? .headline : .title3.bold())
+            Text(cameraService.permissionStatus == .denied
+                 ? "Turn it on in Settings to track shots automatically. You can still score by hand."
+                 : "HoopTrack needs the camera to see the ball and the hoop. Video stays on this phone.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+            Button(cameraService.permissionStatus == .denied ? "Open Settings" : "Allow camera") {
+                if cameraService.permissionStatus == .denied {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
                     }
-                } label: {
-                    Label("Allow Camera Access", systemImage: "camera")
-                        .frame(maxWidth: 280)
+                } else {
+                    Task { await cameraService.requestPermission() }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-                .disabled(isRequesting)
-
-            case .denied, .restricted:
-                VStack(spacing: 12) {
-                    Text("Camera access was denied.")
-                        .foregroundStyle(.red)
-                        .font(.subheadline)
-
-                    Button {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        Label("Open Settings", systemImage: "gear")
-                            .frame(maxWidth: 280)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
-                }
-
-            default:
-                EmptyView()
             }
-
-            Spacer()
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.leather)
+            .padding(.top, 4)
         }
-        .padding()
+        .padding(24)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { cameraService.refreshPermission() }
+        }
     }
-}
-
-#Preview {
-    CameraPermissionView()
-        .environmentObject(CameraService())
 }

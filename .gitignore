@@ -17,3 +17,6 @@ __pycache__/
 
 # (Model-training Python tooling now lives in the sibling
 # hooptrack-ball-detection/ repo — it has its own .gitignore.)
+
+# SwiftPM build output (Tools/HoopTrackCore)
+.build/

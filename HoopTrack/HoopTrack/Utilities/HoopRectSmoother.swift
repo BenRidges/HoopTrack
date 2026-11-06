@@ -3,7 +3,7 @@
 // Stateless-ish — holds only the last smoothed rect + last-seen timestamp.
 // Replaces the 10-frame-accumulation lock in the previous CourtCalibrationService.
 
-import CoreGraphics
+import Foundation
 
 nonisolated struct HoopRectSmoother: Sendable {
 

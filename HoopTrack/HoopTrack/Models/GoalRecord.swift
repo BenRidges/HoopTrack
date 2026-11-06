@@ -60,12 +60,16 @@ final class GoalRecord {
 
     /// Progress from 0.0 to 1.0 (clamped).
     var progressFraction: Double {
-        guard targetValue != baselineValue else { return isAchieved ? 1 : 0 }
+        if isAchieved { return 1 }
+        guard targetValue != baselineValue, currentValue.isFinite else { return 0 }
         let fraction = (currentValue - baselineValue) / (targetValue - baselineValue)
-        return max(0, min(1, fraction))
+        return fraction.isFinite ? max(0, min(1, fraction)) : 0
     }
 
-    var progressPercent: Int { Int(progressFraction * 100) }
+    var progressPercent: Int {
+        let p = progressFraction
+        return p.isFinite ? Int(p * 100) : 0
+    }
 
     var daysRemaining: Int? {
         guard let target = targetDate else { return nil }
@@ -75,7 +79,7 @@ final class GoalRecord {
 
 // MARK: - GoalMetric
 /// The specific numeric measurement a goal is based on.
-enum GoalMetric: String, Codable, CaseIterable, Identifiable {
+nonisolated enum GoalMetric: String, Codable, CaseIterable, Identifiable {
     case fgPercent          = "FG %"
     case threePointPercent  = "3PT %"
     case freeThrowPercent   = "FT %"
@@ -87,6 +91,24 @@ enum GoalMetric: String, Codable, CaseIterable, Identifiable {
     case sessionsPerWeek    = "Sessions / Week"
 
     var id: String { rawValue }
+
+    /// Shuttle times improve downwards; everything else upwards.
+    var lowerIsBetter: Bool { self == .shuttleRunSeconds }
+
+    /// Short UI label (rawValue is a persistence/sync key).
+    var displayName: String {
+        switch self {
+        case .fgPercent:         return "Field goal %"
+        case .threePointPercent: return "Three-point %"
+        case .freeThrowPercent:  return "Free throw %"
+        case .verticalJumpCm:    return "Vertical jump"
+        case .dribbleSpeedHz:    return "Dribble speed"
+        case .shuttleRunSeconds: return "Shuttle run"
+        case .overallRating:     return "Overall rating"
+        case .shootingRating:    return "Shooting rating"
+        case .sessionsPerWeek:   return "Sessions a week"
+        }
+    }
 
     var unit: String {
         switch self {

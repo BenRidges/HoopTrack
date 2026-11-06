@@ -16,44 +16,69 @@ xcodebuild test -project HoopTrack.xcodeproj -scheme HoopTrack \
   -only-testing:HoopTrackTests/ShotScienceCalculatorTests
 ```
 
-Minimum deployment target: **iOS 16.0**. SwiftData is iOS 17+; the app uses a Core Data fallback for iOS 16.
+Minimum deployment target: **iOS 17.0** (SwiftData, `onChange(of:_:)` two-parameter form, `ContentUnavailableView`).
+
+### Pure logic without a simulator
+
+`Tools/HoopTrackCore` (repo root) is a Swift package built from symlinks to the app's Foundation-only sources (`ShotTracker`, `BallFilter`, `DetectionRegion`, `ShotGeometry`, `CourtZoneClassifier`, `StreakCalculator`, `BoxScore`, `DribbleCalculator`, `HoopRectSmoother`, `InputValidator`, `SkillRatingCalculator`, `Constants`, `Models/Enums`, …) and their tests. It works on macOS or Linux:
+
+```bash
+cd ../Tools/HoopTrackCore
+swift test                                        # pure-logic tests, seconds
+swift run shot-eval detections.jsonl labels.csv   # replay a session log through ShotTracker and score it
+```
+
+When adding pure logic, keep the file free of SwiftUI/UIKit/CoreGraphics imports, mark its types `nonisolated`, and add a symlink for it (and its test) in the package so it's covered there too.
 
 ## Architecture
 
-**MVVM + SwiftData + Combine.** All ViewModels and services are `@MainActor final class` with `@Published` properties. `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is set project-wide.
+**MVVM + SwiftData + Combine.** `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is set project-wide, so view models and services are main-actor by default. Pure value types and anything that runs on the camera queue must be marked `nonisolated` (all enums in `Models/Enums.swift` are).
+
+### App shell
+
+- **`HoopTrackApp`** builds one **`AppServices`** (every long-lived service, created from `HoopTrackStore.shared`) and injects it with `.appEnvironment(services, auth:)`. UIKit-hosted content (the landscape session) needs `.appEnvironment` applied again.
+- **`RootView`** — onboarding, then three tabs: **Train**, **Progress**, **Profile**. Every training session is presented full screen from here by setting `AppState.activeLaunch`; the summary sheet appears after the cover has dismissed (`AppState.finishSession` → `sessionCoverDismissed`).
+- **`HoopTrackStore`** is the only place a `ModelContainer` is built (app, intents, tests via `makeInMemoryContainer()`). Never open a container with a partial schema.
+- **`AppPreferences`** holds the `@AppStorage` keys and static readers for services. All opt-ins (app lock, Apple Health, telemetry sharing, reminder) default to off.
 
 ### Data layer
 
-- **`Models/`** — SwiftData `@Model` classes: `PlayerProfile`, `TrainingSession`, `ShotRecord`, `GoalRecord`, `EarnedBadge`. All enums live in `Models/Enums.swift`.
-- **`Services/DataService.swift`** — Single SwiftData abstraction. All persistence goes through here. Has `finaliseSession()` / `finaliseDribbleSession()` entry points; post-session work (goal updates, skill rating recalc) is delegated to `SessionFinalizationCoordinator` (Phase 5).
-- **`TrainingSession.recalculateStats()`** — Call after modifying `shots`; caches aggregate FG%, Shot Science averages, consistency score.
+- **`Models/`** — SwiftData `@Model` classes: `PlayerProfile`, `TrainingSession`, `ShotRecord`, `GoalRecord`, `EarnedBadge`, `GameSession`, `GamePlayer`, `GameShotRecord`, `TelemetryUpload`. All enums live in `Models/Enums.swift`.
+- **`Services/DataService.swift`** — all persistence goes through here. It bumps a published `revision` on every save; tabs reload on `onChange(of: dataService.revision)`.
+- **`SessionFinalizationCoordinator`** — every session type ends through one pipeline: goals → Health (if enabled) → skill ratings → badges → reminders → sync → telemetry (if enabled).
+- **`TrainingSession.recalculateStats()`** — call after modifying `shots`.
 
-### CV pipeline
+### Shot tracking
 
-The computer vision stack runs on a background `sessionQueue`. Results are dispatched to main actor for UI/model updates.
+All per-frame work runs on the camera's session queue; results reach the main actor through `@MainActor` delegate protocols. See `docs/cv-review-2026-11.md` at the repo root for the design and the improvement plan.
 
-- **`CameraService`** — AVCaptureSession lifecycle, `framePublisher: AnyPublisher<CMSampleBuffer, Never>`
-- **`CVPipeline`** — Shot detection state machine: `idle → tracking → release_detected → resolved`. Subscribes to `framePublisher`.
-- **`CourtCalibrationService`** — ML-based rim tracking via the detector's `basket` class, smoothed per-frame by `HoopRectSmoother` (EMA, 0.5s lost-timeout). Emits `looking / tracking(hoopRect) / lost(hoopRect)`. Court position normalised to 0–1 half-court space via `courtPosition(for:)`.
-- **`PoseEstimationService`** — Vision body pose for Shot Science metrics (Phase 3, rear camera)
-- **`DribblePipeline`** — Hand tracking for dribble drills (Phase 4, front camera)
+- **`CameraService`** — `AVCaptureSession`, 720p at 60 fps where available, `framePublisher`. Live shooting is landscape-right only (capture is fixed at 0°).
+- **`CVPipeline`** — frame → `SessionRecorder` (HEVC video) → detector → `CourtCalibrationService` (smoothed hoop) → `ShotTracker` → `CourtPositionEstimator` + `ShotPhysics` → `ShotPipelineDelegate`.
+- **`ShotTracker`** (`Utilities/`) — pure make/miss state machine, unit tested. Tracks every ball between shots; from release a `BallFilter` (Kalman) picks the shot ball each frame. Tune via `ShotTracker.Tuning`, measured with `shot-eval`.
+- **`DetectionRegion`** — while a shot is in flight the detector runs on a crop around hoop + ball (`HoopTrack.CV.focusDuringShots`).
+- **`ShotGeometry`** — distance from apparent ball/rim size and the camera FOV; launch angle from flight time.
+- **`DribblePipeline`** — body-pose wrists + `WristBounceDetector` (front camera, portrait).
+- Manual Make / Miss / Undo are always available; low-confidence calls are stored with `needsReview` and flagged in the summary.
 
 ### Constants
 
-All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums: `HoopTrack.Camera`, `HoopTrack.CourtGeometry`, `HoopTrack.ShotScience`, `HoopTrack.Dribble`, `HoopTrack.SkillRating`, etc.
+All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums: `HoopTrack.Camera`, `HoopTrack.CV`, `HoopTrack.ShotScience`, `HoopTrack.Dribble`, `HoopTrack.SkillRating`, etc. Court dimensions (feet) are in `CourtGeometry` (`Utilities/CourtZoneClassifier.swift`).
+
+### Design system
+
+`Design/Theme.swift` — dark "gym at night" palette (`Color.court`, `.panel`, `.leather`, `.make`, `.miss`), `Font.score(_:)` for numbers, `Panel`, `SectionLabel`, `StatValue`, button styles `.primary` / `.secondary` / `.pressable`, and `courtBackground()` / `courtList()`. Use these instead of ad-hoc colours and cards; keep screens to one clear primary action.
 
 ### Navigation
 
-`HoopTrackApp` → `CoordinatorHost` → `TabView` with 4 `NavigationStack` tabs: **Home**, **Train**, **Progress**, **Profile**.
-
-The Train tab hosts the main live session flow:
-1. `TrainTabView` — drill picker grid, routes to `LiveSessionView` (shot/dribble) or `AgilityDrillView` (agility) via `fullScreenCover`
-2. Live session ends → `DataService.finalise*()` → `SessionFinalizationCoordinator` → `SessionSummaryView`
+- **Train** — start shooting (hero), this week, drill library (`NamedDrill.library`), pickup game, last session.
+- **Progress** — FG% for a range with trend, shot chart, zones, skills, goals, badges, history, games.
+- **Profile** — career numbers and every setting (training, cloud backup, privacy, developer).
+- Sessions: `LiveSessionView` (landscape, via `LandscapeContainer`), `DribbleDrillView`, `AgilitySessionView`, `GameFlowView`. Each ends with `onFinish(SessionResult?)`; nil means nothing worth keeping (empty sessions are discarded).
 
 ### App Intents & Deep Links
 
 - **`AppIntents/`** — Siri Shortcuts: `StartFreeShootSessionIntent`, `ShowMyStatsIntent`, `ShotsTodayIntent`. `HoopTrackShortcuts` is the single registration point — adding a new shortcut requires only a new file + one line there.
-- **`AppState`** — handles `hooptrack://` URL scheme routing via `.onOpenURL` in `HoopTrackApp`. Add new routes as `AppRoute` enum cases.
+- **`AppState.handleDeepLink`** — `hooptrack://shoot` starts a session; `train` / `progress` / `profile` select a tab. `hooptrack://auth/...` goes to `AuthViewModel` instead.
 
 ### Services (added Phase 6A)
 
@@ -66,14 +91,15 @@ The Train tab hosts the main live session flow:
 - **`Utilities/InputValidator.swift`** — Pure `enum` with static validators. Call before persisting any sensor value or user string: `isValidReleaseAngle`, `isValidJumpHeight`, `isValidCourtCoordinate`, `sanitisedProfileName`.
 - **`Utilities/PinningURLSessionDelegate.swift`** — SPKI SHA-256 cert pinning (real Supabase hashes live since Phase 9). **Delegate is not yet wired into supabase-swift's URLSession — the pins are scenery until that happens.** Tracked P0 in `docs/production-readiness.md`.
 - **`PrivacyInfo.xcprivacy`** — App Store privacy manifest. Auto-discovered by Xcode 26. No pbxproj edits needed.
-- **`DataService.deleteAllUserData()`** — GDPR right-to-delete. Clears SwiftData records, `Documents/Sessions/` files, Keychain, and all known UserDefaults keys.
+- **`DataService.deleteAllUserData()`** — GDPR right-to-delete. Deletes every SwiftData record (all nine models), session videos, telemetry files, exports, the Keychain, and every key in `AppPreferences.allKeys`.
 
 ### Auth layer (added Phase 8)
 
-- **`Auth/`** — Supabase email+password auth. `AuthViewModel` (state machine: `unauthenticated / authenticating / authenticated / locked / error`), `AuthProviding` protocol (real impl `SupabaseAuthProvider`, `MockAuthProvider` in tests), `SupabaseContainer` (lazy `AuthClient` + `postgrest()` builder), `BiometricService` (Face ID / Touch ID unlock after `HoopTrack.Auth.backgroundLockTimeoutSec` — default 60s), `BackendSecrets.swift` (gitignored; copy from `BackendSecrets.swift.example` and fill in Supabase URL + anon key).
-- **`Views/Auth/`** — `AuthGate` wraps `CoordinatorHost`, routing between `SignInView` / `SignUpView` / `VerifyEmailView` / `LockedView` based on `AuthState`.
-- **`PlayerProfile.supabaseUserID`** — set on every authenticated restore by `CoordinatorHost.onChange`; canonical key for RLS `auth.uid()` matching in Phase 9.
-- **Sign in with Apple is intentionally skipped.** Email-only is App Store compliant when no other social provider is offered. Can be added later as another `AuthProviding` impl without touching the view model.
+- **Accounts are optional.** The app works fully offline; signing in (Profile → Cloud backup → `AccountSheet`) only adds Supabase sync.
+- **`Auth/`** — Supabase email+password. `AuthViewModel` (state: `unauthenticated / authenticating / authenticated / error`), `AuthProviding` protocol (`SupabaseAuthProvider`, `MockAuthProvider` in tests), `SupabaseContainer`, `BackendSecrets.swift` (gitignored; copy from `BackendSecrets.swift.example` and fill in Supabase URL + anon key).
+- **`AppLock`** — optional Face ID / passcode lock, independent of signing in. Re-locks after `HoopTrack.Auth.backgroundLockTimeoutSec` in the background; `LockedView` overlays `RootView`.
+- **`PlayerProfile.supabaseUserID`** — linked in `HoopTrackApp` when a verified user is restored, unlinked only on explicit sign-out; canonical key for RLS `auth.uid()` matching.
+- **Sign in with Apple is intentionally skipped.** Email-only is App Store compliant when no other social provider is offered.
 
 ### Sync layer (added Phase 9)
 
@@ -85,7 +111,7 @@ The Train tab hosts the main live session flow:
 
 ## Testing conventions
 
-Tests live in `HoopTrackTests/`. All existing tests cover **pure functions only** — calculators, classifiers, state machines. No mocks of services or SwiftData. Tests are `XCTestCase` subclasses using `@testable import HoopTrack`.
+Tests live in `HoopTrackTests/`. Most cover **pure functions** — calculators, classifiers, the `ShotTracker` state machine (synthetic trajectories). `DataService` tests use `HoopTrackStore.makeInMemoryContainer()`; don't build containers with a partial schema. Tests are `XCTestCase` subclasses using `@testable import HoopTrack`.
 
 When adding new pure logic (calculators, services that take value-type inputs), write a corresponding test file following the same pattern as `ShotScienceCalculatorTests.swift`.
 
@@ -102,13 +128,13 @@ When adding new pure logic (calculators, services that take value-type inputs), 
 - **Normalised court coordinates.** Shot positions are stored as 0–1 fractions of half-court space, not screen pixels.
 - **`AgilityAttempt` is in-session only** — not persisted. Aggregates (`bestShuttleRunSeconds`, `bestLaneAgilitySeconds`, `avgVerticalJumpCm`) go on `TrainingSession`.
 - **Phase gating in comments.** Code sections are annotated `// Phase N —` to indicate when they were introduced. Don't remove these.
-- **Portrait by default.** The app is portrait-locked except for `LiveSessionView`, which forces landscape via `LandscapeHostingController`. The `OrientationLock` flag in `HoopTrackApp.swift` gates which orientations the AppDelegate allows. CV coordinate mapping uses `CameraOrientation.landscape` (videoRotationAngle = 0°) during live sessions.
-- **Video storage.** Session videos go to `Documents/Sessions/<uuid>.mov`. Auto-deleted after `HoopTrack.Storage.defaultVideoRetainDays` (60) days unless `videoPinnedByUser = true`.
+- **Portrait by default.** The app is portrait-locked except for `LiveSessionView`, which forces landscape-right via `LandscapeHostingController`. The `OrientationLock.mode` flag in `HoopTrackApp.swift` gates which orientations the AppDelegate allows. Capture uses `CameraOrientation.landscape` (videoRotationAngle = 0°), so the other landscape would turn the picture — and the tracker's "up" — upside down.
+- **Video storage.** `SessionRecorder` writes session videos to `Documents/Sessions/<uuid>.mov`. Auto-deleted after the profile's retention setting (default `HoopTrack.Storage.defaultVideoRetainDays`) unless `videoPinnedByUser = true`.
 - **Swift 6 async pattern.** Never use `DispatchQueue.main.async` inside `@MainActor` classes — use `Task { @MainActor in }` instead. The project targets strict concurrency compliance.
 - **Sensitive data in Keychain only.** Auth tokens, user IDs, and API keys go in `KeychainService`. `UserDefaults` and `@AppStorage` are for non-sensitive UI preferences only.
 - **Validate before persisting.** All sensor values (release angle, jump height, court coordinates) and user-provided strings must pass `InputValidator` checks before writing to SwiftData or sending to any API.
 - **File protection on sensitive files.** Session videos (`Documents/Sessions/`) and exported JSON must have `FileProtectionType.complete`. `HoopTrackApp` re-applies this at launch.
-- **`DetectionOverlay` is a temporary debug aid.** Shows green rim + orange ball boxes over the camera preview. Slated for removal once CV detection is verified end-to-end on device.
+- **Detection boxes are a developer toggle** (Profile → Developer → Show detection boxes); the hoop bracket is always shown.
 - **Phase plan.** See `docs/ROADMAP.md` (at the **repo root**, not `HoopTrack/docs/`) for the full implementation roadmap. `docs/production-readiness.md` tracks what must land before App Store submission.
 
 ## Parallel Agent Dispatch
@@ -145,7 +171,7 @@ Copy the relevant block into agent prompts:
 
 ```
 # iOS app context
-SwiftUI + SwiftData + Combine, iOS 16+, MVVM, @MainActor final class ViewModels,
+SwiftUI + SwiftData + Combine, iOS 17+, MVVM, @MainActor final class ViewModels,
 SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor.
 Key services: DataService, SessionFinalizationCoordinator, CameraService, CVPipeline,
 SyncCoordinator, AuthViewModel.

@@ -1,164 +1,100 @@
 // HoopTrack/Views/Train/SessionReplayView.swift
-// Full-screen video replay with shot timeline markers and per-shot Shot Science overlay.
+// Session video with a shot strip underneath: tap a shot to jump to it.
+// Standard player controls, so scrubbing and AirPlay just work.
 
 import SwiftUI
 import AVKit
+import AVFoundation
 
 struct SessionReplayView: View {
     let session: TrainingSession
     @Environment(\.dismiss) private var dismiss
-
-    @State private var player:         AVPlayer?
-    @State private var currentTimeSec: Double  = 0
-    @State private var selectedShot:   ShotRecord? = nil
-    @State private var timeObserver:   Any?
-    @State private var duration:       Double  = 0
+    @State private var player: AVPlayer?
+    @State private var selected: ShotRecord.ID?
 
     private var timedShots: [ShotRecord] {
-        session.shots
-            .filter { $0.videoTimestampSeconds != nil && $0.result != .pending }
-            .sorted { $0.sequenceIndex < $1.sequenceIndex }
+        session.orderedShots.filter { $0.videoTimestampSeconds != nil && $0.result != .pending }
     }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            if let player {
-                VideoPlayerView(player: player)
-                    .ignoresSafeArea()
-            }
-
-            VStack {
+        VStack(spacing: 0) {
+            HStack {
+                Text(session.title)
+                    .font(.headline)
                 Spacer()
-                if let shot = selectedShot {
-                    ShotScienceCard(shot: shot)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 80)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 34, height: 34)
+                        .background(Color.panelRaised, in: Circle())
+                }
+                .accessibilityLabel("Close")
+            }
+            .padding(.horizontal, Metrics.screenPadding)
+            .padding(.vertical, 12)
+
+            Group {
+                if let player {
+                    VideoPlayer(player: player)
+                } else {
+                    ContentUnavailableView("Video unavailable",
+                                           systemImage: "video.slash",
+                                           description: Text("It may have been deleted to save space."))
                 }
             }
-            .animation(.spring(response: 0.35), value: selectedShot?.id)
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .background(Color.black)
 
-            VStack {
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.white.opacity(0.85))
-                            .padding(16)
-                    }
-                    Spacer()
-                }
-
-                Spacer()
-
-                shotTimeline
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 24)
-            }
-        }
-        .statusBarHidden(true)
-        .onAppear  { setupPlayer() }
-        .onDisappear { teardownPlayer() }
-    }
-
-    private var shotTimeline: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.white.opacity(0.25))
-                    .frame(height: 4)
-
-                Capsule()
-                    .fill(.white.opacity(0.8))
-                    .frame(width: progressWidth(in: geo.size.width, for: currentTimeSec),
-                           height: 4)
-
-                ForEach(timedShots) { shot in
-                    Circle()
-                        .fill(shot.isMake ? .green : .red)
-                        .frame(width: 14, height: 14)
-                        .overlay(
-                            Circle().stroke(
-                                selectedShot?.id == shot.id ? Color.white : .clear,
-                                lineWidth: 2
-                            )
-                        )
-                        .offset(
-                            x: progressWidth(in: geo.size.width,
-                                             for: shot.videoTimestampSeconds ?? 0) - 7,
-                            y: -5
-                        )
-                        .onTapGesture {
-                            let isSame = selectedShot?.id == shot.id
-                            selectedShot = isSame ? nil : shot
-                            if !isSame {
-                                player?.seek(
-                                    to: CMTime(seconds: shot.videoTimestampSeconds ?? 0,
-                                               preferredTimescale: 600),
-                                    toleranceBefore: .zero,
-                                    toleranceAfter:  .zero
-                                )
+            if !timedShots.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionLabel("Jump to a shot")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Array(timedShots.enumerated()), id: \.element.id) { index, shot in
+                                Button {
+                                    jump(to: shot)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Circle().fill(shot.result.color).frame(width: 8, height: 8)
+                                        Text("\(index + 1)")
+                                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 9)
+                                    .background(selected == shot.id ? Color.leather.opacity(0.25) : Color.panelRaised,
+                                                in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Shot \(index + 1), \(shot.isMake ? "make" : "miss")")
                             }
                         }
+                    }
                 }
+                .padding(Metrics.screenPadding)
             }
-            .frame(height: 20)
+            Spacer()
         }
-        .frame(height: 20)
-        .background(.ultraThinMaterial.opacity(0.6),
-                    in: RoundedRectangle(cornerRadius: 12))
-        .padding(.vertical, 8)
+        .courtBackground()
+        .onAppear(perform: setUp)
+        .onDisappear { player?.pause() }
     }
 
-    private func progressWidth(in totalWidth: CGFloat, for seconds: Double) -> CGFloat {
-        guard duration > 0 else { return 0 }
-        return CGFloat(seconds / duration) * totalWidth
-    }
-
-    private func setupPlayer() {
-        guard let fileName = session.videoFileName else { return }
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let url  = docs.appendingPathComponent("Sessions/\(fileName)")
+    private func setUp() {
+        guard player == nil, let name = session.videoFileName else { return }
+        let url = SessionRecorder.directory.appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
-
         let avPlayer = AVPlayer(url: url)
-
-        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
-        timeObserver = avPlayer.addPeriodicTimeObserver(
-            forInterval: interval, queue: .main
-        ) { [weak avPlayer] time in
-            currentTimeSec = CMTimeGetSeconds(time)
-            if let d = avPlayer?.currentItem?.duration, d.isNumeric {
-                duration = CMTimeGetSeconds(d)
-            }
-        }
-
         player = avPlayer
         avPlayer.play()
     }
 
-    private func teardownPlayer() {
-        if let obs = timeObserver { player?.removeTimeObserver(obs) }
-        player?.pause()
-        player = nil
-    }
-}
-
-private struct VideoPlayerView: UIViewControllerRepresentable {
-    let player: AVPlayer
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let vc = AVPlayerViewController()
-        vc.player               = player
-        vc.showsPlaybackControls = false
-        return vc
-    }
-
-    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
-        vc.player = player
+    private func jump(to shot: ShotRecord) {
+        selected = shot.id
+        // Start a beat before release so you see the whole shot.
+        let t = max(0, (shot.videoTimestampSeconds ?? 0) - 1.0)
+        player?.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        player?.play()
     }
 }
