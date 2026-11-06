@@ -54,21 +54,35 @@ jobs:
       - name: Placeholder backend secrets
         # The real file is gitignored; the example has the right shape.
         run: cp HoopTrack/HoopTrack/Auth/BackendSecrets.swift.example HoopTrack/HoopTrack/Auth/BackendSecrets.swift
-      - name: Build and test
+      - name: Build
         # Ad-hoc ("Sign to Run Locally") signing: no certificates needed, but
         # the simulator app gets its entitlements, which the Keychain needs.
         # (With signing off, every Keychain call fails with -34018.)
         working-directory: HoopTrack
         run: |
           set -o pipefail
-          # TEST_RUNNER_ variables reach the tests without the prefix:
-          # ScreenSnapshotTests writes a PNG of each main screen here.
-          TEST_RUNNER_SNAPSHOT_DIR="$RUNNER_TEMP/screens" xcodebuild test \
+          xcodebuild build-for-testing \
             -project HoopTrack.xcodeproj \
             -scheme HoopTrack \
             -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
+      - name: Wait for the simulator
+        # Tests on a half-booted simulator crash the screen snapshots.
+        run: xcrun simctl bootstatus "$SIM" -b
+      - name: Test
+        working-directory: HoopTrack
+        run: |
+          set -o pipefail
+          # TEST_RUNNER_ variables reach the tests without the prefix:
+          # ScreenSnapshotTests writes a PNG of each main screen here.
+          TEST_RUNNER_SNAPSHOT_DIR="$RUNNER_TEMP/screens" xcodebuild test-without-building \
+            -project HoopTrack.xcodeproj \
+            -scheme HoopTrack \
+            -destination "id=$SIM" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages"
       - name: Screens
         if: always()
         uses: actions/upload-artifact@v4
