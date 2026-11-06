@@ -34,6 +34,9 @@ jobs:
         # The real file is gitignored; the example has the right shape.
         run: cp HoopTrack/HoopTrack/Auth/BackendSecrets.swift.example HoopTrack/HoopTrack/Auth/BackendSecrets.swift
       - name: Build and test
+        # Ad-hoc ("Sign to Run Locally") signing: no certificates needed, but
+        # the simulator app gets its entitlements, which the Keychain needs.
+        # (With signing off, every Keychain call fails with -34018.)
         working-directory: HoopTrack
         run: |
           set -o pipefail
@@ -46,4 +49,4 @@ jobs:
             -project HoopTrack.xcodeproj \
             -scheme HoopTrack \
             -destination "id=$SIM" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
