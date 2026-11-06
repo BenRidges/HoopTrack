@@ -32,17 +32,6 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      - name: Start booting the simulator
-        # A cold simulator takes 1-6 minutes to boot. Started here, it boots
-        # while the app compiles instead of after.
-        run: |
-          SIM=$(xcrun simctl list devices available -j | python3 -c "
-          import json, sys
-          devices = json.load(sys.stdin)['devices']
-          print(next(d['udid'] for runtime, ds in devices.items() if 'iOS' in runtime
-                     for d in ds if d['name'].startswith('iPhone')))")
-          echo "SIM=$SIM" >> "$GITHUB_ENV"
-          xcrun simctl boot "$SIM" > /dev/null 2>&1 &
       - uses: actions/checkout@v4
       - name: Cache Swift packages
         uses: actions/cache@v4
@@ -54,35 +43,28 @@ jobs:
       - name: Placeholder backend secrets
         # The real file is gitignored; the example has the right shape.
         run: cp HoopTrack/HoopTrack/Auth/BackendSecrets.swift.example HoopTrack/HoopTrack/Auth/BackendSecrets.swift
-      - name: Build
+      - name: Build and test
         # Ad-hoc ("Sign to Run Locally") signing: no certificates needed, but
         # the simulator app gets its entitlements, which the Keychain needs.
         # (With signing off, every Keychain call fails with -34018.)
+        # The simulator boots after the build, not alongside it: on the 3-core
+        # runner, booting it early slowed the build more than it saved.
         working-directory: HoopTrack
         run: |
           set -o pipefail
-          xcodebuild build-for-testing \
-            -project HoopTrack.xcodeproj \
-            -scheme HoopTrack \
-            -destination "id=$SIM" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
-            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
-      - name: Wait for the simulator
-        # Tests on a half-booted simulator crash the screen snapshots.
-        run: xcrun simctl bootstatus "$SIM" -b
-      - name: Test
-        working-directory: HoopTrack
-        run: |
-          set -o pipefail
+          SIM=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          print(next(d['udid'] for runtime, ds in devices.items() if 'iOS' in runtime
+                     for d in ds if d['name'].startswith('iPhone')))")
           # TEST_RUNNER_ variables reach the tests without the prefix:
           # ScreenSnapshotTests writes a PNG of each main screen here.
-          TEST_RUNNER_SNAPSHOT_DIR="$RUNNER_TEMP/screens" xcodebuild test-without-building \
+          TEST_RUNNER_SNAPSHOT_DIR="$RUNNER_TEMP/screens" xcodebuild test \
             -project HoopTrack.xcodeproj \
             -scheme HoopTrack \
             -destination "id=$SIM" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages"
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
       - name: Screens
         if: always()
         uses: actions/upload-artifact@v4
