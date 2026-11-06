@@ -56,7 +56,7 @@ final class AppState: ObservableObject {
     /// How the live session ended, acted on once it has finished dismissing.
     private var queuedEnd: SessionEnd?
 
-    static let discardedNotice = "Nothing was recorded, so the session wasn't saved."
+    static let discardedNotice = "Session not saved: nothing recorded."
 
     /// Called by every live session when it closes; nil when there's
     /// nothing to report (a game, or closing after a failed save). The
