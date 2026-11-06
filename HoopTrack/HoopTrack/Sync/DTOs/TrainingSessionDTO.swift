@@ -102,4 +102,40 @@ struct TrainingSessionDTO: Codable, Sendable {
         self.longestMakeStreak = session.longestMakeStreak
         self.shotSpeedStdDev = session.shotSpeedStdDev
     }
+
+    /// A local session from a backed-up row (restore). Unknown enum keys
+    /// fall back rather than dropping the session. Videos aren't backed
+    /// up, so there's none.
+    @MainActor
+    func makeSession(syncedAt: Date = .now) -> TrainingSession {
+        let session = TrainingSession(drillType: DrillType(rawValue: drillType) ?? .freeShoot,
+                                      namedDrill: namedDrill.flatMap(NamedDrill.init(rawValue:)),
+                                      courtType: CourtType(rawValue: courtType) ?? .nba,
+                                      locationTag: locationTag,
+                                      notes: notes)
+        session.id = id
+        session.startedAt = startedAt
+        session.endedAt = endedAt
+        session.durationSeconds = durationSeconds
+        session.shotsAttempted = shotsAttempted
+        session.shotsMade = shotsMade
+        session.fgPercent = fgPercent
+        session.avgReleaseAngleDeg = avgReleaseAngleDeg
+        session.avgReleaseTimeMs = avgReleaseTimeMs
+        session.avgVerticalJumpCm = avgVerticalJumpCm
+        session.avgShotSpeedMph = avgShotSpeedMph
+        session.consistencyScore = consistencyScore
+        session.videoPinnedByUser = videoPinnedByUser
+        session.totalDribbles = totalDribbles
+        session.avgDribblesPerSec = avgDribblesPerSec
+        session.maxDribblesPerSec = maxDribblesPerSec
+        session.handBalanceFraction = handBalanceFraction
+        session.dribbleCombosDetected = dribbleCombosDetected
+        session.bestShuttleRunSeconds = bestShuttleRunSeconds
+        session.bestLaneAgilitySeconds = bestLaneAgilitySeconds
+        session.longestMakeStreak = longestMakeStreak
+        session.shotSpeedStdDev = shotSpeedStdDev
+        session.cloudSyncedAt = syncedAt
+        return session
+    }
 }

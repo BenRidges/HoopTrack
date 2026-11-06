@@ -34,4 +34,16 @@ struct EarnedBadgeDTO: Codable, Sendable {
         self.rank = badge.rank.displayName
         self.earnedAt = badge.earnedAt
     }
+
+    /// A local badge from a backed-up row (restore); nil for unknown ids.
+    @MainActor
+    func makeBadge(syncedAt: Date = .now) -> EarnedBadge? {
+        guard let badgeID = BadgeID(rawValue: badgeId) else { return nil }
+        let badge = EarnedBadge(badgeID: badgeID, initialMMR: mmr)
+        badge.id = id
+        badge.earnedAt = earnedAt
+        badge.lastUpdatedAt = updatedAt
+        badge.cloudSyncedAt = syncedAt
+        return badge
+    }
 }

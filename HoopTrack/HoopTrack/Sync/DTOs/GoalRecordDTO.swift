@@ -47,4 +47,21 @@ struct GoalRecordDTO: Codable, Sendable {
         self.isAchieved = goal.isAchieved
         self.achievedAt = goal.achievedAt
     }
+
+    /// A local goal from a backed-up row (restore); nil for unknown keys.
+    @MainActor
+    func makeGoal(syncedAt: Date = .now) -> GoalRecord? {
+        guard let skill = SkillDimension(rawValue: skill),
+              let metric = GoalMetric(rawValue: metric) else { return nil }
+        let goal = GoalRecord(title: title, skill: skill, metric: metric,
+                              targetValue: targetValue, baselineValue: baselineValue,
+                              targetDate: targetDate)
+        goal.id = id
+        goal.createdAt = createdAt
+        goal.currentValue = currentValue
+        goal.isAchieved = isAchieved
+        goal.achievedAt = achievedAt
+        goal.cloudSyncedAt = syncedAt
+        return goal
+    }
 }

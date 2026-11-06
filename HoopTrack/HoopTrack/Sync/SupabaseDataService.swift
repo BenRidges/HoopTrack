@@ -22,12 +22,16 @@ final class SupabaseDataService: SupabaseDataServiceProtocol, @unchecked Sendabl
             .execute()
     }
 
-    func insertShots(_ dtos: [ShotRecordDTO]) async throws {
+    func upsertShots(_ dtos: [ShotRecordDTO]) async throws {
         guard !dtos.isEmpty else { return }
         let client = try await SupabaseContainer.postgrest()
+        // "Ignore duplicates" is ON CONFLICT DO NOTHING, which the
+        // insert-only policy allows; a plain insert failed the whole sync
+        // as soon as one shot was already up.
         try await client
             .from("shot_records")
-            .insert(dtos)
+            .upsert(dtos, onConflict: "id", returning: .minimal,
+                    ignoreDuplicates: !HoopTrack.Backend.shotRowsUpdatable)
             .execute()
     }
 
@@ -45,5 +49,41 @@ final class SupabaseDataService: SupabaseDataServiceProtocol, @unchecked Sendabl
             .from("earned_badges")
             .upsert(dto, onConflict: "user_id,badge_id")
             .execute()
+    }
+
+    // MARK: - Restore
+
+    func fetchSessions() async throws -> [TrainingSessionDTO] {
+        try await fetchAll("training_sessions", orderedBy: "started_at")
+    }
+
+    func fetchShots() async throws -> [ShotRecordDTO] {
+        try await fetchAll("shot_records", orderedBy: "timestamp")
+    }
+
+    func fetchGoals() async throws -> [GoalRecordDTO] {
+        try await fetchAll("goal_records", orderedBy: "created_at")
+    }
+
+    func fetchBadges() async throws -> [EarnedBadgeDTO] {
+        try await fetchAll("earned_badges", orderedBy: "earned_at")
+    }
+
+    /// Pages through a table: PostgREST returns at most 1000 rows a request.
+    private func fetchAll<Row: Decodable & Sendable>(_ table: String, orderedBy column: String) async throws -> [Row] {
+        let client = try await SupabaseContainer.postgrest()
+        let page = 1000
+        var rows: [Row] = []
+        while true {
+            let batch: [Row] = try await client
+                .from(table)
+                .select()
+                .order(column)
+                .range(from: rows.count, to: rows.count + page - 1)
+                .execute()
+                .value
+            rows += batch
+            if batch.count < page { return rows }
+        }
     }
 }

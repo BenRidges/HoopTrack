@@ -216,6 +216,9 @@ final class DataService: ObservableObject {
         if shot.result != result {
             shot.result = result
             shot.isUserCorrected = true
+            // Back up the correction (and the session's new totals).
+            shot.cloudSyncedAt = nil
+            shot.session?.cloudSyncedAt = nil
         }
         shot.needsReview = false
         shot.session?.recalculateStats()
@@ -228,6 +231,7 @@ final class DataService: ObservableObject {
     func deleteShot(_ shot: ShotRecord) {
         let session = shot.session
         session?.shots.removeAll { $0.id == shot.id }
+        session?.cloudSyncedAt = nil
         modelContext.delete(shot)
         session?.recalculateStats()
         save()

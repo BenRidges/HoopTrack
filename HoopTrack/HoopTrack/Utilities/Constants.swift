@@ -183,6 +183,10 @@ nonisolated enum HoopTrack {
         static var supabaseURL: URL { BackendSecrets.supabaseURL }
         /// Supabase anon / public key.
         static var supabaseAnonKey: String { BackendSecrets.supabaseAnonKey }
+        /// `shot_records` is insert-only by policy, so a corrected result
+        /// can't reach the cloud. Flip this once
+        /// supabase/migrations/20261107000000_shot_record_updates.sql is applied.
+        static let shotRowsUpdatable = false
     }
 
     // MARK: - Auth (Phase 8)

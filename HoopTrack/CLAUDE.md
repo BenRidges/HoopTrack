@@ -112,7 +112,9 @@ All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums:
 
 - **`Sync/`** — `SupabaseDataService` (PostgREST wrapper, `nonisolated init`), `SupabaseDataServiceProtocol`, `SyncCoordinator` (orchestrates uploads, stamps `cloudSyncedAt`), 5 Codable DTOs (`PlayerProfileDTO`, `TrainingSessionDTO`, `ShotRecordDTO`, `GoalRecordDTO`, `EarnedBadgeDTO`) with snake_case CodingKeys.
 - **`SessionFinalizationCoordinator` step 8** — `kickOffSync(session:profile:)` fires a fire-and-forget Supabase upload after every shooting / dribble / agility session. Skips if no coordinator injected, no signed-in user, `endedAt == nil`, or `durationSeconds < 30`.
-- **`cloudSyncedAt: Date?`** on the 5 syncable models — nil means never-synced or dirty. Stamped by `SyncCoordinator` after a successful upsert.
+- **`cloudSyncedAt: Date?`** on the 5 syncable models — nil means never-synced or dirty. Stamped by `SyncCoordinator` after a successful upsert; corrections and deletions clear the session's stamp.
+- **Whole-store passes** — `AppServices.syncCloudBackup` (after every sign-in and launch while signed in) restores onto a phone with no history (`SyncCoordinator.restore`, by id, local always wins), then `backUpEverything` uploads what isn't up. Profile → Restore from backup merges on demand. No delete sync yet.
+- **`shot_records` is insert-only** on the server; uploads use ignore-duplicates. `HoopTrack.Backend.shotRowsUpdatable` turns on updates once `supabase/migrations/20261107000000_shot_record_updates.sql` is applied.
 - **Postgres schema + RLS** live on Supabase project `nfzhqcgofuohsjhtxvqa`. 5 tables, 16 RLS policies keyed on `auth.uid()`. `shot_records` is append-only by policy (select + insert only).
 - **Enum raw values are storage keys** — SwiftData and the Postgres rows both hold them ("Free Shoot", "Mid-Range", "Make"). Never change one; UI text comes from `displayName`. `PersistedKeysTests` fails on any change.
 

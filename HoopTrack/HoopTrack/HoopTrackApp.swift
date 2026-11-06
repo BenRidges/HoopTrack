@@ -62,6 +62,7 @@ struct HoopTrackApp: App {
                 .onChange(of: authViewModel.state) { old, new in
                     if case .authenticated(let user) = new, user.emailVerified {
                         try? services.dataService.linkSupabaseUser(id: user.id.uuidString)
+                        Task { await services.syncCloudBackup(userID: user.id) }
                     } else if case .unauthenticated = new, case .authenticated = old {
                         // Explicit sign-out only — a failed offline restore keeps the link.
                         services.dataService.unlinkSupabaseUser()

@@ -9,7 +9,7 @@ final class MockSupabaseDataService: SupabaseDataServiceProtocol, @unchecked Sen
 
     private(set) var profileUpserts: [PlayerProfileDTO] = []
     private(set) var sessionUpserts: [TrainingSessionDTO] = []
-    private(set) var shotInserts:   [[ShotRecordDTO]] = []
+    private(set) var shotUpserts:   [[ShotRecordDTO]] = []
     private(set) var goalUpserts:   [GoalRecordDTO] = []
     private(set) var badgeUpserts:  [EarnedBadgeDTO] = []
 
@@ -23,9 +23,9 @@ final class MockSupabaseDataService: SupabaseDataServiceProtocol, @unchecked Sen
         sessionUpserts.append(dto)
     }
 
-    func insertShots(_ dtos: [ShotRecordDTO]) async throws {
+    func upsertShots(_ dtos: [ShotRecordDTO]) async throws {
         try throwIfScripted()
-        shotInserts.append(dtos)
+        shotUpserts.append(dtos)
     }
 
     func upsertGoal(_ dto: GoalRecordDTO) async throws {
@@ -37,6 +37,18 @@ final class MockSupabaseDataService: SupabaseDataServiceProtocol, @unchecked Sen
         try throwIfScripted()
         badgeUpserts.append(dto)
     }
+
+    // MARK: Restore
+
+    var remoteSessions: [TrainingSessionDTO] = []
+    var remoteShots: [ShotRecordDTO] = []
+    var remoteGoals: [GoalRecordDTO] = []
+    var remoteBadges: [EarnedBadgeDTO] = []
+
+    func fetchSessions() async throws -> [TrainingSessionDTO] { try throwIfScripted(); return remoteSessions }
+    func fetchShots() async throws -> [ShotRecordDTO] { try throwIfScripted(); return remoteShots }
+    func fetchGoals() async throws -> [GoalRecordDTO] { try throwIfScripted(); return remoteGoals }
+    func fetchBadges() async throws -> [EarnedBadgeDTO] { try throwIfScripted(); return remoteBadges }
 
     private func throwIfScripted() throws {
         if let err = scriptedError { throw err }

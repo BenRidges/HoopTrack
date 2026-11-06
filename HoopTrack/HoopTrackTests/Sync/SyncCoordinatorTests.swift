@@ -27,11 +27,11 @@ final class SyncCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(mock.sessionUpserts.count, 1)
         XCTAssertEqual(mock.sessionUpserts.first?.id, session.id)
-        XCTAssertEqual(mock.shotInserts.count, 1)
-        XCTAssertEqual(mock.shotInserts.first?.count, 3)
+        XCTAssertEqual(mock.shotUpserts.count, 1)
+        XCTAssertEqual(mock.shotUpserts.first?.count, 3)
     }
 
-    func test_syncSession_withNoShots_skipsShotInsert() async throws {
+    func test_syncSession_withNoShots_skipsShotUpload() async throws {
         let mock = MockSupabaseDataService()
         let coordinator = SyncCoordinator(backend: mock)
         let session = TrainingSession(drillType: .freeShoot)
@@ -40,7 +40,7 @@ final class SyncCoordinatorTests: XCTestCase {
         try await coordinator.syncSession(session, userID: UUID())
 
         XCTAssertEqual(mock.sessionUpserts.count, 1)
-        XCTAssertEqual(mock.shotInserts.count, 0)
+        XCTAssertEqual(mock.shotUpserts.count, 0)
     }
 
     // MARK: - cloudSyncedAt stamping

@@ -64,4 +64,28 @@ struct ShotRecordDTO: Codable, Sendable {
         self.videoTimestampSeconds = shot.videoTimestampSeconds
         self.isUserCorrected = shot.isUserCorrected
     }
+
+    /// A local shot from a backed-up row (restore); nil if its result is
+    /// unreadable. Not yet attached to a session.
+    @MainActor
+    func makeShot(syncedAt: Date = .now) -> ShotRecord? {
+        guard let result = ShotResult(rawValue: result), result != .pending else { return nil }
+        let shot = ShotRecord(sequenceIndex: sequenceIndex,
+                              result: result,
+                              zone: CourtZone(rawValue: zone) ?? .unknown,
+                              shotType: ShotType(rawValue: shotType) ?? .unknown,
+                              courtX: courtX,
+                              courtY: courtY)
+        shot.id = id
+        shot.timestamp = timestamp
+        shot.releaseAngleDeg = releaseAngleDeg
+        shot.releaseTimeMs = releaseTimeMs
+        shot.verticalJumpCm = verticalJumpCm
+        shot.legAngleDeg = legAngleDeg
+        shot.shotSpeedMph = shotSpeedMph
+        shot.videoTimestampSeconds = videoTimestampSeconds
+        shot.isUserCorrected = isUserCorrected
+        shot.cloudSyncedAt = syncedAt
+        return shot
+    }
 }

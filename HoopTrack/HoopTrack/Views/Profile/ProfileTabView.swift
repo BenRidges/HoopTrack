@@ -14,6 +14,7 @@ struct ProfileTabView: View {
     @EnvironmentObject private var notificationService: NotificationService
     @EnvironmentObject private var authViewModel: AuthViewModel
     @EnvironmentObject private var appLock: AppLock
+    @EnvironmentObject private var services: AppServices
     @Query(sort: \PlayerProfile.createdAt) private var profiles: [PlayerProfile]
 
     @AppStorage(AppPreferences.Key.healthKitEnabled) private var healthKitEnabled = false
@@ -30,6 +31,8 @@ struct ProfileTabView: View {
     @State private var confirmDeleteAccount = false
     @State private var isDeleting = false
     @State private var deleteError: String?
+    @State private var isRestoring = false
+    @State private var restoreMessage: String?
     @State private var exportURL: URL?
     @State private var exportError: String?
     @State private var isExporting = false
@@ -118,6 +121,12 @@ struct ProfileTabView: View {
         } message: {
             Text("Your HoopTrack account and everything backed up to it are deleted. Sessions on this phone stay. This can't be undone.")
         }
+        .alert("Restore from backup", isPresented: Binding(get: { restoreMessage != nil },
+                                                           set: { if !$0 { restoreMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(restoreMessage ?? "")
+        }
         .alert("Couldn't delete", isPresented: Binding(get: { deleteError != nil },
                                                       set: { if !$0 { deleteError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -127,6 +136,21 @@ struct ProfileTabView: View {
     }
 
     private var isSignedIn: Bool { authViewModel.state.isAuthenticated }
+
+    private func restore(for user: AuthUser) {
+        isRestoring = true
+        Task {
+            do {
+                let report = try await services.restoreFromBackup(userID: user.id)
+                restoreMessage = report.isEmpty
+                    ? "Everything in your backup is already on this phone."
+                    : "Restored \(report.sessions) \(report.sessions == 1 ? "session" : "sessions"), \(report.goals) \(report.goals == 1 ? "goal" : "goals") and \(report.badges) \(report.badges == 1 ? "badge" : "badges")."
+            } catch {
+                restoreMessage = "Couldn't reach your backup. \(error.localizedDescription)"
+            }
+            isRestoring = false
+        }
+    }
 
     /// The account goes first: if the server can't be reached, stop before
     /// wiping the phone, so the cloud copy isn't left behind unnoticed.
@@ -272,6 +296,16 @@ struct ProfileTabView: View {
         switch authViewModel.state {
         case .authenticated(let user) where user.emailVerified:
             LabeledContent("Signed in", value: user.email)
+            Button {
+                restore(for: user)
+            } label: {
+                HStack {
+                    Text("Restore from backup")
+                    Spacer()
+                    if isRestoring { ProgressView() }
+                }
+            }
+            .disabled(isRestoring)
             Button("Sign out") {
                 Task { await authViewModel.signOut() }
             }

@@ -156,8 +156,15 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 
 - ✅ **Postgres schema + RLS policies** — shipped in Phase 9. Five tables, 16 RLS policies keyed on `auth.uid()`, `shot_records` is append-only.
 - ✅ **`cloudSyncedAt: Date?` on synced models** — shipped in Phase 9 as additive nullable field. No migration plan required.
-- ⏳ **Conflict resolution logic tested** — NOT YET. Current Phase 9 is upload-only. Scalar LWW by `updated_at` (server-set via trigger) and set-union on `shot_records` happen automatically in the DB, but the *client* doesn't yet read back / reconcile. Lands with Phase 9.5 when cross-device restore ships.
-- ⏳ **`InitialSyncCoordinator`** — NEW. Users upgrading from pre-Phase-9 builds have local-only history. Needs a one-shot batch-upload pass on first authenticated launch.
+- ✅ **Restore and reconciliation** (Nov 2026)
+  - `SyncCoordinator.restore` adds the sessions (with shots), goals and badges a phone doesn't have, matched by id. Local copies always win, and shots are only added to sessions restored at the same time.
+  - It runs automatically on a phone with no history (new phone or reinstall). On a phone with history it only runs from Profile → Restore from backup, because sessions deleted locally still exist in the cloud.
+  - Tests: `CloudBackupTests`.
+  - *Limitation:* there's no delete sync yet, so a session deleted on one phone stays in the cloud.
+- ✅ **Initial sync** (Nov 2026)
+  - `SyncCoordinator.backUpEverything` runs after every sign-in and launch while signed in (`AppServices.syncCloudBackup`). It uploads every finished session or shot not yet in the cloud, plus profile, goals and badges.
+  - Shot uploads skip rows already there. They used to re-insert every shot on each sync, so any retry failed on duplicate ids.
+  - Corrections mark the session for re-upload.
 - ⏳ **Config.xcconfig or similar for separate dev / staging / prod projects**
   - *Current:* Single project (`nfzhqcgofuohsjhtxvqa`), shared between dev testing and any future prod traffic.
   - *Recommended:* Three Supabase projects. Xcode build configuration selects which URL + anon key baked in. Avoids a dev-only database with prod data.
@@ -167,11 +174,12 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
 
 ### P1 — High
 
-- ⏳ **Fire-and-forget sync on session finalization**
-  - Non-fatal: upload failure does not roll back session save. Surface a retry mechanism somewhere.
+- ✅ **Retry for failed uploads** (Nov 2026)
+  - A failed post-session upload leaves `cloudSyncedAt` nil, and the next launch's backup pass sends it.
 
-- ⏳ **Initial sync coordinator for upgrading users**
-  - Users who installed before Phase 9 have local-only data. On first sign-in post-upgrade, batch-upsert existing records to Supabase.
+- 🟡 **Corrected shots in the backup**
+  - `shot_records` is insert-only, so a corrected result can't overwrite the uploaded one, and a restore brings back the original call.
+  - *To do:* apply `supabase/migrations/20261107000000_shot_record_updates.sql`, then set `HoopTrack.Backend.shotRowsUpdatable = true`.
 
 ---
 

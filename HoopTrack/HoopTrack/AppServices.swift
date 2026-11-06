@@ -23,7 +23,9 @@ final class AppServices: ObservableObject {
     let appState = AppState()
     let appLock = AppLock()
     let metricsService = MetricsService()
+    let syncCoordinator = SyncCoordinator()
     private let telemetryUpload: TelemetryUploadService
+    private var isSyncing = false
 
     init(container: ModelContainer = HoopTrackStore.shared) {
         self.container = container
@@ -41,7 +43,7 @@ final class AppServices: ObservableObject {
             skillRatingService:     SkillRatingService(modelContext: context),
             badgeEvaluationService: BadgeEvaluationService(modelContext: context),
             notificationService:    notificationService,
-            syncCoordinator:        SyncCoordinator(),
+            syncCoordinator:        syncCoordinator,
             telemetryCaptureService: TelemetryCaptureService(modelContext: context),
             telemetryUploadService:  telemetryUpload
         )
@@ -64,6 +66,34 @@ final class AppServices: ObservableObject {
         if let uid = profile?.supabaseUserID.flatMap(UUID.init(uuidString:)) {
             Task { await telemetryUpload.uploadPending(userID: uid) }
         }
+    }
+
+    // MARK: - Cloud backup
+
+    /// Runs when a verified user is signed in (at launch, or on signing in).
+    /// A phone with no history of its own gets the backup restored first.
+    /// That covers a new phone or a reinstall. Merging into an existing
+    /// history only happens from Profile → Restore from backup, because a
+    /// session deleted here still exists in the cloud and would come back.
+    /// Then anything not yet backed up is uploaded.
+    func syncCloudBackup(userID: UUID) async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        let context = dataService.modelContext
+        let hasHistory = ((try? context.fetchCount(FetchDescriptor<TrainingSession>())) ?? 0) > 0
+        if !hasHistory, let report = try? await syncCoordinator.restore(userID: userID, context: context),
+           !report.isEmpty {
+            try? dataService.recomputeCareerStats()
+        }
+        try? await syncCoordinator.backUpEverything(userID: userID, context: context)
+    }
+
+    /// Profile → Restore from backup: adds whatever's in the cloud and not here.
+    func restoreFromBackup(userID: UUID) async throws -> SyncCoordinator.RestoreReport {
+        let report = try await syncCoordinator.restore(userID: userID, context: dataService.modelContext)
+        if !report.isEmpty { try? dataService.recomputeCareerStats() }
+        return report
     }
 
     // Phase 7 — Security: (re)apply complete protection to session videos.
