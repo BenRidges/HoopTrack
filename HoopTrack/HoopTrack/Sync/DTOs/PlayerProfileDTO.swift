@@ -2,7 +2,7 @@
 import Foundation
 
 /// Codable mirror of the `player_profiles` Postgres row.
-struct PlayerProfileDTO: Codable, Sendable {
+nonisolated struct PlayerProfileDTO: Codable, Sendable {
     let userId: UUID
     var name: String
     var createdAt: Date

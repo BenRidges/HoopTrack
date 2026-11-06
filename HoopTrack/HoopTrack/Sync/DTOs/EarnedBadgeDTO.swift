@@ -1,7 +1,7 @@
 // HoopTrack/Sync/DTOs/EarnedBadgeDTO.swift
 import Foundation
 
-struct EarnedBadgeDTO: Codable, Sendable {
+nonisolated struct EarnedBadgeDTO: Codable, Sendable {
     let id: UUID
     let userId: UUID
     var createdAt: Date

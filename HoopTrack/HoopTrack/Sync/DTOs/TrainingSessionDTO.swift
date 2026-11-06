@@ -1,7 +1,7 @@
 // HoopTrack/Sync/DTOs/TrainingSessionDTO.swift
 import Foundation
 
-struct TrainingSessionDTO: Codable, Sendable {
+nonisolated struct TrainingSessionDTO: Codable, Sendable {
     let id: UUID
     let userId: UUID
     var createdAt: Date

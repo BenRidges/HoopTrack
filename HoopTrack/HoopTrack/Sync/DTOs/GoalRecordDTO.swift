@@ -1,7 +1,7 @@
 // HoopTrack/Sync/DTOs/GoalRecordDTO.swift
 import Foundation
 
-struct GoalRecordDTO: Codable, Sendable {
+nonisolated struct GoalRecordDTO: Codable, Sendable {
     let id: UUID
     let userId: UUID
     var createdAt: Date

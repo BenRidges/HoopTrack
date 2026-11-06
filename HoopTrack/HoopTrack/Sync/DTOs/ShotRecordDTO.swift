@@ -1,7 +1,7 @@
 // HoopTrack/Sync/DTOs/ShotRecordDTO.swift
 import Foundation
 
-struct ShotRecordDTO: Codable, Sendable {
+nonisolated struct ShotRecordDTO: Codable, Sendable {
     let id: UUID
     let userId: UUID
     let sessionId: UUID
