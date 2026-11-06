@@ -10,6 +10,7 @@
 //   8. CV-A telemetry capture + upload (opt-in, fire-and-forget)
 
 import Foundation
+import SwiftData
 import Combine
 
 @MainActor final class SessionFinalizationCoordinator: ObservableObject {

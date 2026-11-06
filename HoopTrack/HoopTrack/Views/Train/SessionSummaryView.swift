@@ -7,6 +7,7 @@
 // tracker wasn't sure about are flagged so they get checked first.
 
 import SwiftUI
+import SwiftData
 
 /// Post-session sheet.
 struct SessionSummaryView: View {
