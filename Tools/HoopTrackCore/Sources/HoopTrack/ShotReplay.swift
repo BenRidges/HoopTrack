@@ -8,6 +8,9 @@
 // Package-only: never compiled into the app.
 
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 nonisolated enum ShotReplay {
 

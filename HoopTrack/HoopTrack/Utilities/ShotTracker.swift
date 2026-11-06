@@ -21,6 +21,9 @@
 // decides which detection is the shot ball.
 
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 nonisolated struct ShotTracker: Sendable {
 

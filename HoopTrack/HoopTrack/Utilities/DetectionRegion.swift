@@ -11,6 +11,9 @@
 // Both directions live here so they can be unit tested.
 
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 nonisolated enum DetectionRegion {
 

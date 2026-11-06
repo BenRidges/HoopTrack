@@ -8,6 +8,7 @@
 // entered during onboarding were silently dropped.
 
 import SwiftUI
+import UIKit
 import AVFoundation
 
 struct OnboardingView: View {

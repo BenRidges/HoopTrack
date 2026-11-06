@@ -4,6 +4,9 @@
 // Replaces the 10-frame-accumulation lock in the previous CourtCalibrationService.
 
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 nonisolated struct HoopRectSmoother: Sendable {
 

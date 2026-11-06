@@ -15,6 +15,8 @@ import PackageDescription
 
 let package = Package(
     name: "HoopTrackCore",
+    // Matches the app's deployment target; macOS for `swift test` on a Mac.
+    platforms: [.macOS(.v14), .iOS(.v17)],
     targets: [
         // Same isolation defaults as the app target.
         .target(name: "HoopTrack",

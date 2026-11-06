@@ -4,6 +4,9 @@
 
 import Foundation
 import SwiftData
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 @Model
 final class ShotRecord {

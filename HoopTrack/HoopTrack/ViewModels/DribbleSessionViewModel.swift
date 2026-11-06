@@ -3,6 +3,7 @@
 
 import Foundation
 import Combine
+import AVFoundation
 
 @MainActor
 final class DribbleSessionViewModel: ObservableObject, DribblePipelineDelegate {

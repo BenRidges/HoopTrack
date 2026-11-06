@@ -11,6 +11,7 @@ import Combine
 import CoreGraphics
 import CoreMedia
 import UIKit
+import AVFoundation
 
 @MainActor
 final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {

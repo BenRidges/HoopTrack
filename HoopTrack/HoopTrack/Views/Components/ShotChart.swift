@@ -8,6 +8,7 @@
 // is efficiency — readable at a glance however many shots you take.
 
 import SwiftUI
+import CoreGraphics
 
 /// Court lines for a 50 × 47 ft half court. Draw into a 50:47 rect.
 struct HalfCourtShape: Shape {

@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AVFoundation
+import CoreGraphics
 
 struct CameraPreviewView: UIViewRepresentable {
 

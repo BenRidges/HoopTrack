@@ -9,6 +9,9 @@
 // to the court this way and fall back to "unknown position".
 
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 nonisolated enum CourtPositionEstimator {
 

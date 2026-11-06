@@ -1,6 +1,9 @@
 // HoopTrackTests/ShotScienceCalculatorTests.swift
 import XCTest
 @testable import HoopTrack
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 final class ShotScienceCalculatorTests: XCTestCase {
 
