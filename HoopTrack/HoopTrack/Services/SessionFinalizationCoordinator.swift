@@ -14,6 +14,8 @@ import SwiftData
 import Combine
 
 @MainActor final class SessionFinalizationCoordinator: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     let objectWillChange = ObservableObjectPublisher()
 

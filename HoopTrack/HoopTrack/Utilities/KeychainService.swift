@@ -5,6 +5,8 @@ import Security
 /// Thread-safe Keychain wrapper. All callers must be on @MainActor.
 @MainActor
 final class KeychainService {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     // MARK: - String convenience
 

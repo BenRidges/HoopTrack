@@ -7,6 +7,8 @@ import Combine
 
 @MainActor
 final class HapticService: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     // Pre-warmed generators for lower latency during live sessions.
     private let lightImpact   = UIImpactFeedbackGenerator(style: .light)

@@ -17,6 +17,8 @@ struct AgilitySessionView: View {
     @StateObject private var holder = Holder()
 
     final class Holder: ObservableObject {
+        deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
         @Published var viewModel: AgilitySessionViewModel?
     }
 

@@ -11,6 +11,8 @@ import UIKit
 
 @MainActor
 final class CameraService: NSObject, ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     // MARK: - Published State
     @Published var permissionStatus: AVAuthorizationStatus = .notDetermined

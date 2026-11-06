@@ -8,6 +8,8 @@ import Foundation
 import SwiftData
 
 @MainActor final class GoalUpdateService: GoalUpdateServiceProtocol {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     private let modelContext: ModelContext
 

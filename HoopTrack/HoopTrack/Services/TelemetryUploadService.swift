@@ -12,6 +12,8 @@ import Storage
 
 @MainActor
 final class TelemetryUploadService {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     private let modelContext: ModelContext
     private let fileManager = FileManager.default

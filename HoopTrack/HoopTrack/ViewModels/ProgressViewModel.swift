@@ -40,6 +40,8 @@ enum TimeRange: String, CaseIterable, Identifiable {
 
 @MainActor
 final class ProgressViewModel: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     struct TrendPoint: Identifiable, Equatable {
         let date: Date

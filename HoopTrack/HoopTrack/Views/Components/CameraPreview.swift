@@ -37,6 +37,8 @@ struct CameraPreviewView: UIViewRepresentable {
     }
 
     final class PreviewUIView: UIView {
+        deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     }

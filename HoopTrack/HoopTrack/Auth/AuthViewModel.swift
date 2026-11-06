@@ -4,6 +4,8 @@ import Combine
 
 @MainActor
 final class AuthViewModel: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     @Published private(set) var state: AuthState = .unauthenticated
     /// Set when a password-reset link opened the app; RootView then asks

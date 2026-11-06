@@ -6,6 +6,8 @@ import Combine
 
 @MainActor
 final class TrainViewModel: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     struct Week: Equatable {
         var shots = 0

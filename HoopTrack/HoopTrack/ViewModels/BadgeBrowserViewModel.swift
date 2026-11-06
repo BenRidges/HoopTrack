@@ -3,6 +3,8 @@ import Foundation
 import Combine
 
 @MainActor final class BadgeBrowserViewModel: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     struct BadgeRowItem: Identifiable {
         let id: BadgeID

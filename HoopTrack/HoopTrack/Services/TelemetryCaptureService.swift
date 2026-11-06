@@ -12,6 +12,8 @@ import SwiftData
 
 @MainActor
 final class TelemetryCaptureService {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     private let modelContext: ModelContext
     private let fileManager = FileManager.default

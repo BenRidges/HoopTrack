@@ -3,6 +3,8 @@ import Foundation
 import SwiftData
 
 @MainActor final class BadgeEvaluationService: BadgeEvaluationServiceProtocol {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     private let modelContext: ModelContext
 

@@ -54,6 +54,8 @@ struct LiveSessionView: View {
 
     /// Lets the view model be built from environment objects on first appear.
     final class ViewModelHolder: ObservableObject {
+        deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
         @Published var viewModel: LiveSessionViewModel?
     }
 }

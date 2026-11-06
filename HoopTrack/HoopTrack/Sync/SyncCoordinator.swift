@@ -14,6 +14,8 @@ import SwiftData
 
 @MainActor
 final class SyncCoordinator {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     private let backend: SupabaseDataServiceProtocol
 

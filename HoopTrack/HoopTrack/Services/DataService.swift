@@ -21,6 +21,8 @@ enum DataServiceError: LocalizedError {
 
 @MainActor
 final class DataService: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     let modelContext: ModelContext
 

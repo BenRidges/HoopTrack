@@ -6,6 +6,8 @@ import SwiftUI
 import UIKit
 
 final class LandscapeHostingController<Content: View>: UIHostingController<Content> {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         .landscapeRight

@@ -13,6 +13,8 @@ import Combine
 
 @MainActor
 final class AppServices: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     let container: ModelContainer
     let dataService: DataService

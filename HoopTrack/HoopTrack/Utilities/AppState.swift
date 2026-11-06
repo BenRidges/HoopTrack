@@ -46,6 +46,8 @@ struct CompletedSession: Identifiable {
 
 @MainActor
 final class AppState: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     @Published var selectedTab: AppTab = .train
     @Published var activeLaunch: TrainingLaunch?

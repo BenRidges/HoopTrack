@@ -3,6 +3,8 @@ import Foundation
 import HealthKit
 
 @MainActor final class HealthKitService: HealthKitServiceProtocol {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     private let store = HKHealthStore()
 

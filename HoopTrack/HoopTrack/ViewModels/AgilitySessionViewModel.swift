@@ -8,6 +8,8 @@ import Foundation
 import Combine
 
 @MainActor final class AgilitySessionViewModel: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     enum Metric: String, CaseIterable, Identifiable {
         case shuttleRun = "Shuttle run"

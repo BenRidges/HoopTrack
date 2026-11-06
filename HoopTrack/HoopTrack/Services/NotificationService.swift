@@ -8,6 +8,8 @@ import Combine
 
 @MainActor
 final class NotificationService: NSObject, ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     @Published var authorizationStatus: UNAuthorizationStatus = .notDetermined
 

@@ -65,6 +65,8 @@ jobs:
             -destination "id=$SIM" \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
+      - name: No deinit through the back-deploy shim
+        run: Tools/ci/check-isolated-deinit.sh
       - name: Screens
         if: always()
         uses: actions/upload-artifact@v4

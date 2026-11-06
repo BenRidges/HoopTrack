@@ -28,6 +28,8 @@ enum OrientationLock {
 
 // MARK: - App Delegate (Orientation Gate)
 final class HoopTrackAppDelegate: NSObject, UIApplicationDelegate {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?

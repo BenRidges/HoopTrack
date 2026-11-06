@@ -10,6 +10,8 @@ import LocalAuthentication
 
 @MainActor
 final class AppLock: ObservableObject {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     @Published private(set) var isLocked = false
     private var backgroundedAt: Date?

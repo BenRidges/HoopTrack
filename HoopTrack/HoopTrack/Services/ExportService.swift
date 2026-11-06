@@ -71,6 +71,8 @@ private struct ProfileExport: Codable {
 
 @MainActor
 final class ExportService {
+    deinit {} // Keep: see "Explicit deinit" in CLAUDE.md
+
 
     // MARK: - Public Interface
 
