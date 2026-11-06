@@ -104,7 +104,8 @@ final class DataService: ObservableObject {
     func startSession(drillType: DrillType,
                       namedDrill: NamedDrill? = nil,
                       courtType: CourtType = .nba,
-                      locationTag: String = "") throws -> TrainingSession {
+                      locationTag: String = "",
+                      playoffSeriesID: UUID? = nil) throws -> TrainingSession {
         // Phase 7 — Security: sanitise free-text location tag before persisting.
         let safeTag = String(locationTag.unicodeScalars
             .filter { !CharacterSet.controlCharacters.union(.illegalCharacters).contains($0) }
@@ -115,6 +116,7 @@ final class DataService: ObservableObject {
                                       namedDrill: namedDrill,
                                       courtType: courtType,
                                       locationTag: safeTag)
+        session.playoffSeriesID = playoffSeriesID
         let profile = try fetchOrCreateProfile()
         session.profile = profile
         modelContext.insert(session)
@@ -160,9 +162,11 @@ final class DataService: ObservableObject {
         if let file = session.videoFileName {
             try? FileManager.default.removeItem(at: SessionRecorder.directory.appendingPathComponent(file))
         }
+        let playoff = session.playoffSeriesID
         modelContext.delete(session)
         try modelContext.save()
         try recomputeCareerStats()
+        refreshPlayoff(taggedOn: playoff)
     }
 
     // MARK: - Shots
@@ -217,6 +221,7 @@ final class DataService: ObservableObject {
         shot.session?.recalculateStats()
         save()
         refreshCareerStatsIfFinished(shot.session)
+        refreshPlayoff(taggedOn: shot.session?.playoffSeriesID)
     }
 
     /// Removes a shot that never happened (live "undo" or summary delete).
@@ -227,6 +232,7 @@ final class DataService: ObservableObject {
         session?.recalculateStats()
         save()
         refreshCareerStatsIfFinished(session)
+        refreshPlayoff(taggedOn: session?.playoffSeriesID)
     }
 
     // MARK: - Goals
@@ -365,6 +371,79 @@ final class DataService: ObservableObject {
         revision += 1
     }
 
+    // MARK: - Playoffs
+
+    /// The run in progress, if any. Starting a new one ends the old, so
+    /// there's at most one.
+    func activePlayoffSeries() -> PlayoffSeries? {
+        let descriptor = FetchDescriptor<PlayoffSeries>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
+        return (try? modelContext.fetch(descriptor))?.first { $0.isActive }
+    }
+
+    func playoffSeries(id: UUID) -> PlayoffSeries? {
+        var descriptor = FetchDescriptor<PlayoffSeries>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    func startPlayoffSeries(spot: PlayoffSpot) throws -> PlayoffSeries {
+        if let current = activePlayoffSeries() { retirePlayoff(current) }
+        let series = PlayoffSeries(spot: spot)
+        modelContext.insert(series)
+        try modelContext.save()
+        revision += 1
+        return series
+    }
+
+    /// The run, replayed from every shot of its sessions in order.
+    func playoffRun(for series: PlayoffSeries) -> PlayoffRun {
+        let target: UUID? = series.id
+        let descriptor = FetchDescriptor<TrainingSession>(
+            predicate: #Predicate { $0.playoffSeriesID == target },
+            sortBy: [SortDescriptor(\.startedAt)])
+        let sessions = (try? modelContext.fetch(descriptor)) ?? []
+        var run = PlayoffRun(spot: series.spot,
+                             results: sessions.flatMap { $0.orderedShots.map(\.result) })
+        if series.retiredAt != nil { run.retire() }
+        return run
+    }
+
+    /// Re-reads the run into the series' cached numbers.
+    func refreshPlayoff(_ series: PlayoffSeries) {
+        let run = playoffRun(for: series)
+        series.round       = run.round
+        series.wins        = run.wins
+        series.losses      = run.losses
+        series.status      = run.status
+        series.gamesPlayed = run.games.count
+        series.updatedAt   = .now
+        if run.status == .champion, series.wonAt == nil { series.wonAt = .now }
+        save()
+        revision += 1
+    }
+
+    /// Ends a run early. Its sessions and shots stay in history.
+    func retirePlayoff(_ series: PlayoffSeries) {
+        guard series.isActive else { return }
+        series.retiredAt = .now
+        series.status = .retired
+        series.updatedAt = .now
+        save()
+        revision += 1
+    }
+
+    /// Shots this player has taken, for the comeback drill's weak-spot hint.
+    func recentShotZones(limit: Int = 600) -> [(zone: CourtZone, made: Bool)] {
+        var descriptor = FetchDescriptor<ShotRecord>(sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        descriptor.fetchLimit = limit
+        return ((try? modelContext.fetch(descriptor)) ?? []).map { ($0.zone, $0.result == .make) }
+    }
+
+    private func refreshPlayoff(taggedOn seriesID: UUID?) {
+        guard let seriesID, let series = playoffSeries(id: seriesID) else { return }
+        refreshPlayoff(series)
+    }
+
     // MARK: - Delete everything (Phase 7 — GDPR right-to-delete)
 
     /// Permanently removes all user data: SwiftData records, session videos,
@@ -381,6 +460,7 @@ final class DataService: ObservableObject {
             try deleteEvery(GamePlayer.self)
             try deleteEvery(GameSession.self)
             try deleteEvery(TelemetryUpload.self)
+            try deleteEvery(PlayoffSeries.self)
             try deleteEvery(PlayerProfile.self)
             try modelContext.save()
         } catch {

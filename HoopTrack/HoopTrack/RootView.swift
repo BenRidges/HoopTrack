@@ -74,6 +74,12 @@ struct RootView: View {
             AgilitySessionView(namedDrill: drill, onFinish: finish)
         case .game:
             GameFlowView(onFinish: { appState.finishSession(with: nil) })
+        case .playoff(let id):
+            LandscapeContainer {
+                LiveSessionView(namedDrill: nil, playoffSeriesID: id, onFinish: finish)
+                    .appEnvironment(services, auth: authViewModel)
+            }
+            .ignoresSafeArea()
         }
     }
 }

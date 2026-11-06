@@ -52,6 +52,20 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     let namedDrill: NamedDrill?
     var timeLimit: TimeInterval? { namedDrill?.timeLimitSec }
 
+    // MARK: Playoffs
+
+    /// The run as of the last shot; nil outside a playoff sitting.
+    @Published private(set) var playoff: PlayoffRun?
+    /// The latest game or series result, for the HUD's card.
+    @Published private(set) var playoffMoment: PlayoffMoment?
+    /// Where to take comeback shots: the player's weakest zone, if known.
+    private(set) var comebackZone: CourtZone?
+    let playoffSeriesID: UUID?
+    private var playoffSeries: PlayoffSeries?
+    /// The run before this sitting's first shot.
+    private var playoffBase: PlayoffRun?
+    private var momentCounter = 0
+
     // MARK: Dependencies
 
     private let dataService: DataService
@@ -73,11 +87,13 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     private var lastAnnouncement = Date.distantPast
 
     init(namedDrill: NamedDrill?,
+         playoffSeriesID: UUID? = nil,
          dataService: DataService,
          coordinator: SessionFinalizationCoordinator,
          camera: CameraService,
          haptics: HapticService) {
         self.namedDrill = namedDrill
+        self.playoffSeriesID = playoffSeriesID
         self.dataService = dataService
         self.coordinator = coordinator
         self.camera = camera
@@ -96,13 +112,22 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
         let profile = try? dataService.fetchOrCreateProfile()
         courtType = profile?.preferredCourtType ?? .nba
+        let series = playoffSeriesID.flatMap { dataService.playoffSeries(id: $0) }
         do {
             session = try dataService.startSession(drillType: .freeShoot,
                                                    namedDrill: namedDrill,
-                                                   courtType: courtType)
+                                                   courtType: courtType,
+                                                   playoffSeriesID: series?.id)
         } catch {
             errorMessage = error.localizedDescription
             return
+        }
+        if let series {
+            let base = dataService.playoffRun(for: series)
+            playoffSeries = series
+            playoffBase = base
+            playoff = base
+            comebackZone = PlayoffRun.weakestZone(dataService.recentShotZones())
         }
 
         beginClock()
@@ -164,9 +189,11 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
             dataService.discardSession(session)
             Task { if let url = await recorder?.finish() { try? FileManager.default.removeItem(at: url) } }
         } else {
-            Task { [coordinator] in
+            let series = playoffSeries
+            Task { [coordinator, dataService] in
                 session.videoFileName = await recorder?.finish()?.lastPathComponent
                 _ = try? await coordinator.finaliseSession(session, activeDuration: active)
+                if let series { dataService.refreshPlayoff(series) }
             }
         }
     }
@@ -206,6 +233,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         session.videoFileName = videoURL?.lastPathComponent
         do {
             let result = try await coordinator.finaliseSession(session, activeDuration: active)
+            if let playoffSeries { dataService.refreshPlayoff(playoffSeries) }
             haptics.milestone()
             return result
         } catch {
@@ -250,7 +278,12 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         guard let session, let last = session.orderedShots.last else { return }
         dataService.deleteShot(last)
         refreshCounts()
+        updatePlayoff(announce: false)
         haptics.tap()
+    }
+
+    func dismissPlayoffMoment() {
+        playoffMoment = nil
     }
 
     // MARK: - ShotPipelineDelegate
@@ -313,6 +346,31 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         lastShot = ShotFlash(result: result, id: shotCounter)
         result == .make ? haptics.makeMade() : haptics.missMade()
         announce(result)
+        updatePlayoff(announce: true)
+    }
+
+    /// Replays this sitting's shots on top of the run as it stood, so an
+    /// undo un-decides a game as cleanly as a shot decides one.
+    private func updatePlayoff(announce: Bool) {
+        guard let base = playoffBase, let session else { return }
+        var run = base
+        var event: PlayoffEvent?
+        for shot in session.orderedShots { event = run.record(shot.result) }
+        playoff = run
+        guard announce, let event else {
+            if !announce { playoffMoment = nil }
+            return
+        }
+        momentCounter += 1
+        playoffMoment = PlayoffMoment(event: event, id: momentCounter)
+        switch event {
+        case .seriesWon, .champion, .comebackComplete: haptics.milestone()
+        case .eliminated:                              haptics.longPress()
+        case .gameWon, .gameLost:                      break
+        }
+        if UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement, argument: PlayoffMoment.spoken(event, run: run))
+        }
     }
 
     private func refreshCounts() {
@@ -341,6 +399,24 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         lastAnnouncement = .now
         let word = result == .make ? "Make" : "Miss"
         UIAccessibility.post(notification: .announcement, argument: "\(word). \(makes) for \(attempts).")
+    }
+}
+
+/// A playoff result to show on the HUD.
+struct PlayoffMoment: Equatable, Identifiable {
+    let event: PlayoffEvent
+    let id: Int
+
+    static func spoken(_ event: PlayoffEvent, run: PlayoffRun) -> String {
+        switch event {
+        case .gameWon:          return "Game won. Series \(run.wins) to \(run.losses)."
+        case .gameLost:         return "Game lost. Series \(run.wins) to \(run.losses)."
+        case .seriesWon(let round, _):
+            return "\(PlayoffRun.roundName(round)) won. On to the \(run.roundName.lowercased())."
+        case .eliminated:       return "Eliminated. Make \(run.comebackTarget) to earn another shot."
+        case .champion:         return "Champion!"
+        case .comebackComplete: return "You're back in. The series starts again at zero all."
+        }
     }
 }
 

@@ -53,6 +53,10 @@ final class TrainingSession {
     // MARK: - Sync (Phase 9)
     var cloudSyncedAt: Date?
 
+    // MARK: - Playoffs
+    /// The PlayoffSeries this sitting belongs to; nil for ordinary sessions.
+    var playoffSeriesID: UUID?
+
     // MARK: - Relationships
     var profile: PlayerProfile?
     @Relationship(deleteRule: .cascade) var shots: [ShotRecord]
@@ -113,7 +117,10 @@ final class TrainingSession {
     }
 
     /// Shown in lists and headers: the named drill, else the drill type.
-    var title: String { namedDrill?.rawValue ?? drillType.displayName }
+    var title: String {
+        if playoffSeriesID != nil { return "Playoffs" }
+        return namedDrill?.rawValue ?? drillType.displayName
+    }
 
     var shotsMissed: Int { shotsAttempted - shotsMade }
 

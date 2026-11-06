@@ -14,7 +14,7 @@ enum HoopTrackStore {
         PlayerProfile.self, TrainingSession.self,
         ShotRecord.self, GoalRecord.self, EarnedBadge.self,
         GamePlayer.self, GameSession.self, GameShotRecord.self,
-        TelemetryUpload.self,
+        TelemetryUpload.self, PlayoffSeries.self,
     ])
 
     /// Shared on-disk container for the app process.

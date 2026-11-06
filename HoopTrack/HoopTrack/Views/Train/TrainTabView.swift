@@ -1,6 +1,7 @@
 // TrainTabView.swift
-// Home screen. One big way to start shooting, a quiet look at the week,
-// and the drill library. Everything here starts something.
+// Home screen. One big way to start shooting, a playoff run in progress,
+// a quiet look at the week, and the drill library. Everything here starts
+// something.
 
 import SwiftUI
 
@@ -11,12 +12,24 @@ struct TrainTabView: View {
     @EnvironmentObject private var hapticService: HapticService
     @StateObject private var viewModel = TrainViewModel()
     @State private var openedSession: TrainingSession?
+    @State private var showingPlayoffSetup = false
+    /// Set by the setup sheet; launched once the sheet has gone, since the
+    /// session cover can't open over it.
+    @State private var playoffToLaunch: UUID?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
                 header
                 hero
+                if let playoff = viewModel.playoff {
+                    PlayoffCard(series: playoff.series, run: playoff.run,
+                                onContinue: {
+                                    hapticService.tap()
+                                    appState.activeLaunch = .playoff(playoff.series.id)
+                                },
+                                onEnd: { dataService.retirePlayoff(playoff.series) })
+                }
                 if viewModel.hasHistory {
                     weekStrip
                 } else {
@@ -37,6 +50,16 @@ struct TrainTabView: View {
         .onChange(of: dataService.revision) { _, _ in viewModel.load(from: dataService) }
         .navigationDestination(item: $openedSession) { session in
             SessionDetailView(session: session)
+        }
+        .sheet(isPresented: $showingPlayoffSetup, onDismiss: {
+            if let id = playoffToLaunch {
+                playoffToLaunch = nil
+                appState.activeLaunch = .playoff(id)
+            }
+        }) {
+            PlayoffSetupSheet { spot in
+                playoffToLaunch = try? dataService.startPlayoffSeries(spot: spot).id
+            }
         }
     }
 
@@ -148,6 +171,15 @@ struct TrainTabView: View {
                              detail: drill.summary) {
                         hapticService.tap()
                         appState.activeLaunch = .forDrill(drill)
+                    }
+                }
+                if viewModel.playoff == nil {
+                    Hairline(inset: 64)
+                    DrillRow(icon: "trophy.fill",
+                             title: "Playoffs",
+                             detail: "Best of seven, four rounds. Knocked out? Earn your way back.") {
+                        hapticService.tap()
+                        showingPlayoffSetup = true
                     }
                 }
                 Hairline(inset: 64)

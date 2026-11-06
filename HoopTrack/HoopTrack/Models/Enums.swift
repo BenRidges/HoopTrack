@@ -293,3 +293,50 @@ nonisolated enum SessionKind: String, Codable {
     case training
     case game
 }
+
+// MARK: - Playoffs
+
+/// Where a playoff run is shot from. Easier spots need more makes a game.
+nonisolated enum PlayoffSpot: String, Codable, CaseIterable, Identifiable {
+    case threes     = "Threes"
+    case midRange   = "Mid-range"
+    case freeThrows = "Free throws"
+
+    var id: String { rawValue }
+
+    /// Makes needed to win a 10-shot game in rounds 1 to 4.
+    var makesToWin: [Int] {
+        switch self {
+        case .threes:     return [4, 5, 6, 7]
+        case .midRange:   return [5, 6, 7, 8]
+        case .freeThrows: return [6, 7, 8, 9]
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .threes:     return "3.circle.fill"
+        case .midRange:   return "2.circle.fill"
+        case .freeThrows: return "1.circle.fill"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .threes:     return "Anywhere behind the arc."
+        case .midRange:   return "Inside the arc, outside the paint."
+        case .freeThrows: return "From the line."
+        }
+    }
+}
+
+/// Where a playoff run stands.
+nonisolated enum PlayoffStatus: String, Codable {
+    /// Playing a series.
+    case playing
+    /// Knocked out; making shots to earn the round back.
+    case comeback
+    case champion
+    /// Ended by the player.
+    case retired
+}

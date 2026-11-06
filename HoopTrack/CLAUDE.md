@@ -43,7 +43,7 @@ When adding pure logic, keep the file free of SwiftUI/UIKit/CoreGraphics imports
 
 ### Data layer
 
-- **`Models/`** — SwiftData `@Model` classes: `PlayerProfile`, `TrainingSession`, `ShotRecord`, `GoalRecord`, `EarnedBadge`, `GameSession`, `GamePlayer`, `GameShotRecord`, `TelemetryUpload`. All enums live in `Models/Enums.swift`.
+- **`Models/`** — SwiftData `@Model` classes: `PlayerProfile`, `TrainingSession`, `ShotRecord`, `GoalRecord`, `EarnedBadge`, `GameSession`, `GamePlayer`, `GameShotRecord`, `TelemetryUpload`, `PlayoffSeries`. All enums live in `Models/Enums.swift`.
 - **`Services/DataService.swift`** — all persistence goes through here. It bumps a published `revision` on every save; tabs reload on `onChange(of: dataService.revision)`.
 - **`SessionFinalizationCoordinator`** — every session type ends through one pipeline: goals → Health (if enabled) → skill ratings → badges → reminders → sync → telemetry (if enabled).
 - **`TrainingSession.recalculateStats()`** — call after modifying `shots`.
@@ -73,7 +73,8 @@ All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums:
 
 ### Navigation
 
-- **Train** — start shooting (hero), this week, drill library (`NamedDrill.library`), pickup game, last session.
+- **Train** — start shooting (hero), playoff run in progress, this week, drill library (`NamedDrill.library`), playoffs, pickup game, last session.
+- **Playoffs** — best of seven, four rounds, solo. `PlayoffRun` (`Utilities/PlayoffEngine.swift`, pure) is replayed from the shots of every `TrainingSession` tagged with the run's `playoffSeriesID`, so undo and corrections just work; `PlayoffSeries` only caches the result (`DataService.refreshPlayoff`). Sittings are ordinary shooting sessions (`TrainingLaunch.playoff(id)`) with a playoff HUD, so they count toward every stat.
 - **Progress** — FG% for a range with trend, shot chart, zones, skills, goals, badges, history, games.
 - **Profile** — career numbers and every setting (training, cloud backup, privacy, developer).
 - Sessions: `LiveSessionView` (landscape, via `LandscapeContainer`), `DribbleDrillView`, `AgilitySessionView`, `GameFlowView`. Each ends with `onFinish(SessionResult?)`; nil means nothing worth keeping (empty sessions are discarded).
@@ -94,7 +95,7 @@ All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums:
 - **`Utilities/InputValidator.swift`** — Pure `enum` with static validators. Call before persisting any sensor value or user string: `isValidReleaseAngle`, `isValidJumpHeight`, `isValidCourtCoordinate`, `sanitisedProfileName`.
 - **`Utilities/PinningURLSessionDelegate.swift`** — SPKI SHA-256 cert pinning (real Supabase hashes live since Phase 9). **Delegate is not yet wired into supabase-swift's URLSession — the pins are scenery until that happens.** Tracked P0 in `docs/production-readiness.md`.
 - **`PrivacyInfo.xcprivacy`** — App Store privacy manifest. Auto-discovered by Xcode 26. No pbxproj edits needed.
-- **`DataService.deleteAllUserData()`** — GDPR right-to-delete. Deletes every SwiftData record (all nine models), session videos, telemetry files, exports, the Keychain, and every key in `AppPreferences.allKeys`.
+- **`DataService.deleteAllUserData()`** — GDPR right-to-delete. Deletes every SwiftData record (all ten models), session videos, telemetry files, exports, the Keychain, and every key in `AppPreferences.allKeys`.
 
 ### Auth layer (added Phase 8)
 

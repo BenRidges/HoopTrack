@@ -403,8 +403,22 @@ Data-model layer + registration flow + manual-scoring live game. Landed 2026-04-
 ### Game — SP2 Scoring & Box Score 🔜 Planned
 See [SP2 design spec](../HoopTrack/docs/superpowers/specs/2026-04-19-game-scoring-design.md). Builds `PlayerTracker` (appearance-matching re-ID), `GameScoringCoordinator`, full `LiveGameView` with killfeed + player overlays, post-game box score + unresolved-shots flow.
 
-### Game — SP3 BO7 Playoff 🔜 Planned (after SP2)
-See [SP3 design spec](../HoopTrack/docs/superpowers/specs/2026-04-19-game-playoff-design.md). `PlayoffSeries` state machine, round thresholds (40/50/60/70%), `WeakZoneAnalyser`, prescribed-drill generation, mid-series resume.
+### Game — SP3 BO7 Playoff ✅ Built (Nov 2026)
+Built from the [SP3 design spec](../HoopTrack/docs/superpowers/specs/2026-04-19-game-playoff-design.md) as a solo shooting mode. It doesn't depend on SP2.
+
+How it works:
+- Four rounds, best of seven. Each game is 10 shots, won by reaching the round's target before the misses run out.
+- Spot presets with their own targets per round:
+  - threes: 4/5/6/7;
+  - mid-range: 5/6/7/8;
+  - free throws: 6/7/8/9.
+- An elimination leads to a comeback drill: make three games' worth of shots, with a hint for the player's weakest zone (`PlayoffRun.weakestZone`). Finishing it earns the round back at 0–0.
+- Resume from the Train tab card. Runs show on the Progress tab.
+
+Changes from the spec:
+- No separate state machine to keep in sync. `PlayoffRun` is replayed from the shots of the run's tagged sessions, so undo and corrections are exact.
+- Sittings are normal shooting sessions, so playoff shots count in every stat, chart and replay.
+- The comeback is counted by makes rather than prescribed as a generated drill.
 
 ### Game — SP4 Live Commentary 🔜 Planned (can run parallel to SP2)
 See [SP4 design spec](../HoopTrack/docs/superpowers/specs/2026-04-19-game-commentary-design.md). `CommentaryEventBus`, clip-selection engine (intensity + anti-rep + pacing), 2 personalities at launch. Works with solo training in "lite" mode.

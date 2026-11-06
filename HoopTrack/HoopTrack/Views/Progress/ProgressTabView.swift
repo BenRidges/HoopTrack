@@ -32,6 +32,7 @@ struct ProgressTabView: View {
                     if let profile = viewModel.profile { GoalsSection(profile: profile) }
                     if let profile = viewModel.profile { badgesRow(profile) }
                     history
+                    PlayoffRunsSection()
                     RecentGamesSection()
                 } else {
                     emptyState

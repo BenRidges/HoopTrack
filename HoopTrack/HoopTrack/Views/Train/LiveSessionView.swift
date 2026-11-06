@@ -12,6 +12,7 @@ import Combine
 struct LiveSessionView: View {
 
     let namedDrill: NamedDrill?
+    var playoffSeriesID: UUID? = nil
     let onFinish: (SessionResult?) -> Void
 
     @EnvironmentObject private var dataService: DataService
@@ -37,6 +38,7 @@ struct LiveSessionView: View {
         .onAppear {
             if holder.viewModel == nil {
                 holder.viewModel = LiveSessionViewModel(namedDrill: namedDrill,
+                                                        playoffSeriesID: playoffSeriesID,
                                                         dataService: dataService,
                                                         coordinator: coordinator,
                                                         camera: cameraService,
@@ -69,9 +71,17 @@ private struct LiveSessionContent: View {
             camera
             ShotFlashOverlay(flash: viewModel.lastShot)
             hud
+            if let moment = viewModel.playoffMoment, let run = viewModel.playoff, !viewModel.isPaused {
+                PlayoffMomentCard(moment: moment, run: run, comebackZone: viewModel.comebackZone,
+                                  onDismiss: { viewModel.dismissPlayoffMoment() },
+                                  onFinish: { finish() })
+                    .id(moment.id)
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+            }
             if viewModel.isPaused { pausedOverlay }
             if showsHoopCoach { hoopCoach }
         }
+        .animation(.snappy, value: viewModel.playoffMoment)
         .task { await viewModel.start(showDetectionBoxes: showDetectionBoxes) }
         .onChange(of: viewModel.timeIsUp) { _, up in
             if up { finish() }
@@ -121,7 +131,11 @@ private struct LiveSessionContent: View {
     private var hud: some View {
         VStack {
             HStack(alignment: .top) {
-                scoreBlock
+                if let run = viewModel.playoff {
+                    PlayoffScoreboard(run: run, comebackZone: viewModel.comebackZone)
+                } else {
+                    scoreBlock
+                }
                 Spacer()
                 statusPill
                 Spacer()

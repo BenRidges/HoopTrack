@@ -15,6 +15,8 @@ enum TrainingLaunch: Identifiable, Equatable {
     case dribble(NamedDrill)
     case agility(NamedDrill)
     case game
+    /// A sitting of the playoff run with this PlayoffSeries id.
+    case playoff(UUID)
 
     var id: String {
         switch self {
@@ -22,6 +24,7 @@ enum TrainingLaunch: Identifiable, Equatable {
         case .dribble(let drill):  return "dribble-\(drill.rawValue)"
         case .agility(let drill):  return "agility-\(drill.rawValue)"
         case .game:                return "game"
+        case .playoff(let id):     return "playoff-\(id.uuidString)"
         }
     }
 

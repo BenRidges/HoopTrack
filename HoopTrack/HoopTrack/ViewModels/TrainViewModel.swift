@@ -1,5 +1,5 @@
 // TrainViewModel.swift
-// The Train tab's "this week" strip and last-session row.
+// The Train tab's "this week" strip, playoff run and last-session row.
 
 import Foundation
 import Combine
@@ -20,6 +20,8 @@ final class TrainViewModel: ObservableObject {
     @Published private(set) var streak = 0
     @Published private(set) var lastSession: TrainingSession?
     @Published private(set) var hasHistory = false
+    /// The playoff run in progress, replayed fresh (loading never writes).
+    @Published private(set) var playoff: (series: PlayoffSeries, run: PlayoffRun)?
 
     func load(from dataService: DataService) {
         let calendar = Calendar.current
@@ -36,6 +38,7 @@ final class TrainViewModel: ObservableObject {
         streak = profile?.currentStreakDays ?? 0
         lastSession = (try? dataService.fetchSessions(limit: 1))?.first
         hasHistory = lastSession != nil
+        playoff = dataService.activePlayoffSeries().map { ($0, dataService.playoffRun(for: $0)) }
     }
 
     var greeting: String {
