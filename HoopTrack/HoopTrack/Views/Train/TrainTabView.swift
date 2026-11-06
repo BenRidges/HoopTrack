@@ -90,11 +90,13 @@ struct TrainTabView: View {
 
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
-            HalfCourtShape()
+            // The key and arc come in from the top-right; the arc's left
+            // edge stays clear of the headline.
+            HalfCourtShape(sidelines: false)
                 .stroke(Color.leather.opacity(0.28), lineWidth: 2)
                 .aspectRatio(CourtGeometry.widthFt / CourtGeometry.depthFt, contentMode: .fit)
                 .frame(width: 330)
-                .offset(x: 130, y: -70)
+                .offset(x: 145, y: -70)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .accessibilityHidden(true)
 

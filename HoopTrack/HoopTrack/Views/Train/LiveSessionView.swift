@@ -175,7 +175,7 @@ private struct LiveSessionContent: View {
         .padding(.vertical, 6)
         .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(viewModel.makes) makes from \(viewModel.attempts) shots")
+        .accessibilityLabel("\(viewModel.makes.counted("make")) from \(viewModel.attempts.counted("shot"))")
     }
 
     private var statusPill: some View {

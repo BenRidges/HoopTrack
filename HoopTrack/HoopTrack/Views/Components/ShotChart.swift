@@ -13,6 +13,9 @@ import CoreGraphics
 /// Court lines for a 50 × 47 ft half court. Draw into a 50:47 rect.
 struct HalfCourtShape: Shape {
     var threePointFt: Double = CourtType.nba.threePointDistanceFt
+    /// Off for decoration: the sidelines and half-court line are long
+    /// straight strokes that cut through any text laid over them.
+    var sidelines = true
 
     func path(in rect: CGRect) -> Path {
         let sx = rect.width / CourtGeometry.widthFt
@@ -33,8 +36,11 @@ struct HalfCourtShape: Shape {
         }
 
         var path = Path()
-        // Baseline and sidelines.
-        path.addRect(CGRect(origin: p(0, 0), size: CGSize(width: rect.width, height: rect.height)))
+        if sidelines {
+            path.addRect(CGRect(origin: p(0, 0), size: CGSize(width: rect.width, height: rect.height)))
+        } else {
+            path.move(to: p(0, 0)); path.addLine(to: p(CourtGeometry.widthFt, 0))
+        }
         // Lane.
         path.addRect(CGRect(origin: p(17, 0), size: CGSize(width: 16 * sx, height: 19 * sy)))
         // Free-throw circle.
@@ -149,7 +155,7 @@ struct ShotChart: View {
     private var accessibilitySummary: String {
         guard !placed.isEmpty else { return "Shot chart. No placed shots." }
         let makes = placed.filter(\.isMake).count
-        return "Shot chart. \(makes) makes from \(placed.count) placed shots."
+        return "Shot chart. \(makes.counted("make")) from \(placed.count.counted("placed shot"))."
     }
 }
 

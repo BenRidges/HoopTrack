@@ -21,6 +21,13 @@ nonisolated extension Date {
     }
 }
 
+nonisolated extension Int {
+    /// "1 game", "3 games". The app's copy is English-only.
+    func counted(_ noun: String, plural: String? = nil) -> String {
+        "\(self) \(self == 1 ? noun : plural ?? noun + "s")"
+    }
+}
+
 nonisolated extension TimeInterval {
     /// "4:07" style clock text for durations.
     var clockText: String {

@@ -68,7 +68,7 @@ struct PlayoffRunView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(series.standing)
                         .font(.title2.bold())
-                    Text("Started \(series.createdAt.formatted(date: .abbreviated, time: .omitted)) · \(run?.games.count ?? 0) games")
+                    Text("Started \(series.createdAt.formatted(date: .abbreviated, time: .omitted)) · \((run?.games.count ?? 0).counted("game"))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

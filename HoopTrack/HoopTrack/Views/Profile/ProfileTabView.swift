@@ -221,7 +221,7 @@ struct ProfileTabView: View {
         LabeledContent("Best session", value: profile.prBestFGPercentSession > 0
                        ? "\(Int(profile.prBestFGPercentSession.rounded()))%" : "–")
         LabeledContent("Most makes", value: "\(profile.prMostMakesSession)")
-        LabeledContent("Longest streak", value: "\(profile.longestStreakDays) days")
+        LabeledContent("Longest streak", value: profile.longestStreakDays.counted("day"))
     }
 
     private func hoursText(_ minutes: Double) -> String {

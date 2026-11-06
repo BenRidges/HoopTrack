@@ -79,7 +79,7 @@ struct ProgressTabView: View {
             } else {
                 Text("No shots \(viewModel.range.phrase)")
                     .font(.title3.weight(.semibold))
-                Text("\(viewModel.sessionCount) sessions · \(Int(viewModel.minutes)) min")
+                Text("\(viewModel.sessionCount.counted("session")) · \(Int(viewModel.minutes)) min")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

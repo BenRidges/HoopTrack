@@ -36,11 +36,10 @@ struct OnboardingView: View {
 
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HalfCourtShape()
+            HalfCourtShape(sidelines: false)
                 .stroke(Color.leather.opacity(0.35), lineWidth: 2)
                 .aspectRatio(CourtGeometry.widthFt / CourtGeometry.depthFt, contentMode: .fit)
-                .padding(.horizontal, -40)
-                .frame(maxHeight: 300)
+                .frame(maxWidth: .infinity, maxHeight: 300)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 10) {

@@ -82,18 +82,22 @@ private struct GoalRow: View {
                 Text(goal.title)
                     .font(.body.weight(.semibold))
                 Spacer()
-                Text("\(goal.progressPercent)%")
+                // Where the player is now; the bar shows how far that is
+                // from the starting point to the target. A bare "0%" here
+                // read as a shooting percentage.
+                Text(GoalFormat.value(goal.currentValue, goal.metric))
                     .font(.score(22))
                     .foregroundStyle(Color.leather)
             }
             ProgressView(value: goal.progressFraction)
                 .tint(Color.leather)
+                .accessibilityValue("\(goal.progressPercent) percent of the way")
             HStack {
-                Text("\(GoalFormat.value(goal.currentValue, goal.metric)) now · target \(GoalFormat.value(goal.targetValue, goal.metric))")
+                Text("From \(GoalFormat.value(goal.baselineValue, goal.metric)) · target \(GoalFormat.value(goal.targetValue, goal.metric))")
                 Spacer()
                 if let days = goal.daysRemaining {
                     Text(days < 0 ? "Past the deadline" : days == 0 ? "Due today"
-                         : days == 1 ? "1 day left" : "\(days) days left")
+                         : "\(days.counted("day")) left")
                         .foregroundStyle(days < 7 ? Color.miss : .secondary)
                 }
             }
