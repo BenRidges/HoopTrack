@@ -38,7 +38,13 @@ nonisolated enum BallDetectorFactory {
     static func make(_ configuration: BallDetectorConfiguration) -> BallDetectorProtocol? {
         switch configuration {
         case .stub:
+            // The synthetic arc only exists in debug builds; a release build
+            // that somehow asks for it gets manual mode, never fake shots.
+            #if DEBUG
             return BallDetectorStub()
+            #else
+            return nil
+            #endif
 
         case .bundled(let modelName):
             // Xcode compiles the .mlpackage source into .mlmodelc at build

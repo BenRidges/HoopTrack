@@ -1,0 +1,8 @@
+# Training and export for Tools/training/train_detector.py.
+# Install into a venv; after the first good run, freeze exact versions with
+#   .venv/bin/pip freeze > Tools/training/requirements.lock
+# and install from the lock from then on, so a retrain months later builds
+# the same way.
+ultralytics>=8.3.0,<8.4
+coremltools>=8.0,<9
+pyyaml>=6.0

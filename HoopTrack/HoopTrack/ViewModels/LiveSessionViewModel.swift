@@ -242,7 +242,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     func logManual(_ result: ShotResult) {
         record(result: result, zone: .unknown, courtX: 0.5, courtY: 0.5,
-               science: nil, videoOffset: nil, needsReview: false)
+               science: nil, videoOffset: nil, detectionConfidence: nil)
     }
 
     /// Removes the most recent shot (wrong call, or a shot that never happened).
@@ -289,19 +289,21 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         guard !isPaused, phase == .live else { return }
         record(result: shot.result, zone: shot.zone, courtX: shot.courtX, courtY: shot.courtY,
                science: shot.science, videoOffset: shot.videoOffset,
-               needsReview: shot.confidence < HoopTrack.CV.lowConfidence)
+               detectionConfidence: shot.confidence)
     }
 
     // MARK: - Private
 
     private func record(result: ShotResult, zone: CourtZone, courtX: Double, courtY: Double,
-                        science: ShotScienceMetrics?, videoOffset: Double?, needsReview: Bool) {
+                        science: ShotScienceMetrics?, videoOffset: Double?,
+                        detectionConfidence: Double?) {
         guard let session, phase == .live else { return }
         do {
             try dataService.addShot(to: session, result: result, zone: zone, shotType: .unknown,
                                     courtX: courtX, courtY: courtY, science: science,
                                     videoOffset: videoOffset ?? recordingOffsetNow(),
-                                    needsReview: needsReview)
+                                    needsReview: (detectionConfidence ?? 1) < HoopTrack.CV.lowConfidence,
+                                    detectionConfidence: detectionConfidence)
         } catch {
             errorMessage = error.localizedDescription
             return

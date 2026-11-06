@@ -115,18 +115,23 @@ This document tracks everything that is deliberately dev-only, placeholder, or d
   - *Current:* `BallDetector.mlmodel` is v1 (yolov8s, 40 epochs, mAP50 0.988) trained on the public Roboflow dataset.
   - *Required:* Either (a) ship v1 as the launch model, OR (b) collect ≥ 20 sessions of real HoopTrack footage via `upgrade-cv-detection.md` Phase A, retrain, and ship v2. Don't ship the synthetic `BallDetectorStub` in production.
 
-- ⏳ **`BallDetectorStub` gated to simulator/debug only**
-  - *Current:* `BallDetectorFactory.active` returns `.bundled` always. Stub compiles into every build as a compile-time safety net but is never selected at runtime.
-  - *Recommended:* Confirm the production archive does not include the stub in a runtime-reachable path. `grep -r BallDetectorStub` in the built `.app` should return nothing.
+- ✅ **`BallDetectorStub` gated to debug only** (Nov 2026)
+  - `BallDetectorStub` is wrapped in `#if DEBUG`; in a release build `.stub` returns nil (manual mode), so a fake detector can't ship.
+- ⏳ **Detector licence** (Nov 2026)
+  - *Current:* The bundled model is Ultralytics YOLO, AGPL-3.0. See `docs/training-review-2026-11.md`.
+  - *Required:* An Ultralytics Enterprise licence, or a model trained with Create ML or an Apache-2.0 detector, before the first App Store build.
 
 ### P1 — High
 
-- ⏳ **Remove raw-YOLO fallback decoder once confident**
-  - *Current:* `CoreMLBallDetector.decodeYOLO()` exists as a safety net for non-NMS model exports. Dead code today since our bundled model has NMS.
-  - *Recommended:* Keep for one or two releases in case a future model retrain accidentally ships without NMS. Remove in the v1.1 release after verifying the NMS path is the only one used in telemetry.
+- ✅ **Raw-YOLO fallback decoder removed** (Nov 2026)
+  - The detector reads Vision's NMS output only. `Tools/training/train_detector.py` always exports with NMS.
 
-- ⏳ **Phase A telemetry foundation (see `docs/upgrade-cv-detection.md`)**
-  - Shot telemetry capture + eval fixture + user-correction UI. Ships before Phase B retrain. This is the foundation for improving detection accuracy on real HoopTrack footage.
+- ✅ **Phase A telemetry foundation** (Nov 2026)
+  - Capture: `detections.jsonl` plus `manifest.json`, which records each frame's boxes and each shot's outcome.
+  - Eval: `swift run shot-eval`.
+  - Correction UI: "Check" flags, edit and undo.
+  - Dataset and retraining: `Tools/dataset`, `Tools/training`.
+  - *Still needed:* real labelled sessions (see `docs/cv-review-2026-11.md`, "Next").
 
 ### P2 — Nice to have
 

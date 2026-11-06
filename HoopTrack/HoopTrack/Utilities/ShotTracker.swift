@@ -45,6 +45,9 @@ nonisolated struct ShotTracker: Sendable {
         /// Time the ball dropped through rim height, if seen. Used for arc.
         let rimArrivalTime: Double?
         let hoop: CGRect
+        /// When the shot ball was last detected. For a lost ball, roughly
+        /// when it reached the rim.
+        let lastSeenTime: Double
     }
 
     enum Event: Sendable, Equatable {
@@ -108,6 +111,8 @@ nonisolated struct ShotTracker: Sendable {
     private var reachedApex = false
     /// Follows the ball from release until the shot resolves.
     private var filter: BallFilter?
+    /// The rim box at release, used until the shot resolves.
+    private var shotHoop: CGRect?
 
     /// Image aspect ratio (width / height). Converts width-normalised sizes
     /// into height-normalised units for vertical thresholds.
@@ -123,6 +128,9 @@ nonisolated struct ShotTracker: Sendable {
         return true
     }
 
+    /// The rim box held for the shot in flight, nil between shots.
+    var lockedHoop: CGRect? { shotHoop }
+
     /// The shot ball's last box while a shot is in flight, nil between shots.
     /// CVPipeline crops detection around this and the hoop.
     var shotBallBox: CGRect? {
@@ -137,14 +145,19 @@ nonisolated struct ShotTracker: Sendable {
         cooldownUntil = -.infinity
         reachedApex = false
         filter = nil
+        shotHoop = nil
     }
 
     // MARK: Per-frame update
 
     /// Feed one frame. `balls` are all ball candidates this frame (any order);
     /// `hoop` is the smoothed rim box, nil when no rim has been seen.
-    mutating func update(balls: [CGRect], hoop: CGRect?, time: Double) -> Event? {
-        guard let hoop, hoop.width > 0, hoop.height > 0 else { return nil }
+    mutating func update(balls: [CGRect], hoop liveHoop: CGRect?, time: Double) -> Event? {
+        // During a shot the rim is held where it was at release: the ball
+        // passing through the net makes the detected box jump about, which
+        // would move the make line mid-shot. The phone is on a stand, so the
+        // real rim doesn't move.
+        guard let hoop = shotHoop ?? liveHoop, hoop.width > 0, hoop.height > 0 else { return nil }
 
         let rimUnitY = Double(hoop.width) * aspect           // rim diameter, height units
         let rimLine = Double(hoop.maxY) - 0.15 * Double(hoop.height)
@@ -164,6 +177,7 @@ nonisolated struct ShotTracker: Sendable {
         case .idle:
             for track in candidates {
                 if let event = tryStart(track: track, rimLine: rimLine, rimUnitY: rimUnitY, time: time) {
+                    shotHoop = hoop
                     return event
                 }
             }
@@ -282,8 +296,11 @@ nonisolated struct ShotTracker: Sendable {
             let v = upwardSpeed(at: i, in: run)
             if v > fastest { fastest = v; releaseIndex = i }
         }
+        // The shorter side: motion blur stretches the box along the ball's
+        // path (mostly upwards), which would make the ball look bigger and
+        // so closer than it is.
         let afterRelease = run[releaseIndex...].prefix(5).map { sample -> Double in
-            max(Double(sample.box.width), Double(sample.box.height) / aspect)
+            min(Double(sample.box.width), Double(sample.box.height) / aspect)
         }
         let release = Release(box: run[releaseIndex].box,
                               time: run[releaseIndex].time,
@@ -409,11 +426,13 @@ nonisolated struct ShotTracker: Sendable {
         phase = .idle
         reachedApex = false
         filter = nil
+        shotHoop = nil
         cooldownUntil = time + tuning.cooldown
+        let seen = lastSeen
         history.removeAll()
         candidates.removeAll()
         return .resolved(Outcome(result: result, confidence: confidence, release: release,
-                                 rimArrivalTime: arrival, hoop: hoop))
+                                 rimArrivalTime: arrival, hoop: hoop, lastSeenTime: seen))
     }
 
     /// Upward speed (height units/s) at index `i`, smoothed over two steps.

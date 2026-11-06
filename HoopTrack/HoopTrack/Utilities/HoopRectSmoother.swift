@@ -69,6 +69,33 @@ nonisolated struct HoopRectSmoother: Sendable {
         lastSeenTimestamp = 0
     }
 
+    /// Which of this frame's hoop detections is the one being tracked.
+    ///
+    /// Gyms often have more than one basket in view. Taking the most
+    /// confident box each frame made the smoother average two hoops into a
+    /// box between them. Instead: while tracking, only a box overlapping the
+    /// current one counts; otherwise (first sighting, or lost after the
+    /// phone moved) take the biggest box — the nearest hoop, the one the
+    /// camera was set up for.
+    func choose(from candidates: [CGRect]) -> CGRect? {
+        let valid = candidates.filter { $0.width > 0 && $0.height > 0 }
+        if state == .tracking, let current = smoothedRect {
+            let best = valid.map { ($0, Self.overlap($0, current)) }.max { $0.1 < $1.1 }
+            return best.flatMap { $0.1 >= 0.2 ? $0.0 : nil }
+        }
+        return valid.max { $0.width * $0.height < $1.width * $1.height }
+    }
+
+    /// Intersection over union.
+    static func overlap(_ a: CGRect, _ b: CGRect) -> Double {
+        let w = min(a.maxX, b.maxX) - max(a.minX, b.minX)
+        let h = min(a.maxY, b.maxY) - max(a.minY, b.minY)
+        guard w > 0, h > 0 else { return 0 }
+        let inter = Double(w * h)
+        let union = Double(a.width * a.height + b.width * b.height) - inter
+        return union > 0 ? inter / union : 0
+    }
+
     // MARK: - Private
 
     private func ema(from a: CGRect, to b: CGRect, alpha: Double) -> CGRect {

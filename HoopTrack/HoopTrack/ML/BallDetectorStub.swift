@@ -6,6 +6,7 @@
 import AVFoundation
 import CoreGraphics
 
+#if DEBUG
 nonisolated final class BallDetectorStub: BallDetectorProtocol {
 
     nonisolated(unsafe) private var frameCount = 0
@@ -40,6 +41,7 @@ nonisolated final class BallDetectorStub: BallDetectorProtocol {
             frameTimestamp: timestamp
         )
 
-        return SceneDetection(balls: ball.map { [$0] } ?? [], basket: basket, frameTimestamp: timestamp)
+        return SceneDetection(balls: ball.map { [$0] } ?? [], baskets: [basket], frameTimestamp: timestamp)
     }
 }
+#endif

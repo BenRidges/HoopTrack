@@ -4,9 +4,10 @@
 // camera's field of view that gives each object's distance from the lens,
 // and from there the shooter's position relative to the basket.
 //
-// Assumes the usual setup: phone on a stand behind (or in front of) the
-// shooter, looking at the hoop. Side-on camera placements can't be mapped
-// to the court this way and fall back to "unknown position".
+// Works with the phone behind the shooter looking at the hoop (the
+// recommended setup) or behind the hoop looking back at the shooter.
+// Side-on placements can't be mapped this way; implausible results fall
+// back to "unknown position".
 
 import Foundation
 #if canImport(CoreGraphics)
@@ -50,11 +51,14 @@ nonisolated enum CourtPositionEstimator {
         let ballX = (Double(ballBox.midX) - 0.5) * ballDepth / f
         let rimX  = (Double(rimBox.midX) - 0.5) * rimDepth / f
 
-        let lateral = ballX - rimX
-        let depth = rimDepth - ballDepth
-        guard lateral.isFinite, depth.isFinite,
-              abs(lateral) < 12, depth > -2, depth < 16 else { return nil }
-        return Estimate(lateralM: lateral, depthM: max(0, depth))
+        // Ball nearer the lens than the rim: camera behind the shooter.
+        // Ball further away: camera behind the hoop facing the shooter, which
+        // also mirrors left and right relative to the court.
+        let facingShooter = ballDepth > rimDepth + 1.5
+        let lateral = facingShooter ? rimX - ballX : ballX - rimX
+        let depth = abs(rimDepth - ballDepth)
+        guard lateral.isFinite, depth.isFinite, abs(lateral) < 12, depth < 16 else { return nil }
+        return Estimate(lateralM: lateral, depthM: depth)
     }
 
     /// Normalised court coordinates for an estimate (see CourtGeometry).

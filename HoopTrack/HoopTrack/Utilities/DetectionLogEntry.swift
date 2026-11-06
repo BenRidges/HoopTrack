@@ -41,6 +41,14 @@ nonisolated struct DetectionLogEntry: Codable, Sendable, Equatable {
     /// Confidence of a make/miss call made on this frame.
     var eventConfidence: Double? = nil
 
+    /// Net movement since the previous frame (NetMotion.activity), nil when
+    /// the net wasn't sampled.
+    var netActivity: Double? = nil
+
+    /// Call published after the net check ("make"/"miss"), when it was held.
+    var checkedEvent: String? = nil
+    var checkedConfidence: Double? = nil
+
     enum CodingKeys: String, CodingKey {
         case timestampSec    = "t"
         case ballConfidence  = "ci"
@@ -52,6 +60,9 @@ nonisolated struct DetectionLogEntry: Codable, Sendable, Equatable {
         case region          = "roi"
         case event           = "ev"
         case eventConfidence = "ec"
+        case netActivity     = "na"
+        case checkedEvent    = "cv"
+        case checkedConfidence = "cc"
     }
 
     /// Encode as a single-line JSON terminated with `\n`. Safe to append

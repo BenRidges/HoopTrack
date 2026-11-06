@@ -141,7 +141,14 @@ import Combine
         else { return }
 
         let videoURL = SessionRecorder.directory.appendingPathComponent(videoFileName)
-        let shotTimestamps = session.orderedShots.compactMap(\.videoTimestampSeconds)
+        let shots = session.orderedShots.compactMap { shot -> TelemetryManifest.Shot? in
+            guard let time = shot.videoTimestampSeconds, shot.result != .pending else { return nil }
+            return TelemetryManifest.Shot(videoSec: time,
+                                          result: shot.result == .make ? "make" : "miss",
+                                          autoConfidence: shot.detectionConfidence,
+                                          needsReview: shot.needsReview,
+                                          userCorrected: shot.isUserCorrected)
+        }
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         let sessionID = session.id
         let sessionStartedAt = session.startedAt
@@ -152,7 +159,7 @@ import Combine
                 sessionID: sessionID,
                 sessionKind: .training,
                 videoURL: videoURL,
-                shotTimestamps: shotTimestamps,
+                shots: shots,
                 sessionStartedAt: sessionStartedAt,
                 sessionDurationSec: durationSec,
                 modelVersion: HoopTrack.MLModel.modelVersion,

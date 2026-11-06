@@ -37,6 +37,25 @@ final class ShotReplayTests: XCTestCase {
         XCTAssertEqual(ShotReplay.run(log).map(\.result), [.make])
     }
 
+    func test_replay_netSwingRescuesABallLostAtTheRim() {
+        // Off-centre and lost just above the rim (behind it, say), then the net jumps.
+        let log = stride(from: 0.0, through: 2.0, by: 1.0 / 60).map { t -> DetectionLogEntry in
+            let y = 0.40 + 2.0 * t - 1.6667 * t * t
+            let ball: [Double]? = t <= 0.85 ? [0.57 - 0.015, y - 0.0267, 0.03, 0.0533] : nil
+            var entry = DetectionLogEntry(timestampSec: t,
+                                          ballConfidence: ball == nil ? nil : 0.8,
+                                          ballBox: ball, rimConfidence: 0.9, rimBox: rim, state: "idle")
+            entry.balls = ball.map { [$0 + [0.8]] } ?? []
+            entry.netActivity = t >= 0.95 && t <= 1.6 ? 0.06 : 0.01
+            return entry
+        }
+        XCTAssertEqual(ShotReplay.run(log, netCheck: false).map(\.result), [.miss])
+        let calls = ShotReplay.run(log)
+        XCTAssertEqual(calls.map(\.result), [.make])
+        XCTAssertLessThan(calls[0].confidence, HoopTrack.CV.lowConfidence)
+        XCTAssertEqual(calls[0].time, 0.85, accuracy: 0.02)
+    }
+
     func test_replay_parsesJSONL() throws {
         let text = try shotLog(start: 0).map { try $0.jsonLine() }.joined() + "garbage line\n"
         XCTAssertEqual(ShotReplay.entries(fromJSONL: text).count, shotLog(start: 0).count)

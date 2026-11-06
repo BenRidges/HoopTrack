@@ -15,11 +15,15 @@ nonisolated struct BallDetection: Sendable {
 /// there are several balls on court.
 nonisolated struct SceneDetection: Sendable {
     let balls: [BallDetection]
-    let basket: BallDetection?
+    /// Every hoop in view, most confident first — a gym can have several.
+    /// CourtCalibrationService decides which one is being shot at.
+    let baskets: [BallDetection]
     let frameTimestamp: CMTime
 
     /// Most confident ball, for logging and the debug overlay.
     var ball: BallDetection? { balls.first }
+    /// Most confident hoop.
+    var basket: BallDetection? { baskets.first }
 }
 
 /// Implemented by the Core ML wrapper and the debug stub. Called on the

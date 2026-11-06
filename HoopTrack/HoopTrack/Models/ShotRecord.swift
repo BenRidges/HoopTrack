@@ -39,6 +39,10 @@ final class ShotRecord {
     var isUserCorrected: Bool           // true if user edited result/position
     /// Set when the CV call was low-confidence; the summary asks the user to check it.
     var needsReview: Bool = false
+    /// The tracker's confidence when the shot was called automatically; nil
+    /// when it was logged by hand. Telemetry uses it to tell the tracker's
+    /// mistakes (corrected auto calls) from shots it never saw (hand-logged).
+    var detectionConfidence: Double?
 
     // MARK: - Sync (Phase 9)
     var cloudSyncedAt: Date?

@@ -100,4 +100,32 @@ final class HoopRectSmootherTests: XCTestCase {
         XCTAssertEqual(smoother.state, .looking)
         XCTAssertNil(smoother.smoothedRect)
     }
+
+    // MARK: - Choosing between hoops
+
+    func test_choose_firstSighting_takesTheBiggestHoop() {
+        let smoother = HoopRectSmoother()
+        let far = CGRect(x: 0.1, y: 0.7, width: 0.03, height: 0.03)
+        let near = CGRect(x: 0.5, y: 0.6, width: 0.08, height: 0.07)
+        XCTAssertEqual(smoother.choose(from: [far, near]), near)
+    }
+
+    func test_choose_whileTracking_sticksToTheSameHoop() {
+        var smoother = HoopRectSmoother()
+        let mine = CGRect(x: 0.45, y: 0.7, width: 0.06, height: 0.05)
+        smoother.update(basketRect: mine, timestamp: 0)
+        // A bigger, more confident hoop elsewhere doesn't pull it away.
+        let other = CGRect(x: 0.05, y: 0.6, width: 0.1, height: 0.09)
+        let jittered = mine.offsetBy(dx: 0.004, dy: -0.003)
+        XCTAssertEqual(smoother.choose(from: [other, jittered]), jittered)
+        XCTAssertNil(smoother.choose(from: [other]), "only the other hoop in view: treat as no detection")
+    }
+
+    func test_choose_afterLosingTheHoop_acceptsANewOne() {
+        var smoother = HoopRectSmoother(lostTimeoutSec: 0.5)
+        smoother.update(basketRect: CGRect(x: 0.45, y: 0.7, width: 0.06, height: 0.05), timestamp: 0)
+        smoother.updateNoDetection(timestamp: 1.0)
+        let moved = CGRect(x: 0.2, y: 0.5, width: 0.07, height: 0.06)
+        XCTAssertEqual(smoother.choose(from: [moved]), moved)
+    }
 }

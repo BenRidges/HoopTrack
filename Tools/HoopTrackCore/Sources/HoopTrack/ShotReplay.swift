@@ -21,31 +21,53 @@ nonisolated enum ShotReplay {
         let confidence: Double
     }
 
-    /// Runs `entries` (in time order) through a new tracker.
+    /// Runs `entries` (in time order) through a new tracker, then the net
+    /// check (NetCheck) as the app does, unless `netCheck` is off. Logs from
+    /// before net sampling have no `netActivity`, so the check never changes
+    /// their calls.
     static func run(_ entries: [DetectionLogEntry],
                     aspect: Double = 16.0 / 9.0,
-                    tuning: ShotTracker.Tuning = ShotTracker.Tuning()) -> [Call] {
+                    tuning: ShotTracker.Tuning = ShotTracker.Tuning(),
+                    netCheck useNet: Bool = true) -> [Call] {
         var tracker = ShotTracker(aspect: aspect, tuning: tuning)
         var smoother = HoopRectSmoother()
+        var meter = NetMotionMeter()
+        var check = NetCheck<Void>()
         var calls: [Call] = []
+
+        func add(_ call: NetCheck<Void>.Call) {
+            calls.append(Call(time: call.outcome.rimArrivalTime ?? call.outcome.lastSeenTime,
+                              result: call.result, confidence: call.confidence))
+        }
 
         for entry in entries.sorted(by: { $0.timestampSec < $1.timestampSec }) {
             let t = entry.timestampSec
-            if let rim = entry.rimBox.flatMap(rect) {
+            if let rim = smoother.choose(from: entry.rimBox.flatMap(rect).map { [$0] } ?? []) {
                 smoother.update(basketRect: rim, timestamp: t)
             } else {
                 smoother.updateNoDetection(timestamp: t)
             }
             let hoop = smoother.state == .looking ? nil : smoother.smoothedRect
 
+            // The app clears its meter on any frame without a net sample.
+            if useNet, let activity = entry.netActivity {
+                meter.record(activity, at: t)
+            } else {
+                meter.reset()
+            }
+
             let balls = entry.balls?.compactMap { rect(Array($0.prefix(4))) }
                 ?? entry.ballBox.flatMap(rect).map { [$0] } ?? []
-            if case .resolved(let outcome)? = tracker.update(balls: balls, hoop: hoop, time: t) {
-                calls.append(Call(time: outcome.rimArrivalTime ?? t,
-                                  result: outcome.result,
-                                  confidence: outcome.confidence))
+            switch tracker.update(balls: balls, hoop: hoop, time: t) {
+            case .started:
+                if let call = check.flush(meter: meter) { add(call) }
+            case .resolved(let outcome):
+                check.submit(outcome, context: (), now: t, meter: meter).forEach(add)
+            case nil:
+                if let call = check.due(now: t, meter: meter) { add(call) }
             }
         }
+        if let call = check.flush(meter: meter) { add(call) }
         return calls
     }
 

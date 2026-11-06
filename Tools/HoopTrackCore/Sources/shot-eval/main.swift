@@ -2,6 +2,7 @@
 //
 //   swift run shot-eval detections.jsonl              list the calls
 //   swift run shot-eval detections.jsonl labels.csv   …and score them
+//   swift run shot-eval --no-net …                    tracker alone, no net check
 //
 // detections.jsonl is written to Documents/Telemetry/<session id>/ when
 // "Help improve shot tracking" is on (pull it with Xcode → Devices →
@@ -20,9 +21,11 @@ extension String {
     }
 }
 
-let args = CommandLine.arguments.dropFirst()
+var args = Array(CommandLine.arguments.dropFirst())
+let useNet = !args.contains("--no-net")
+args.removeAll { $0 == "--no-net" }
 guard let logPath = args.first else {
-    print("usage: shot-eval <detections.jsonl> [labels.csv]")
+    print("usage: shot-eval [--no-net] <detections.jsonl> [labels.csv]")
     exit(2)
 }
 
@@ -40,7 +43,7 @@ guard !entries.isEmpty else {
     print("no readable frames in \(logPath)")
     exit(1)
 }
-let calls = ShotReplay.run(entries)
+let calls = ShotReplay.run(entries, netCheck: useNet)
 let span = (entries.last?.timestampSec ?? 0) - (entries.first?.timestampSec ?? 0)
 print("\(entries.count) frames over \(Int(span)) s, \(calls.count) shots called\n")
 for (index, call) in calls.enumerated() {

@@ -176,7 +176,8 @@ final class DataService: ObservableObject {
                  courtY: Double,
                  science: ShotScienceMetrics? = nil,
                  videoOffset: Double? = nil,
-                 needsReview: Bool = false) throws -> ShotRecord {
+                 needsReview: Bool = false,
+                 detectionConfidence: Double? = nil) throws -> ShotRecord {
         // Phase 7 — Security: validate sensor inputs before persistence.
         guard InputValidator.isValidCourtCoordinate(courtX),
               InputValidator.isValidCourtCoordinate(courtY) else {
@@ -192,6 +193,7 @@ final class DataService: ObservableObject {
                               courtY: courtY)
         shot.videoTimestampSeconds = videoOffset ?? shot.timestamp.timeIntervalSince(session.startedAt)
         shot.needsReview = needsReview
+        shot.detectionConfidence = detectionConfidence
         apply(science, to: shot)
 
         modelContext.insert(shot)

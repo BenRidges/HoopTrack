@@ -42,11 +42,11 @@ nonisolated final class CourtCalibrationService {
         state = .looking
     }
 
-    /// Called once per frame with that frame's hoop detection (nil if none).
-    func updateBasket(_ basket: BallDetection?, timestamp: CMTime) {
+    /// Called once per frame with that frame's hoop detections (may be empty).
+    func updateBaskets(_ baskets: [BallDetection], timestamp: CMTime) {
         let ts = CMTimeGetSeconds(timestamp)
-        if let basket {
-            smoother.update(basketRect: basket.boundingBox, timestamp: ts)
+        if let rect = smoother.choose(from: baskets.map(\.boundingBox)) {
+            smoother.update(basketRect: rect, timestamp: ts)
         } else {
             smoother.updateNoDetection(timestamp: ts)
         }

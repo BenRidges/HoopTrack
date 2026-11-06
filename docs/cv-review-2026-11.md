@@ -34,9 +34,11 @@ thresholds (ball 0.30, hoop 0.45), returns up to four ball candidates and
 runs on all compute units. The model has NMS built in, so the hand-rolled
 YOLO decoder is gone.
 
-**Hoop** (`Services/CourtCalibrationService.swift`): unchanged EMA smoother
-with a 0.5 s lost timeout. The HUD shows searching / tracking / lost, with a
-coach card until the hoop is found.
+**Hoop** (`Services/CourtCalibrationService.swift`): EMA smoother with a
+0.5 s lost timeout. The detector passes up to three basket boxes, and the
+smoother stays with the one that overlaps the hoop it's tracking, so a
+second hoop in the gym can't pull the box across. The HUD shows searching /
+tracking / lost, with a coach card until the hoop is found.
 
 **Shots** (`Utilities/ShotTracker.swift`): a pure struct, unit tested.
 
@@ -51,18 +53,41 @@ coach card until the hoop is found.
   and the gate widens on its own across missed frames.
 - Release is the frame of peak upward speed: close to where the ball left
   the hands, not the apex.
+- The rim is held where it was at release until the shot resolves. The
+  ball passing through the net makes the detected box jump, and that used
+  to move the make line mid-shot.
 - A make has to drop through the rim line inside the rim's width. It then
   has to leave below the net, or disappear into it and stay gone for
   0.45 s. A ball that comes back up is a bounce, not a make.
+- Pausing drops a shot in the air instead of calling it on resume.
 - Timeouts and lost-ball guesses get low confidence. Shots under 0.6 are
   flagged "Check" in the summary, which has a one-tap "They're all right".
 
+**Net check** (`Utilities/NetMotion.swift`):
+
+- A make keeps the net swinging for half a second after the ball has gone
+  through. A ball passing in front of or behind the net only flickers.
+- The pipeline samples brightness on a 12 × 10 grid where the net hangs.
+  It compares the movement 0.2–0.7 s after the ball reached the rim with
+  the quiet before the shot.
+- Calls the tracker is sure of (a ball seen leaving the net, a clear miss)
+  show at once. The rest wait up to 0.7 s and are then settled:
+  - a settled make with a swinging net is confirmed;
+  - one with a still net is flagged;
+  - a ball lost at the rim with a swinging net becomes a flagged make;
+  - a grazing miss with a big swing is flagged.
+- It learns from clean makes whether this net moves at all. On a bare rim
+  or a chain net it stands aside rather than flag every make.
+- `shot-eval` runs the same check (`--no-net` to compare without it).
+
 **Where from** (`Utilities/ShotGeometry.swift`):
 
-- Distance comes from apparent size. A ball is 0.239 m across and a rim
+- Distance comes from apparent size. Ball size is taken from the shorter
+  side of the box, because motion blur stretches it along the flight. A ball is 0.239 m across and a rim
   0.457 m, and with the camera's real field of view
   (`activeFormat.videoFieldOfView`) that gives depth for each.
-- Lateral offset comes from the angle.
+- Lateral offset comes from the angle. With the camera behind the hoop,
+  facing the shooter, left and right are mirrored.
 - The result becomes normalised court coordinates and a zone.
 
 **Arc**: projectile physics from the horizontal distance and the flight time
@@ -87,10 +112,21 @@ the phone reaches `.serious` thermal state, detection drops to every other
 frame and recording stays at full rate. This happens before iOS throttles
 the phone itself.
 
-**Logging**: with "Help improve shot tracking" on, every frame's ball
-candidates, raw rim box, detection crop and tracker calls go to
-`detections.jsonl`. That's enough to replay the session offline. Older logs
-still decode.
+**Logging**: with "Help improve shot tracking" on, these go to
+`detections.jsonl` for every frame:
+- the ball candidates and the raw rim box;
+- the detection crop;
+- net movement;
+- the tracker's call, and the call as published after the net check.
+
+That's enough to replay the session offline. Older logs still decode, and
+times start at the video's first frame.
+
+After the session, the sampled frames are saved with a `manifest.json`
+(`Utilities/TelemetryManifest.swift`). It holds each frame's boxes and every
+shot's outcome: auto or by hand, confidence, flagged, corrected. That's
+what `Tools/dataset/build_dataset.py` turns into training data (see
+`docs/training-review-2026-11.md`).
 
 **Dribbles** (`Services/DribblePipeline.swift`): body pose rather than hand pose,
 because at 2–3 m hands are too small. It runs at about 30 fps on the camera
@@ -113,7 +149,12 @@ which filters out jitter.
 - **Release height** is assumed. A tall shooter or a jumper shifts the arc by
   a few degrees.
 - **Tuning.** `ShotTracker.Tuning` values are first-principles guesses that
-  pass synthetic tests. None of them come from real footage yet.
+  pass synthetic tests. So are the net check's thresholds (`ShotEvidence`).
+  None of them come from real footage yet.
+- **Net check.** It needs the net in the grid below the detected rim. A
+  shooter standing in front of the net adds noise to both windows. That's
+  why it only settles calls the tracker wasn't sure of, and why its own
+  calls are flagged.
 
 ## Tuning it
 
@@ -122,7 +163,7 @@ from symlinks into the app target and needs no simulator.
 
 ```
 cd Tools/HoopTrackCore
-swift test                                        # 131 logic tests
+swift test                                        # 164 logic tests
 swift run shot-eval detections.jsonl labels.csv   # replay + score a session
 ```
 
@@ -145,12 +186,11 @@ which way the wrong calls went, phantom shots and missed shots. Change
    fixtures so regressions show up in `swift test`.
 2. **Check close-up detection on device**, then try a tighter
    `minSidePx` and margin.
-3. **Retrain from this viewpoint.**
-   - Phone behind the shooter at chest height, in gyms and outdoors, at dusk.
-   - Opt-in frames and user corrections (`isUserCorrected`, confirmed "Check"
-     calls) are the best labels the app produces.
-   - Add a `net` class: net motion is the strongest make signal when the
-     ball is hidden behind the rim.
+3. **Retrain from this viewpoint** with the new loop in
+   `docs/training-review-2026-11.md`. That means footage of a phone behind
+   the shooter at chest height, in gyms and outdoors, at dusk. Shared
+   sessions, ranked by where the app went wrong, are the best labels it
+   produces. Settle the model licence first.
 4. **Better position from the shooter.** The model already detects `person`.
    - At release, take the person box nearest the ball. The bottom of the box
      is where the feet touch the floor.
@@ -160,5 +200,8 @@ which way the wrong calls went, phantom shots and missed shots. Change
 5. **Smooth sizes before depth.** Feed the ball filter's box sizes, rather
    than the median of five raw boxes, into `CourtPositionEstimator`.
 6. **Sound** (Phase E of `upgrade-cv-detection.md`). A tiny on-device
-   classifier for rim, backboard and net audio is a strong second opinion on
-   low-confidence calls.
+   classifier for rim, backboard and net audio is a third opinion that
+   works even when the net is out of shot. It needs labelled audio first, so
+   the first step is an opt-in "record sound" for session videos. That adds
+   the microphone permission and a privacy-label change, so it's
+   deliberately not built yet.

@@ -53,12 +53,15 @@ When adding pure logic, keep the file free of SwiftUI/UIKit/CoreGraphics imports
 All per-frame work runs on the camera's session queue; results reach the main actor through `@MainActor` delegate protocols. See `docs/cv-review-2026-11.md` at the repo root for the design and the improvement plan.
 
 - **`CameraService`** — `AVCaptureSession`, 720p at 60 fps where available, `framePublisher`. Live shooting is landscape-right only (capture is fixed at 0°).
-- **`CVPipeline`** — frame → `SessionRecorder` (HEVC video) → detector → `CourtCalibrationService` (smoothed hoop) → `ShotTracker` → `CourtPositionEstimator` + `ShotPhysics` → `ShotPipelineDelegate`.
+- **`CVPipeline`** — frame → `SessionRecorder` (HEVC video) → detector → `CourtCalibrationService` (smoothed hoop) → `ShotTracker` → `NetCheck` → `CourtPositionEstimator` + `ShotPhysics` → `ShotPipelineDelegate`.
 - **`ShotTracker`** (`Utilities/`) — pure make/miss state machine, unit tested. Tracks every ball between shots; from release a `BallFilter` (Kalman) picks the shot ball each frame. Tune via `ShotTracker.Tuning`, measured with `shot-eval`.
+- **`NetMotion`** (`NetWatch`, `NetCheck`, `ShotEvidence`) — samples the net's brightness every frame; calls the tracker wasn't sure of (confidence < 0.9) wait ≤ 0.7 s and are confirmed, flagged or rescued by whether the net swung. `ShotReplay` runs the same `NetCheck`, so `shot-eval` scores what the app publishes.
 - **`DetectionRegion`** — while a shot is in flight the detector runs on a crop around hoop + ball (`HoopTrack.CV.focusDuringShots`).
+- **Telemetry** (opt-in) — `detections.jsonl` per frame, then `TelemetryManifest` (sampled frames with their boxes + every shot's outcome). `Tools/dataset/build_dataset.py` turns those into a YOLO dataset; `Tools/training/train_detector.py` trains, gates against the shipped model and exports. See `docs/training-review-2026-11.md`.
 - **`ShotGeometry`** — distance from apparent ball/rim size and the camera FOV; launch angle from flight time.
 - **`DribblePipeline`** — body-pose wrists + `WristBounceDetector` (front camera, portrait).
-- Manual Make / Miss / Undo are always available; low-confidence calls are stored with `needsReview` and flagged in the summary.
+- Manual Make / Miss / Undo are always available; low-confidence calls are stored with `needsReview` and flagged in the summary. `ShotRecord.detectionConfidence` is nil for hand-logged shots.
+- `BallDetectorStub` exists in DEBUG builds only.
 
 ### Constants
 

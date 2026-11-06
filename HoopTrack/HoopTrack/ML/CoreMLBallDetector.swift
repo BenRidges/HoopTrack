@@ -52,12 +52,12 @@ nonisolated final class CoreMLBallDetector: BallDetectorProtocol {
         do {
             try handler.perform([request])
         } catch {
-            return SceneDetection(balls: [], basket: nil, frameTimestamp: timestamp)
+            return SceneDetection(balls: [], baskets: [], frameTimestamp: timestamp)
         }
 
         let results = request.results as? [VNRecognizedObjectObservation] ?? []
         var balls: [BallDetection] = []
-        var hoop: BallDetection?
+        var hoops: [BallDetection] = []
 
         for observation in results {
             guard let label = observation.labels.first?.identifier.lowercased() else { continue }
@@ -66,7 +66,7 @@ nonisolated final class CoreMLBallDetector: BallDetectorProtocol {
                                           frameTimestamp: timestamp)
             if isHoop(label) {
                 guard observation.confidence >= HoopTrack.CV.hoopConfidence else { continue }
-                if hoop == nil || observation.confidence > hoop!.confidence { hoop = detection }
+                hoops.append(detection)
             } else if ballLabels.contains(where: { label.contains($0) }) {
                 guard observation.confidence >= HoopTrack.CV.ballConfidence else { continue }
                 balls.append(detection)
@@ -74,7 +74,9 @@ nonisolated final class CoreMLBallDetector: BallDetectorProtocol {
         }
 
         balls.sort { $0.confidence > $1.confidence }
-        return SceneDetection(balls: Array(balls.prefix(4)), basket: hoop, frameTimestamp: timestamp)
+        hoops.sort { $0.confidence > $1.confidence }
+        return SceneDetection(balls: Array(balls.prefix(4)), baskets: Array(hoops.prefix(3)),
+                              frameTimestamp: timestamp)
     }
 
     /// Whole-word match so a "basketball" class never counts as a hoop just

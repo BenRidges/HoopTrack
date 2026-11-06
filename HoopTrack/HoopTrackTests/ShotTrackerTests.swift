@@ -184,6 +184,37 @@ final class ShotTrackerTests: XCTestCase {
         XCTAssertEqual(outcomes(events).map(\.result), [.make])
     }
 
+    func test_rimBoxJumpingDuringTheShot_doesNotMoveTheMakeLine() {
+        var tracker = ShotTracker()
+        var events: [ShotTracker.Event] = []
+        var frame = 0
+        while Double(frame) / fps <= 1.6 {
+            let t = Double(frame) / fps
+            // As the ball reaches the net the detected box shifts down and
+            // widens (net bulging), then vanishes for a moment.
+            let hoopNow: CGRect? = t < 0.85 ? hoop
+                : t < 1.0 ? CGRect(x: 0.40, y: 0.60, width: 0.20, height: 0.12) : nil
+            let balls = t <= 1.2 ? [box(0.5, arcY(t))] : []
+            if let event = tracker.update(balls: balls, hoop: hoopNow, time: t) { events.append(event) }
+            frame += 1
+        }
+        XCTAssertEqual(outcomes(events).map(\.result), [.make])
+    }
+
+    func test_reset_dropsAShotInTheAir() {
+        var tracker = ShotTracker()
+        var frame = 0
+        while Double(frame) / fps <= 0.5 {
+            let t = Double(frame) / fps
+            _ = tracker.update(balls: [box(0.5, arcY(t))], hoop: hoop, time: t)
+            frame += 1
+        }
+        XCTAssertTrue(tracker.isTrackingShot)
+        tracker.reset()
+        XCTAssertFalse(tracker.isTrackingShot)
+        XCTAssertNil(tracker.shotBallBox)
+    }
+
     // MARK: - Back-to-back shots
 
     func test_twoShots_bothResolved() {

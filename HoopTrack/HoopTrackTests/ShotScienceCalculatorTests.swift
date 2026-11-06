@@ -92,6 +92,22 @@ final class ShotScienceCalculatorTests: XCTestCase {
         XCTAssertGreaterThan(CourtPositionEstimator.courtPosition(for: estimate).courtX, 0.5)
     }
 
+    func test_estimate_cameraBehindHoop_facingShooter_mirrorsSides() {
+        // Camera 1.5 m behind the rim looking back; shooter 5 m out from the
+        // rim, 2 m to *their* right — which is the camera's left.
+        let rimDepth = 1.5, ballDepth = 6.5, lateralCameraX = -2.0
+        let rimW = width(CourtPositionEstimator.rimDiameterM, at: rimDepth)
+        let ballW = width(CourtPositionEstimator.ballDiameterM, at: ballDepth)
+        let ballCentreX = 0.5 + lateralCameraX * focal / ballDepth
+        let rim = CGRect(x: 0.5 - rimW / 2, y: 0.7, width: rimW, height: rimW)
+        let ball = CGRect(x: ballCentreX - ballW / 2, y: 0.5, width: ballW, height: ballW)
+
+        let estimate = CourtPositionEstimator.estimate(ballBox: ball, ballDiameter: ballW,
+                                                       rimBox: rim, horizontalFOV: fov)!
+        XCTAssertEqual(estimate.depthM, 5, accuracy: 0.05)
+        XCTAssertEqual(estimate.lateralM, 2, accuracy: 0.05)
+    }
+
     func test_estimate_degenerateSizes_returnNil() {
         let rim = CGRect(x: 0.45, y: 0.7, width: 0.05, height: 0.04)
         XCTAssertNil(CourtPositionEstimator.estimate(ballBox: .zero, ballDiameter: 0, rimBox: rim))

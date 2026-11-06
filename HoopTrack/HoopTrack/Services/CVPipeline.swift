@@ -6,6 +6,7 @@
 //            while a shot is in flight — see DetectionRegion)
 //         ─▶ CourtCalibrationService (smoothed rim)
 //         ─▶ ShotTracker (make / miss state machine)
+//         ─▶ NetWatch / NetCheck (unsure calls wait for the net to swing)
 //         ─▶ CourtPositionEstimator + ShotPhysics (where from, what arc)
 //         ─▶ delegate on the main actor
 //
@@ -74,8 +75,13 @@ nonisolated final class CVPipeline: @unchecked Sendable {
     // Shot in flight
     nonisolated(unsafe) private var pendingEstimate: CourtPositionEstimator.Estimate?
 
+    // CV-D — net movement as a second opinion on unsure calls
+    nonisolated(unsafe) private var net = NetWatch()
+    nonisolated(unsafe) private var netCheck = NetCheck<CourtPositionEstimator.Estimate?>()
+
     // Load shedding
     nonisolated(unsafe) private var frameIndex = 0
+    nonisolated(unsafe) private var wasPaused = false
     nonisolated(unsafe) private var isHot = false
 
     init(detector: BallDetectorProtocol?,
@@ -100,6 +106,8 @@ nonisolated final class CVPipeline: @unchecked Sendable {
         frameCancellable = nil
         tracker.reset()
         calibration.reset()
+        net.reset()
+        netCheck.drop()
         detectionLogger?.close()
         detectionLogger = nil
     }
@@ -113,7 +121,21 @@ nonisolated final class CVPipeline: @unchecked Sendable {
 
     private func process(_ buffer: CMSampleBuffer) {
         recorder?.append(buffer)
-        guard !isPaused, let detector else { return }
+        // A shot in the air when the session is paused would otherwise
+        // resolve on resume as a lost-ball guess: drop it.
+        if isPaused {
+            if !wasPaused {
+                tracker.reset()
+                pendingEstimate = nil
+                // A call already made stands; it just can't wait for the net.
+                if let call = netCheck.flush(meter: net.meter) { publish(call) }
+                net.reset()
+            }
+            wasPaused = true
+            return
+        }
+        wasPaused = false
+        guard let detector else { return }
 
         // Check the temperature about once a second; when hot, detect on
         // alternate frames. The tracker works from timestamps, so it copes.
@@ -127,31 +149,82 @@ nonisolated final class CVPipeline: @unchecked Sendable {
         guard let scene = detector.detectScene(buffer: buffer, region: region) else { return }
         let now = CMTimeGetSeconds(scene.frameTimestamp)
 
-        calibration.updateBasket(scene.basket, timestamp: scene.frameTimestamp)
+        calibration.updateBaskets(scene.baskets, timestamp: scene.frameTimestamp)
         publishHoop(now: now)
         publishBall(scene.ball?.boundingBox, now: now)
+
+        // Before the tracker: on the frame a shot resolves the grid should
+        // still be on the rim the shot was judged against.
+        let netActivity = watchNet(buffer, now: now)
 
         let event = tracker.update(balls: scene.balls.map(\.boundingBox),
                                    hoop: calibration.state.hoopRect,
                                    time: now)
-        logTelemetry(scene, region: region, event: event, now: now)
+        var published: [NetCheck<CourtPositionEstimator.Estimate?>.Call] = []
         switch event {
         case .started(let release):
+            // A held call can't wait through another shot.
+            if let call = netCheck.flush(meter: net.meter) { published.append(call) }
             pendingEstimate = calibration.state.hoopRect.flatMap { hoop in
                 CourtPositionEstimator.estimate(ballBox: release.box,
                                                 ballDiameter: release.ballDiameter,
                                                 rimBox: hoop,
                                                 horizontalFOV: fieldOfView())
             }
-            Task { @MainActor [weak delegate] in delegate?.pipelineShotStarted() }
 
         case .resolved(let outcome):
-            let shot = makeShot(from: outcome)
+            published += netCheck.submit(outcome, context: pendingEstimate, now: now, meter: net.meter)
             pendingEstimate = nil
-            Task { @MainActor [weak delegate] in delegate?.pipelineShotResolved(shot) }
 
         case nil:
-            break
+            if let call = netCheck.due(now: now, meter: net.meter) { published.append(call) }
+        }
+        logTelemetry(scene, region: region, event: event, netActivity: netActivity,
+                     published: published.last, now: now)
+
+        published.forEach(publish)
+        if case .started = event {
+            Task { @MainActor [weak delegate] in delegate?.pipelineShotStarted() }
+        }
+    }
+
+    private func publish(_ call: NetCheck<CourtPositionEstimator.Estimate?>.Call) {
+        let shot = makeShot(from: call.outcome, estimate: call.context,
+                            result: call.result, confidence: call.confidence)
+        Task { @MainActor [weak delegate] in delegate?.pipelineShotResolved(shot) }
+    }
+
+    // MARK: - Net (CV-D)
+
+    /// Samples the net's brightness and records how much it changed.
+    private func watchNet(_ buffer: CMSampleBuffer, now: Double) -> Double? {
+        let hoop = tracker.lockedHoop ?? netCheck.heldHoop ?? calibration.state.hoopRect
+        let points = net.aim(at: hoop, aspect: tracker.aspect)
+        return net.observe(points.isEmpty ? nil : Self.luma(at: points, in: buffer), at: now)
+    }
+
+    /// Brightness at each point (Vision-normalised) from the frame's luma
+    /// plane, each the mean of a 2×2 patch two pixels apart, which steadies
+    /// sensor noise.
+    private static func luma(at points: [CGPoint], in buffer: CMSampleBuffer) -> [UInt8]? {
+        guard let pixels = CMSampleBufferGetImageBuffer(buffer),
+              CVPixelBufferIsPlanar(pixels),
+              CVPixelBufferLockBaseAddress(pixels, .readOnly) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddressOfPlane(pixels, 0) else { return nil }
+        let width = CVPixelBufferGetWidthOfPlane(pixels, 0)
+        let height = CVPixelBufferGetHeightOfPlane(pixels, 0)
+        let rowBytes = CVPixelBufferGetBytesPerRowOfPlane(pixels, 0)
+        guard width > 2, height > 2 else { return nil }
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+
+        return points.map { point in
+            // Vision's origin is bottom-left; pixel rows start at the top.
+            let x = min(width - 3, max(0, Int(Double(point.x) * Double(width))))
+            let y = min(height - 3, max(0, Int((1 - Double(point.y)) * Double(height))))
+            let top = y * rowBytes + x, bottom = (y + 2) * rowBytes + x
+            let sum = Int(bytes[top]) + Int(bytes[top + 2]) + Int(bytes[bottom]) + Int(bytes[bottom + 2])
+            return UInt8(sum / 4)
         }
     }
 
@@ -167,8 +240,9 @@ nonisolated final class CVPipeline: @unchecked Sendable {
                                       frameHeight: Double(CVPixelBufferGetHeight(pixels)))
     }
 
-    private func makeShot(from outcome: ShotTracker.Outcome) -> DetectedShot {
-        let estimate = pendingEstimate
+    private func makeShot(from outcome: ShotTracker.Outcome,
+                          estimate: CourtPositionEstimator.Estimate?,
+                          result: ShotResult, confidence: Double) -> DetectedShot {
         let position = estimate.map(CourtPositionEstimator.courtPosition(for:))
         let zone = position.map {
             CourtZoneClassifier.classify(courtX: $0.courtX, courtY: $0.courtY,
@@ -182,8 +256,8 @@ nonisolated final class CVPipeline: @unchecked Sendable {
             science = ShotScienceMetrics(releaseAngleDeg: launch.angleDeg, shotSpeedMph: launch.speedMph)
         }
 
-        return DetectedShot(result: outcome.result,
-                            confidence: outcome.confidence,
+        return DetectedShot(result: result,
+                            confidence: confidence,
                             courtX: position?.courtX ?? 0.5,
                             courtY: position?.courtY ?? 0.5,
                             zone: zone,
@@ -218,11 +292,16 @@ nonisolated final class CVPipeline: @unchecked Sendable {
     // MARK: - Telemetry (CV-A)
 
     /// Everything needed to replay the frame offline (Tools/HoopTrackCore
-    /// shot-eval): all ball candidates, the raw rim, the crop and the call.
+    /// shot-eval): all ball candidates, the raw rim, the crop, net movement,
+    /// the tracker's call and the call published after the net check.
     private func logTelemetry(_ scene: SceneDetection, region: CGRect?,
-                              event: ShotTracker.Event?, now: Double) {
+                              event: ShotTracker.Event?, netActivity: Double?,
+                              published: NetCheck<CourtPositionEstimator.Estimate?>.Call?,
+                              now: Double) {
         guard let logger = detectionLogger else { return }
-        if sessionStartTime == nil { sessionStartTime = now }
+        // Log times are measured from the video's first frame, so they line
+        // up with the session video (and its extracted telemetry frames).
+        if sessionStartTime == nil { sessionStartTime = recorder?.startTime ?? now }
         func box(_ r: CGRect) -> [Double] {
             [Double(r.origin.x), Double(r.origin.y), Double(r.width), Double(r.height)]
         }
@@ -244,6 +323,11 @@ nonisolated final class CVPipeline: @unchecked Sendable {
             entry.eventConfidence = outcome.confidence
         case nil:
             break
+        }
+        entry.netActivity = netActivity
+        if let published {
+            entry.checkedEvent = published.result == .make ? "make" : "miss"
+            entry.checkedConfidence = published.confidence
         }
         logger.log(entry)
     }
