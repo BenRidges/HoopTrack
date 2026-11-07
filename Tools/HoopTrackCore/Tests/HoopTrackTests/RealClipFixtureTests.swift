@@ -111,18 +111,27 @@ final class RealClipFixtureTests: XCTestCase {
 }
 
 // Measured on the committed logs (ShotReplay.run, the same calls the live
-// pipeline made on each — cv-replay's log-replay consistency was MATCH on
-// all four), 2026-11-07, before any tracker fix. These are today's scores,
-// not targets: raise them as the tracker improves.
+// pipeline made on each: cv-replay's log-replay consistency was MATCH on
+// all four). The logs were rewritten on 2026-11-07 by the pipeline after
+// the cv-fix round (rim-shaped boxes, physical link limits, gravity in the
+// ball filter, depth doubts), since the tracker decides when the detector
+// runs on a close-up crop and so what it sees. These are today's scores,
+// not targets: raise them as the tracker improves. Before the round:
+// cam1 27/25/0, cam2 26/25/9, alec-07-11 18/18/12, alec-08-01 6/4/5
+// (detected / right / phantoms).
 private let FLOOR_CAM1_DET = 27       // 27/27 detected
-private let FLOOR_CAM1_RIGHT = 25     // 25/27 right (1 make called miss, 1 miss called make)
+private let FLOOR_CAM1_RIGHT = 27     // 27/27 right
 private let CEIL_CAM1_PHANTOMS = 0
-private let FLOOR_CAM2_DET = 26       // 26/29 (3 shots blocked by rim-as-ball phantoms)
-private let FLOOR_CAM2_RIGHT = 25     // 25/26
-private let CEIL_CAM2_PHANTOMS = 9
-private let FLOOR_A0711_DET = 18      // 18/22 (4 releases unseen against trees)
-private let FLOOR_A0711_RIGHT = 18    // 18/18
-private let CEIL_A0711_PHANTOMS = 12
+private let FLOOR_CAM2_DET = 29       // 29/29 (rim-as-ball phantoms no longer block shots)
+private let FLOOR_CAM2_RIGHT = 29     // 29/29
+private let CEIL_CAM2_PHANTOMS = 2
+private let FLOOR_A0711_DET = 17      // 17/22: 153.05 was a lucky match before (a phantom's
+                                      // close-up crop happened to catch the real release);
+                                      // releases against the trees are a detector limit
+private let FLOOR_A0711_RIGHT = 17    // 17/17
+private let CEIL_A0711_PHANTOMS = 6
 private let FLOOR_A0801_DET = 6       // 6/40: the model calls this rim a ball until 430 s
-private let FLOOR_A0801_RIGHT = 4     // 4/6
-private let CEIL_A0801_PHANTOMS = 5
+private let FLOOR_A0801_RIGHT = 2     // 2/6: hoop found in 1% of frames (camera far below
+                                      // the rim); 464.05 miss is a flagged make, 559.50 a
+                                      // stale partial hoop box (see cv-review-2026-11.md)
+private let CEIL_A0801_PHANTOMS = 3

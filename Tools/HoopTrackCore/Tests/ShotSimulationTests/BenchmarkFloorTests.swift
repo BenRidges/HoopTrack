@@ -50,6 +50,21 @@ final class BenchmarkFloorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(s.report.callAccuracy, FLOOR_CAMBACK3_RIGHT)
     }
 
+    func test_phoneCloseBehindTheShooter_stillStartsShots() {
+        // About 1 m back the ball at release is wider than the rim; the old
+        // size cap dropped it and most shots never started (20% found).
+        let s = score("camback1-real", shots: 30)
+        XCTAssertGreaterThanOrEqual(s.report.detectionRate, FLOOR_CAMBACK1_DETECTED)
+    }
+
+    func test_reboundersPassesBack_fewPhantoms() {
+        // A rebounder under the hoop throwing the ball back to the shooter:
+        // those passes rise like shots and used to start them.
+        let s = score("rebounder-real", shots: 30)
+        XCTAssertGreaterThanOrEqual(s.report.detectionRate, FLOOR_REBOUNDER_DETECTED)
+        XCTAssertLessThanOrEqual(s.report.phantomShots, CEIL_REBOUNDER_PHANTOMS)
+    }
+
     func test_dribbling_startsNoShots() {
         let s = score("dribble-real", shots: 10)     // 60 s of dribbling
         XCTAssertLessThanOrEqual(s.report.phantomShots, CEIL_DRIBBLE_PHANTOMS)
@@ -61,13 +76,18 @@ final class BenchmarkFloorTests: XCTestCase {
     }
 }
 
-// Measured with seed 1 when written; floors sit a little below. A change to
-// the simulator itself (physics, noise, choreography) moves these too —
-// re-measure with `swift run shot-sim --scenario <name> --shots <n>`.
-private let FLOOR_MIXED_DETECTED = 0.85        // measured 27/30 = 0.90
-private let FLOOR_MIXED_RIGHT = 0.80           // measured 23/27 = 0.85
-private let CEIL_MIXED_PHANTOMS = 3            // measured 1
-private let FLOOR_CAMBACK3_DETECTED = 0.95     // measured 20/20
-private let FLOOR_CAMBACK3_RIGHT = 0.85        // measured 18/20 = 0.90
-private let CEIL_DRIBBLE_PHANTOMS = 1          // measured 0 in 60 s
-private let CEIL_PASS_PHANTOMS_PER_MIN = 4.0   // measured 2.7/min
+// Measured with seed 1; floors sit a little below. A change to the
+// simulator itself (physics, noise, choreography) moves these too —
+// re-measure with `swift run -c release -Xswiftc -enable-testing shot-sim
+// --scenario <name> --shots <n>`. Re-measured 2026-11-07 after the cv-fix
+// round; the values before it are in brackets.
+private let FLOOR_MIXED_DETECTED = 0.95        // measured 30/30 (27/30)
+private let FLOOR_MIXED_RIGHT = 0.80           // measured 25/30 = 0.83 (23/27)
+private let CEIL_MIXED_PHANTOMS = 2            // measured 0 (1)
+private let FLOOR_CAMBACK3_DETECTED = 0.95     // measured 20/20 (20/20)
+private let FLOOR_CAMBACK3_RIGHT = 0.85        // measured 18/20 = 0.90 (18/20)
+private let FLOOR_CAMBACK1_DETECTED = 0.45     // measured 17/30 = 0.57 (6/30)
+private let FLOOR_REBOUNDER_DETECTED = 0.90    // measured 30/30 (26/30)
+private let CEIL_REBOUNDER_PHANTOMS = 6        // measured 3 (12)
+private let CEIL_DRIBBLE_PHANTOMS = 1          // measured 0 in 60 s (0)
+private let CEIL_PASS_PHANTOMS_PER_MIN = 3.5   // measured 2.7/min (2.7)
