@@ -108,15 +108,28 @@ nonisolated enum ShotEvidence {
     /// - Parameters:
     ///   - result/confidence: the tracker's call.
     ///   - netSwing: `NetMotionMeter.swing`, nil when unavailable.
+    ///   - doubts: what argued against the tracker's call (`Outcome.doubts`).
+    ///   - netResponds: whether this net swings on clean makes
+    ///     (`NetCheck.netResponds`), nil until known.
     /// - Returns: the call to log. Confidence below `HoopTrack.CV.lowConfidence`
     ///   gets the shot flagged for review.
-    static func fuse(result: ShotResult, confidence: Double, netSwing: Double?) -> (result: ShotResult, confidence: Double) {
+    static func fuse(result: ShotResult, confidence: Double, netSwing: Double?,
+                     doubts: ShotTracker.Doubts = [], netResponds: Bool? = nil) -> (result: ShotResult, confidence: Double) {
         guard let swing = netSwing else { return (result, confidence) }
         switch result {
         case .make:
             // A make the tracker saw leave the bottom of the net (0.95) stands.
             if swing >= strongSwing { return (.make, max(confidence, 0.9)) }
-            if swing <= quietSwing && confidence < 0.9 { return (.make, min(confidence, 0.5)) }
+            if swing <= quietSwing && confidence < 0.9 {
+                // Its size put the ball off the rim's depth, and a net known
+                // to swing on clean makes stayed still: it dropped in front
+                // of (or beyond) the rim. Flagged all the same. Real nets
+                // that swing (2026-11 Somorin clips, from the tracker's
+                // arrival) measured ≥ 2.0 after every make and ≤ 1.3 after
+                // every miss, rim hits included.
+                if !doubts.isDisjoint(with: .depth) && netResponds == true { return (.miss, 0.5) }
+                return (.make, min(confidence, 0.5))
+            }
         case .miss:
             // Ball lost near the rim and the net jumped: probably went in.
             if confidence <= 0.4 && swing >= strongSwing { return (.make, 0.55) }
@@ -266,10 +279,13 @@ nonisolated struct NetCheck<Context: Sendable>: Sendable {
         guard let held else { return nil }
         self.held = nil
         // On a net that doesn't move for clean makes, ignore it entirely.
-        let swing = netResponds == false ? nil : meter.swing(after: held.arrival)
+        let responds = netResponds
+        let swing = responds == false ? nil : meter.swing(after: held.arrival)
         let fused = ShotEvidence.fuse(result: held.outcome.result,
                                       confidence: held.outcome.confidence,
-                                      netSwing: swing)
+                                      netSwing: swing,
+                                      doubts: held.outcome.doubts,
+                                      netResponds: responds)
         return Call(outcome: held.outcome, context: held.context,
                     result: fused.result, confidence: fused.confidence)
     }

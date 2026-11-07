@@ -63,6 +63,48 @@ final class NetCheckDoubtTests: XCTestCase {
         XCTAssertEqual(check.netResponds, false)
     }
 
+    // MARK: - Makes the ball's size doubted
+
+    func test_fuse_doubtedMake_stillNet_thatSwingsOnMakes_isAFlaggedMiss() {
+        let fused = ShotEvidence.fuse(result: .make, confidence: 0.75, netSwing: 1.0,
+                                      doubts: .tooBigForRim, netResponds: true)
+        XCTAssertEqual(fused.result, .miss)
+        XCTAssertLessThan(fused.confidence, HoopTrack.CV.lowConfidence)
+    }
+
+    func test_fuse_doubtedMake_stillNet_notYetKnownToSwing_staysAFlaggedMake() {
+        let fused = ShotEvidence.fuse(result: .make, confidence: 0.75, netSwing: 1.0,
+                                      doubts: .cameBack, netResponds: nil)
+        XCTAssertEqual(fused.result, .make)
+        XCTAssertLessThan(fused.confidence, HoopTrack.CV.lowConfidence)
+    }
+
+    func test_fuse_doubtedMake_swingingNet_isConfirmed() {
+        let fused = ShotEvidence.fuse(result: .make, confidence: 0.75, netSwing: 5,
+                                      doubts: .depth, netResponds: true)
+        XCTAssertEqual(fused.result, .make)
+        XCTAssertGreaterThanOrEqual(fused.confidence, 0.9)
+    }
+
+    func test_fuse_undoubtedSettledMake_stillNet_staysAFlaggedMake() {
+        // Sat at the rim, size fine: a still net only flags it, as before.
+        let fused = ShotEvidence.fuse(result: .make, confidence: 0.8, netSwing: 1.0, netResponds: true)
+        XCTAssertEqual(fused.result, .make)
+        XCTAssertLessThan(fused.confidence, HoopTrack.CV.lowConfidence)
+    }
+
+    func test_check_doubtedMake_isHeld_andSettledByTheNet() {
+        var check = NetCheck<Void>()
+        learn(&check, net: swinging)
+        XCTAssertEqual(check.netResponds, true)
+        let calls = check.submit(outcome(.make, confidence: 0.75, doubts: .tooBigForRim),
+                                 context: (), now: 2.3, meter: still)
+        XCTAssertTrue(calls.isEmpty, "a doubted make waits for the net")
+        let call = check.due(now: 2.75, meter: still)
+        XCTAssertEqual(call?.result, .miss)
+        XCTAssertEqual(call?.outcome.result, .make)        // the tracker's own call is kept
+    }
+
     func test_isAnotherView() {
         XCTAssertFalse(NetCheck<Void>.isAnotherView(hoop, hoop.offsetBy(dx: 0.05, dy: -0.05)))
         XCTAssertTrue(NetCheck<Void>.isAnotherView(hoop, hoop.offsetBy(dx: 0.11, dy: 0)))
