@@ -611,19 +611,19 @@ nonisolated struct ShotTracker: Sendable {
     }
 
     /// Whether a box is somewhere the ball could be if the filter has it out
-    /// of the frame. A ball that went out of the top (or a side) comes back
-    /// through that edge, so it's seen at the edge first; a box deeper in is
-    /// something else, however unsure the filter is after the gap (on the
-    /// real clips, the rim taken for a ball while the shot is above the
-    /// frame).
+    /// of the frame (its centre beyond an edge). A ball that went out of the
+    /// top (or a side) comes back through that edge, so it's seen at the
+    /// edge first; a box deeper in is something else, however unsure the
+    /// filter is after the gap (on the real clips, the rim taken for a ball
+    /// while the shot is above the frame).
     private func couldBeBackInFrame(_ box: CGRect, filter: BallFilter, time: Double) -> Bool {
         guard let size = filter.diameter(at: time) else { return true }
         let p = filter.predicted(at: time)
-        let out = size / 2, depth = tuning.reentryDepth * size
-        if p.y - out > 1, Double(box.maxY) < 1 - depth { return false }
-        if p.y + out < 0, Double(box.minY) > depth { return false }
-        if p.x - out > aspect, Double(box.maxX) * aspect < aspect - depth { return false }
-        if p.x + out < 0, Double(box.minX) * aspect > depth { return false }
+        let depth = tuning.reentryDepth * size
+        if p.y > 1, Double(box.maxY) < 1 - depth { return false }
+        if p.y < 0, Double(box.minY) > depth { return false }
+        if p.x > aspect, Double(box.maxX) * aspect < aspect - depth { return false }
+        if p.x < 0, Double(box.minX) * aspect > depth { return false }
         return true
     }
 
