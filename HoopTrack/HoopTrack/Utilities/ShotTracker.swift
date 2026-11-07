@@ -77,8 +77,11 @@ nonisolated struct ShotTracker: Sendable {
         /// Max jump between frames for the tracked ball, rim diameters.
         var gate: Double = 4.0
         /// A detection further than this many standard deviations from the
-        /// ball filter's prediction is a different ball.
-        var gateSigma: Double = 5.0
+        /// ball filter's prediction is a different ball. Over both axes, the
+        /// shot ball lands beyond 4 SD once in ~3000 frames; with gravity
+        /// modelled, 5 let the rim boxed as a ball through after the shot
+        /// had been above the frame for 0.4 s (somorin-dusk-cam2 170.87).
+        var gateSigma: Double = 4.0
         /// Ball boxes bigger than this many rim widths are false positives.
         var maxBallToRim: Double = 1.6
 
@@ -102,8 +105,8 @@ nonisolated struct ShotTracker: Sendable {
         /// Near the rim and board the ball may bounce: a velocity kick with
         /// this SD as a fraction of its speed. A hit at restitution 0.55
         /// (rim) to 0.68 (glass) changes it by at most ~1.7× the speed,
-        /// which this puts at the gate's 5σ…
-        var bounceKick: Double = 0.35
+        /// which this puts at the gate (`gateSigma`)…
+        var bounceKick: Double = 0.42
         /// …plus this, R/s, for a ball dropping slowly onto the rim.
         var bounceKickFloor: Double = 1
         /// For this long after a shot starts (s) the ball may still be in
