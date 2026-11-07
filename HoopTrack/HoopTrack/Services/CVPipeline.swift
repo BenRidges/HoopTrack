@@ -80,9 +80,15 @@ nonisolated final class CVPipeline: ShotPipelineControl, @unchecked Sendable {
     /// Video is written for the whole session, paused or not, so shot
     /// offsets line up with the file.
     nonisolated(unsafe) var recorder: SessionRecorder?
-    /// Shots aren't detected while paused.
-    nonisolated(unsafe) var isPaused = false
-    /// Publishes the ball box for the debug overlay.
+    /// Shots aren't detected while paused. Set from the main actor at any
+    /// time and read on the pipeline queue every frame, hence the lock.
+    var isPaused: Bool {
+        get { pauseLock.withLock { paused } }
+        set { pauseLock.withLock { paused = newValue } }
+    }
+    private let pauseLock = NSLock()
+    nonisolated(unsafe) private var paused = false
+    /// Publishes the ball box for the debug overlay (set before start()).
     nonisolated(unsafe) var publishesBall = false
 
     // CV-A telemetry
