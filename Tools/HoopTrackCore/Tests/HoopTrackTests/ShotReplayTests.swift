@@ -98,6 +98,17 @@ final class ShotReplayTests: XCTestCase {
         XCTAssertNotEqual(ShotReplay.run(log).map(\.result), [.make])
     }
 
+    func test_replay_logEndingWhileACallWaitsForTheNet_stillCountsIt() {
+        // A graze (unsure miss) and the session ends 0.3 s later, inside the
+        // net check's wait. CVPipeline.stop() hands the call to the session
+        // (settled with the footage there is); the replay flushes it the same
+        // way at the end of the log.
+        let log = shotLog(start: 0, x: { 0.5 + 0.08 * $0 }).filter { $0.timestampSec <= 1.25 }
+        let calls = ShotReplay.run(log)
+        XCTAssertEqual(calls.map(\.result), [.miss])
+        XCTAssertLessThan(calls[0].confidence, 0.9, "an unsure call, so it was still held when the log ended")
+    }
+
     func test_replay_netSwingRescuesABallLostAtTheRim() {
         // Off-centre and lost just above the rim (behind it, say), then the net jumps.
         let log = stride(from: 0.0, through: 2.0, by: 1.0 / 60).map { t -> DetectionLogEntry in

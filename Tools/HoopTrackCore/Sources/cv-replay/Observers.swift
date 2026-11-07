@@ -38,10 +38,14 @@ final class FrameClock: @unchecked Sendable {
 
     struct Shot {
         /// Fed-frame index and PTS (video seconds) of the frame whose
-        /// processing published this call.
+        /// processing published this call (for a call stop() handed back,
+        /// the last frame fed).
         let frame: Int
         let pts: Double
         let shot: DetectedShot
+        /// Handed back by CVPipeline.stop() when the session ended (held by
+        /// the net check then), not published on a frame.
+        var atEnd = false
     }
 
     struct HoopChange {
@@ -91,6 +95,12 @@ final class FrameClock: @unchecked Sendable {
     func pipelineShotResolved(_ shot: DetectedShot) {
         let now = clock.current
         shots.append(Shot(frame: now.index, pts: now.pts, shot: shot))
+    }
+
+    /// What CVPipeline.stop() handed back; LiveSessionViewModel records it.
+    func sessionEnded(handingBack last: [DetectedShot]) {
+        let now = clock.current
+        shots += last.map { Shot(frame: now.index, pts: now.pts, shot: $0, atEnd: true) }
     }
 }
 

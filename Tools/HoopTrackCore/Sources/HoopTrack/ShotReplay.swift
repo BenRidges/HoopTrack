@@ -67,6 +67,10 @@ nonisolated enum ShotReplay {
                 if let call = check.due(now: t, meter: meter) { add(call) }
             }
         }
+        // The end of the log is the end of the session: CVPipeline.stop()
+        // settles a call still waiting for the net with the footage there is
+        // and hands it to the session, which records it. A shot still in the
+        // air is dropped, there as here.
         if let call = check.flush(meter: meter) { add(call) }
         return calls
     }

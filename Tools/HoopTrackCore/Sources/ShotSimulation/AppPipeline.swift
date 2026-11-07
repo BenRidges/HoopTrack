@@ -111,7 +111,9 @@ struct AppPipeline {
         process(time: time, scene: SceneDetections(balls: [], baskets: [], views: []), region: nil, luma: { _ in nil })
     }
 
-    /// End of the recording: anything still held is published as is.
+    /// End of the recording: anything still held is settled with the
+    /// footage there is and published, as CVPipeline.stop() hands it to the
+    /// session.
     mutating func finish() {
         if let call = check.flush(meter: net.meter) {
             published.append(ShotReplay.Call(time: call.outcome.rimArrivalTime ?? call.outcome.lastSeenTime,

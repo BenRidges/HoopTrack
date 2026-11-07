@@ -117,7 +117,8 @@ struct Report {
 
     /// Lines the two lists up by the frame each call was published on
     /// (both in order), so one missing call shows as one row rather than
-    /// shifting every row after it.
+    /// shifting every row after it. Calls settled when the session / log
+    /// ended (stop()'s hand-back, the replay's final flush) come last.
     private static func pair(live: [RecordingDelegate.Shot], replay: [ReplayTrace.Call],
                              sessionStart: Double) -> [CallPair] {
         var rows: [CallPair] = []
@@ -125,9 +126,11 @@ struct Report {
         while i < live.count || j < replay.count {
             let l = i < live.count ? live[i] : nil
             let r = j < replay.count ? replay[j] : nil
-            let livePublished = l.map { $0.pts - sessionStart }
+            // Log time of the publishing frame; infinity = at the end.
+            let liveKey = l.map { $0.atEnd ? Double.infinity : $0.pts - sessionStart }
+            let replayKey = r.map { $0.publishedAt ?? .infinity }
             var problems: [String] = []
-            if let l, let r, let at = r.publishedAt, let published = livePublished, abs(published - at) <= 1e-6 {
+            if let l, let r, let a = liveKey, let b = replayKey, a == b || abs(a - b) <= 1e-6 {
                 if l.shot.result != r.result {
                     problems.append("result: live \(name(l.shot.result)), replay \(name(r.result))")
                 }
@@ -145,16 +148,16 @@ struct Report {
                 rows.append(CallPair(index: rows.count, liveIndex: i, replayIndex: j, live: l, replay: r, problems: problems))
                 i += 1
                 j += 1
-            } else if let l, let published = livePublished,
-                      r.flatMap({ $0.publishedAt }).map({ published < $0 }) ?? true {
-                problems.append("live-only: replay published no call on that frame (\(f(published, 3)) s log time)")
+            } else if let l, let a = liveKey, replayKey.map({ a < $0 }) ?? true {
+                problems.append(l.atEnd
+                    ? "live-only: CVPipeline.stop() handed it back at the end; the replay flushed nothing"
+                    : "live-only: replay published no call on that frame (\(f(a, 3)) s log time)")
                 rows.append(CallPair(index: rows.count, liveIndex: i, replayIndex: nil, live: l, replay: nil, problems: problems))
                 i += 1
             } else if let r {
                 if r.publishedAt == nil {
-                    problems.append("replay-only: held by the net check when the session ended; "
-                                    + "CVPipeline.stop() drops a held call (NetCheck.drop), "
-                                    + "ShotReplay.run flushes it")
+                    problems.append("replay-only: held by the net check when the log ended and flushed; "
+                                    + "CVPipeline.stop() handed nothing back")
                 } else {
                     problems.append("replay-only: the delegate got no call on that frame (\(f(r.publishedAt ?? 0, 3)) s log time)")
                 }
@@ -318,7 +321,7 @@ struct Report {
         for pair in pairs {
             var row = String(format: "%2d  | ", pair.index + 1)
             if let l = pair.live {
-                row += "\(pad(f(l.pts - live.sessionStart, 3), 9))  \(pad(l.shot.videoOffset.map { f($0, 3) } ?? "-", 7))  "
+                row += "\(pad(l.atEnd ? "end" : f(l.pts - live.sessionStart, 3), 9))  \(pad(l.shot.videoOffset.map { f($0, 3) } ?? "-", 7))  "
                     + "\(pad(name(l.shot.result), 6))  \(f(l.shot.confidence, 3))  | "
             } else {
                 row += String(repeating: " ", count: 39) + "-  | "

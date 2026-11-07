@@ -11,8 +11,9 @@
 // the way CameraService's capture delegate does. After every frame the
 // session queue waits for the main queue, so the delegate's main-actor
 // hops (Task { @MainActor … }) for that frame have run before the next
-// frame is fed: each call can be pinned to its frame and none is lost at
-// the end.
+// frame is fed: each call can be pinned to its frame. At the end, stop()
+// hands back what the delegate hasn't been given (a call still waiting for
+// the net check) and it's recorded, as LiveSessionViewModel.end() does.
 //
 // Writes, to the output directory: detections.jsonl (the app's telemetry
 // log), shots.csv, summary.txt, fidelity.txt (live calls vs shot-eval on
@@ -212,41 +213,47 @@ final class Runner {
         let started = Date()
 
         struct Fed { var pts: [Double] = []; var decoded = 0; var thermalMax = ProcessInfo.ThermalState.nominal }
-        let fed: Fed = try await withCheckedThrowingContinuation { continuation in
-            sessionQueue.async {
-                var fed = Fed()
-                var lastProgress = Date()
-                do {
-                    while let frame = try source.next() {
-                        fed.decoded += 1
-                        guard frame.index % stride == 0 else { continue }
-                        clock.set(index: fed.pts.count, pts: frame.seconds)
-                        frames.send(frame.sampleBuffer)
-                        // Let this frame's main-actor hops run before the next frame.
-                        DispatchQueue.main.sync {}
-                        fed.pts.append(frame.seconds)
-                        if fed.pts.count % 30 == 0 {
-                            fed.thermalMax = Thermal.hotter(fed.thermalMax, ProcessInfo.processInfo.thermalState)
-                            if !quiet, Date().timeIntervalSince(lastProgress) > 2 {
-                                lastProgress = Date()
-                                let rate = Double(fed.pts.count) / Date().timeIntervalSince(started)
-                                FileHandle.standardError.write(Data(String(
-                                    format: "\r  frame %d/~%d  %.1f s  %.1f fps   ",
-                                    fed.decoded, estimate, frame.seconds - ptsOffset, rate).utf8))
+        let fed: Fed
+        do {
+            fed = try await withCheckedThrowingContinuation { continuation in
+                sessionQueue.async {
+                    var fed = Fed()
+                    var lastProgress = Date()
+                    do {
+                        while let frame = try source.next() {
+                            fed.decoded += 1
+                            guard frame.index % stride == 0 else { continue }
+                            clock.set(index: fed.pts.count, pts: frame.seconds)
+                            frames.send(frame.sampleBuffer)
+                            // Let this frame's main-actor hops run before the next frame.
+                            DispatchQueue.main.sync {}
+                            fed.pts.append(frame.seconds)
+                            if fed.pts.count % 30 == 0 {
+                                fed.thermalMax = Thermal.hotter(fed.thermalMax, ProcessInfo.processInfo.thermalState)
+                                if !quiet, Date().timeIntervalSince(lastProgress) > 2 {
+                                    lastProgress = Date()
+                                    let rate = Double(fed.pts.count) / Date().timeIntervalSince(started)
+                                    FileHandle.standardError.write(Data(String(
+                                        format: "\r  frame %d/~%d  %.1f s  %.1f fps   ",
+                                        fed.decoded, estimate, frame.seconds - ptsOffset, rate).utf8))
+                                }
                             }
                         }
+                        if !quiet { FileHandle.standardError.write(Data("\n".utf8)) }
+                        continuation.resume(returning: fed)
+                    } catch {
+                        continuation.resume(throwing: error)
                     }
-                    // As LiveSessionViewModel.end(): stop() closes the log.
-                    pipeline.stop()
-                    DispatchQueue.main.sync {}
-                    if !quiet { FileHandle.standardError.write(Data("\n".utf8)) }
-                    continuation.resume(returning: fed)
-                } catch {
-                    pipeline.stop()
-                    continuation.resume(throwing: error)
                 }
             }
+        } catch {
+            _ = await pipeline.stop()
+            throw error
         }
+        // As LiveSessionViewModel.end(): stop() closes the log and hands back
+        // what the delegate hasn't been given (a call still waiting for the
+        // net check), which the session records.
+        delegate.sessionEnded(handingBack: await pipeline.stop())
         let wall = Date().timeIntervalSince(started)
 
         // The barrier after every frame means everything has arrived; make

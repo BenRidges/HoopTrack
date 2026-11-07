@@ -4,7 +4,9 @@
 //
 // Ending a session stops the pipeline and finishes the video *before*
 // saving, so the summary has the video and the camera isn't left running
-// (and recording) behind it.
+// (and recording) behind it. Calls the pipeline made before the end — one
+// still waiting for the net check, or one still on its way to the main
+// actor — are recorded first, so tapping End right after a shot keeps it.
 
 import Foundation
 import Combine
@@ -73,7 +75,10 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     private let camera: CameraService
     private let haptics: HapticService
     private var session: TrainingSession?
-    private var pipeline: CVPipeline?
+    private var pipeline: (any ShotPipelineControl)?
+    /// While the session is ending and waits for the pipeline to stop: the
+    /// calls it made before then still count.
+    private var isStoppingPipeline = false
     private var recorder: SessionRecorder?
     private var shotCounter = 0
     private var flightTimeout: Task<Void, Never>?
@@ -138,6 +143,14 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         }
     }
 
+    #if DEBUG
+    /// Tests: run the session on `pipeline` (start() only builds one when
+    /// the camera is available).
+    func useForTesting(pipeline: any ShotPipelineControl) {
+        self.pipeline = pipeline
+    }
+    #endif
+
     /// Starts tracking if camera access arrives mid-session (turned on in
     /// Settings while the session was scoring by hand).
     func cameraPermissionChanged() {
@@ -181,22 +194,20 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         let active = activeElapsed()
         limitWatcher?.cancel()
         flightTimeout?.cancel()
-        pipeline?.stop()
-        pipeline = nil
         camera.stopSession()
         let recorder = self.recorder
         self.recorder = nil
-        guard let session else { return }
-
-        if attempts == 0 {
-            dataService.discardSession(session)
-            Task { if let url = await recorder?.finish() { try? FileManager.default.removeItem(at: url) } }
-        } else {
-            let series = playoffSeries
-            Task { [coordinator, dataService] in
+        Task {
+            // As in end(): calls made before the view went away count.
+            await stopPipeline()
+            guard let session else { return }
+            if attempts == 0 {
+                dataService.discardSession(session)
+                if let url = await recorder?.finish() { try? FileManager.default.removeItem(at: url) }
+            } else {
                 session.videoFileName = await recorder?.finish()?.lastPathComponent
                 _ = try? await coordinator.finaliseSession(session, activeDuration: active)
-                if let series { dataService.refreshPlayoff(series) }
+                if let playoffSeries { dataService.refreshPlayoff(playoffSeries) }
             }
         }
     }
@@ -221,8 +232,8 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         let active = activeElapsed()
         limitWatcher?.cancel()
         flightTimeout?.cancel()
-        pipeline?.stop()
-        pipeline = nil
+        // Before anything is decided: a shot called just before End counts.
+        await stopPipeline()
         let videoURL = await finishRecording()
         camera.stopSession()
 
@@ -278,6 +289,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     // MARK: - Manual logging & corrections
 
     func logManual(_ result: ShotResult) {
+        guard phase == .live else { return }
         record(result: result, zone: .unknown, courtX: 0.5, courtY: 0.5,
                science: nil, videoOffset: nil, detectionConfidence: nil)
     }
@@ -328,7 +340,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     func pipelineShotResolved(_ shot: DetectedShot) {
         shotInFlight = false
-        guard !isPaused, phase == .live else { return }
+        guard !isPaused, phase == .live || isStoppingPipeline else { return }
         record(result: shot.result, zone: shot.zone, courtX: shot.courtX, courtY: shot.courtY,
                science: shot.science, videoOffset: shot.videoOffset,
                detectionConfidence: shot.confidence)
@@ -336,10 +348,25 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     // MARK: - Private
 
+    /// Stops the pipeline (on its own queue, after the frame in progress)
+    /// and records what it called before the session ended: deliveries that
+    /// arrive meanwhile, then what stop() hands back — a call still waiting
+    /// on the net check, or one whose delivery hadn't run yet.
+    private func stopPipeline() async {
+        guard let pipeline else { return }
+        self.pipeline = nil
+        isStoppingPipeline = true
+        let last = await pipeline.stop()
+        last.forEach(pipelineShotResolved)
+        isStoppingPipeline = false
+    }
+
     private func record(result: ShotResult, zone: CourtZone, courtX: Double, courtY: Double,
                         science: ShotScienceMetrics?, videoOffset: Double?,
                         detectionConfidence: Double?) {
-        guard let session, phase == .live else { return }
+        guard let session, phase == .live || isStoppingPipeline else { return }
+        // Counted quietly once the session is ending: the screen is going.
+        let ending = phase != .live
         do {
             try dataService.addShot(to: session, result: result, zone: zone, shotType: .unknown,
                                     courtX: courtX, courtY: courtY, science: science,
@@ -351,6 +378,10 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
             return
         }
         refreshCounts()
+        guard !ending else {
+            updatePlayoff(announce: false)
+            return
+        }
         shotCounter += 1
         lastShot = ShotFlash(result: result, id: shotCounter)
         result == .make ? haptics.makeMade() : haptics.missMade()

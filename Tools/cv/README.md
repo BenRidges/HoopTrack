@@ -75,7 +75,10 @@ end as `end()` does. Frames go through a `PassthroughSubject` from one serial
 queue, one at a time, synchronously, like `CameraService`'s capture callback.
 After each frame the queue waits on the main queue, so the delegate calls
 that frame caused (`Task { @MainActor … }`) have run before the next frame:
-every call is pinned to its frame and nothing is lost at the end.
+every call is pinned to its frame. At the end `stop()` hands back what the
+delegate hasn't been given — a call still waiting for the net check, settled
+with the footage there is — and the harness records it, as `end()` does
+(`shots.csv` / `fidelity.txt` show it as published at `end`).
 
 Frames:
 
@@ -156,10 +159,12 @@ Anything different is listed in `fidelity.txt` and summarised in
 
 Known ways the two can differ:
 
-- **A call held at the end.** An unsure call waits up to 0.7 s for the net.
-  If the session ends inside that wait, `CVPipeline.stop()` drops it
-  (`NetCheck.drop`), but `ShotReplay.run` flushes it, so `shot-eval` counts a
-  shot the app never logged. Seen on a clip cut 0.3 s after a miss.
+- **A call held at the end** no longer differs. An unsure call waits up to
+  0.7 s for the net; if the session ends inside that wait, `CVPipeline.stop()`
+  settles it with the footage there is and the session records it, and
+  `ShotReplay.run` flushes it the same way at the end of the log. (Until
+  November 2026 the app dropped it and `shot-eval` counted a shot the app
+  never logged; logs from phones on older builds can still show that.)
 - **Two hoops in view, in older logs.** The detector returns up to three
   hoops and `CourtCalibrationService` picks the one overlapping the hoop it
   tracks (or the biggest). Logs now keep all of them (`rs`) and the replay

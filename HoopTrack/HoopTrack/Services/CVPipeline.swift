@@ -10,9 +10,12 @@
 //         ─▶ CourtPositionEstimator + ShotPhysics (where from, what arc)
 //         ─▶ delegate on the main actor
 //
-// All mutable state is touched only from the Combine sink, which runs
-// synchronously on the serial session queue that delivers frames. The
-// `nonisolated(unsafe)` annotations record that the compiler can't prove it.
+// All mutable state is touched only on the pipeline's own serial queue:
+// each frame is processed there, synchronously, from the Combine sink (so
+// the camera's session queue still waits for it and late frames are still
+// discarded there), and stop() runs there too, after any frame in progress.
+// The `nonisolated(unsafe)` annotations record that the compiler can't
+// prove it.
 
 import AVFoundation
 import Combine
@@ -41,15 +44,34 @@ nonisolated struct DetectedShot: Sendable {
     func pipelineShotResolved(_ shot: DetectedShot)
 }
 
+/// What a session does with its pipeline once it's running (CVPipeline;
+/// a stand-in in tests).
+nonisolated protocol ShotPipelineControl: AnyObject, Sendable {
+    /// Shots aren't detected while paused.
+    var isPaused: Bool { get set }
+    /// Stops it for good. Returns the calls it made that the delegate
+    /// hasn't been handed, oldest first; each call arrives exactly once,
+    /// through the delegate or here.
+    func stop() async -> [DetectedShot]
+}
+
 // MARK: - CVPipeline
 
-nonisolated final class CVPipeline: @unchecked Sendable {
+nonisolated final class CVPipeline: ShotPipelineControl, @unchecked Sendable {
 
     /// Nil in manual mode (no model bundled): the pipeline then only records.
     private let detector: BallDetectorProtocol?
     private let calibration = CourtCalibrationService()
     private let threePointDistanceFt: Double
     private let fieldOfView: @Sendable () -> Double
+
+    /// Frames are processed here one at a time, and stop() runs here: see
+    /// the top of the file.
+    private let queue = DispatchQueue(label: "com.hooptrack.cv.pipeline", qos: .userInitiated)
+    /// Set by stop(); frames after it are ignored.
+    nonisolated(unsafe) private var isStopped = false
+    /// Calls on their way to the delegate.
+    private let outbox = ShotOutbox()
 
     nonisolated(unsafe) private var tracker = ShotTracker()
     nonisolated(unsafe) private var frameCancellable: AnyCancellable?
@@ -96,20 +118,49 @@ nonisolated final class CVPipeline: @unchecked Sendable {
 
     func start(framePublisher: AnyPublisher<CMSampleBuffer, Never>, delegate: ShotPipelineDelegate) {
         self.delegate = delegate
+        let queue = self.queue
         frameCancellable = framePublisher.sink { [weak self] buffer in
-            self?.process(buffer)
+            // Synchronous: the camera's queue waits, as if processed there.
+            queue.sync { self?.process(buffer) }
         }
     }
 
-    func stop() {
+    /// Ends the session's analysis. Runs on the pipeline's queue, after any
+    /// frame in progress, so it never races one (it used to run on the main
+    /// actor while the session queue could be mid-frame: tracker, net check
+    /// and log writer touched from two threads at once). Frames after it are
+    /// ignored.
+    ///
+    /// A call still waiting for the net check is settled with the footage
+    /// there is and returned — the shot happened, the session just ended
+    /// before the net had its full 0.7 s (ShotReplay does the same at the end
+    /// of a log). So is any call published whose main-actor delivery hasn't
+    /// run yet. Call from the main actor (start/stop own the subscription).
+    func stop() async -> [DetectedShot] {
         frameCancellable?.cancel()
         frameCancellable = nil
+        return await withCheckedContinuation { continuation in
+            queue.async { [self] in continuation.resume(returning: finish()) }
+        }
+    }
+
+    /// stop()'s work, on the pipeline queue.
+    private func finish() -> [DetectedShot] {
+        guard !isStopped else { return outbox.takeAll() }
+        isStopped = true
+        var last = outbox.takeAll()
+        if let call = netCheck.flush(meter: net.meter) {
+            last.append(makeShot(from: call.outcome, estimate: call.context,
+                                 result: call.result, confidence: call.confidence))
+        }
         tracker.reset()
         calibration.reset()
         net.reset()
         netCheck.drop()
+        pendingEstimate = nil
         detectionLogger?.close()
         detectionLogger = nil
+        return last
     }
 
     func attachTelemetry(logger: DetectionLogger) {
@@ -120,6 +171,8 @@ nonisolated final class CVPipeline: @unchecked Sendable {
     // MARK: - Frame processing
 
     private func process(_ buffer: CMSampleBuffer) {
+        // A frame the camera delivered just before stop() cancelled the feed.
+        guard !isStopped else { return }
         recorder?.append(buffer)
         // A shot in the air when the session is paused would otherwise
         // resolve on resume as a lost-ball guess: drop it.
@@ -191,7 +244,13 @@ nonisolated final class CVPipeline: @unchecked Sendable {
     private func publish(_ call: NetCheck<CourtPositionEstimator.Estimate?>.Call) {
         let shot = makeShot(from: call.outcome, estimate: call.context,
                             result: call.result, confidence: call.confidence)
-        Task { @MainActor [weak delegate] in delegate?.pipelineShotResolved(shot) }
+        let outbox = self.outbox
+        let id = outbox.put(shot)
+        Task { @MainActor [weak delegate] in
+            // Nil when stop() got there first and handed it over itself.
+            guard let shot = outbox.take(id) else { return }
+            delegate?.pipelineShotResolved(shot)
+        }
     }
 
     // MARK: - Net (CV-D)
@@ -332,5 +391,38 @@ nonisolated final class CVPipeline: @unchecked Sendable {
             entry.checkedConfidence = published.confidence
         }
         logger.log(entry)
+    }
+}
+
+// MARK: - Outbox
+
+/// Calls on their way from the pipeline queue to the main actor. Each is
+/// handed over exactly once: by the Task published with it, or by stop() if
+/// that runs first — so a call published just before the session ends is
+/// neither lost nor counted twice.
+nonisolated private final class ShotOutbox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nextID = 0
+    private var waiting: [(id: Int, shot: DetectedShot)] = []
+
+    func put(_ shot: DetectedShot) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        nextID += 1
+        waiting.append((nextID, shot))
+        return nextID
+    }
+
+    func take(_ id: Int) -> DetectedShot? {
+        lock.lock(); defer { lock.unlock() }
+        guard let index = waiting.firstIndex(where: { $0.id == id }) else { return nil }
+        return waiting.remove(at: index).shot
+    }
+
+    /// Everything not yet handed over, oldest first.
+    func takeAll() -> [DetectedShot] {
+        lock.lock(); defer { lock.unlock() }
+        let all = waiting.map(\.shot)
+        waiting.removeAll()
+        return all
     }
 }
