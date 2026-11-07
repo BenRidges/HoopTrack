@@ -53,7 +53,7 @@ struct TraceReplay: Sendable {
 
         for entry in entries.sorted(by: { $0.timestampSec < $1.timestampSec }) {
             let t = entry.timestampSec
-            if let rim = smoother.choose(from: entry.rimBox.flatMap(rect).map { [$0] } ?? []) {
+            if let rim = smoother.choose(from: ShotReplay.hoops(in: entry)) {
                 smoother.update(basketRect: rim, timestamp: t)
             } else {
                 smoother.updateNoDetection(timestamp: t)
@@ -64,8 +64,7 @@ struct TraceReplay: Sendable {
             } else {
                 meter.reset()
             }
-            let balls = entry.balls?.compactMap { rect(Array($0.prefix(4))) }
-                ?? entry.ballBox.flatMap(rect).map { [$0] } ?? []
+            let balls = ShotReplay.balls(in: entry)
             let locked = tracker.lockedHoop
             let event = tracker.update(balls: balls, hoop: hoop, time: t)
             out.frames.append(TraceFrame(time: t, hoop: hoop, tracking: tracker.isTrackingShot,
@@ -85,11 +84,6 @@ struct TraceReplay: Sendable {
         let r = check.netResponds
         if let call = check.flush(meter: meter) { add(call, at: entries.last?.timestampSec ?? 0, responds: r) }
         return out
-    }
-
-    private static func rect(_ values: [Double]) -> CGRect? {
-        guard values.count >= 4, values[2] > 0, values[3] > 0 else { return nil }
-        return CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
     }
 }
 
@@ -131,9 +125,10 @@ enum TraceReport {
             + "the net swing was below \(f(ShotEvidence.strongSwing, 1))" + (noFootage > 0 ? " (\(noFootage) without net footage)" : "")
     }
 
-    /// Sessions where the replayed hoop (from the logged top basket only)
-    /// sat on something other than the real hoop for over a third of the
-    /// session.
+    /// Sessions where the replayed hoop sat on something other than the
+    /// real hoop for over a third of the session (a far basket the smoother
+    /// locked onto: logs from before every basket was logged replayed from
+    /// the top one only, and the live smoother can lock on too).
     static func wrongHoop(_ run: SimulationRun, replay: TraceReplay) -> [String] {
         var out: [String] = []
         for (n, session) in run.sessions.enumerated() {
@@ -295,6 +290,15 @@ enum TraceReport {
     }
 
     private static func how(_ o: ShotTracker.Outcome) -> String {
+        let explanation = explain(o)
+        return o.doubts.contains(.secondBall) ? explanation + "; another ball right next to it at the rim" : explanation
+    }
+
+    private static func explain(_ o: ShotTracker.Outcome) -> String {
+        var doubts: [String] = []
+        if o.doubts.contains(.tooBigForRim) { doubts.append("too big for the rim's depth") }
+        if o.doubts.contains(.cameBack) { doubts.append("came back off the rim or board") }
+        if !doubts.isEmpty { return "out of the net in 2D, doubted: " + doubts.joined(separator: ", ") }
         switch (o.result, o.confidence) {
         case (.make, 0.95): return "left the bottom of the net in the column"
         case (.make, 0.8): return "sat 0.45 s at the rim, still seen"
@@ -352,12 +356,13 @@ enum TraceReport {
     }
 
     /// Why no shot started: the true ball's detections from the tracker's
-    /// point of view — dropped as too big (maxBallToRim), then the best
-    /// rising run judged like tryStart.
+    /// point of view — dropped as too big (maxBallToRimIdle), then the best
+    /// rising run judged like tryStart (which also waits until the ball is
+    /// back under maxBallToRim, i.e. flying away from the lens).
     private static func startStory(_ run: SimulationRun, replay: TraceReplay, shot: ShotTruth, range: Range<Int>) -> String {
         let tuning = ShotTracker.Tuning()
         var samples: [(t: Double, y: Double)] = []
-        var tooBig = 0, usable = 0, maxRatio = 0.0
+        var tooBig = 0, usable = 0, tooNear = 0, maxRatio = 0.0
         var lastTooBig: Double?
         var best: (rise: Double, speed: Double, count: Int, height: Double)?
         var bestScore = -Double.infinity
@@ -367,12 +372,13 @@ enum TraceReport {
                   let box = run.entries[k].balls?[i], let hoop = replay.frames[k].hoop else { continue }
             let ratio = box[2] / Double(hoop.width)
             if fr.time >= shot.releaseTime - 0.1 { maxRatio = max(maxRatio, ratio) }
-            if ratio > tuning.maxBallToRim {
+            if ratio > tuning.maxBallToRimIdle {
                 tooBig += 1
                 lastTooBig = fr.time
                 continue
             }
             usable += 1
+            if ratio > tuning.maxBallToRim { tooNear += 1 }
             let y = box[1] + box[3] / 2
             let rimUnit = Double(hoop.width) * 16 / 9
             let rimLine = Double(hoop.maxY) - 0.15 * Double(hoop.height)
@@ -390,8 +396,11 @@ enum TraceReport {
         }
         var text = "no start: "
         if tooBig > 0 {
-            text += "\(tooBig) detections dropped as too big (ball/rim width up to \(f(maxRatio, 1)) > \(f(tuning.maxBallToRim, 1))"
+            text += "\(tooBig) detections dropped as too big (ball/rim width up to \(f(maxRatio, 1)) > \(f(tuning.maxBallToRimIdle, 1))"
                 + (lastTooBig.map { ", until \(f($0))" } ?? "") + "); "
+        }
+        if tooNear > 0 {
+            text += "\(tooNear) tracked but too near the lens to start (> \(f(tuning.maxBallToRim, 1))); "
         }
         guard let best else { return text + "\(usable) usable detections, never 4 in a rising run" }
         return text + "best rising run \(best.count) detections: rise \(f(best.rise, 1)) rim (need \(f(tuning.minRise, 1))), "

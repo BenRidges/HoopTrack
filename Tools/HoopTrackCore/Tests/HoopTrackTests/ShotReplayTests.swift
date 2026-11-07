@@ -3,6 +3,9 @@
 
 import XCTest
 @testable import HoopTrack
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 final class ShotReplayTests: XCTestCase {
 
@@ -35,6 +38,111 @@ final class ShotReplayTests: XCTestCase {
             return old
         }
         XCTAssertEqual(ShotReplay.run(log).map(\.result), [.make])
+    }
+
+    /// A make through the near hoop (`rim`) with a far basket in view. The far
+    /// one is smaller but outscores the near one on the first frame and on
+    /// every tenth frame after (often enough to hold a lock: the smoother
+    /// gives up after 0.5 s).
+    private func twoHoopLog(logEveryBasket: Bool) -> [DetectionLogEntry] {
+        let far = [0.80, 0.60, 0.04, 0.04]
+        let idle = stride(from: 0.0, to: 0.5, by: 1.0 / 60).map {
+            DetectionLogEntry(timestampSec: $0, ballConfidence: nil, ballBox: nil,
+                              rimConfidence: nil, rimBox: nil, state: "idle")
+        }
+        return (idle + shotLog(start: 0.5)).enumerated().map { i, entry in
+            let baskets = i % 10 == 0 ? [far + [0.9], rim + [0.7]] : [rim + [0.9], far + [0.6]]
+            var e = DetectionLogEntry(timestampSec: entry.timestampSec, ballConfidence: entry.ballConfidence,
+                                      ballBox: entry.ballBox, rimConfidence: baskets[0][4],
+                                      rimBox: Array(baskets[0].prefix(4)), state: entry.state)
+            e.balls = entry.balls
+            e.baskets = logEveryBasket ? baskets : nil
+            return e
+        }
+    }
+
+    func test_replay_choosesAmongEveryLoggedBasket_likeTheLiveSmoother() {
+        let log = twoHoopLog(logEveryBasket: true)
+
+        // CourtCalibrationService.updateBaskets: every basket, every frame.
+        var live = HoopRectSmoother()
+        for entry in log {
+            let all = (entry.baskets ?? []).map { CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
+            if let rect = live.choose(from: all) {
+                live.update(basketRect: rect, timestamp: entry.timestampSec)
+            } else {
+                live.updateNoDetection(timestamp: entry.timestampSec)
+            }
+        }
+        let near = CGRect(x: rim[0], y: rim[1], width: rim[2], height: rim[3])
+        XCTAssertGreaterThan(HoopRectSmoother.overlap(live.smoothedRect ?? .zero, near), 0.9,
+                             "the live smoother takes the bigger, nearer hoop")
+
+        // The replay sees the same candidates, so it follows the same hoop
+        // and makes the call the shot through it deserves.
+        XCTAssertEqual(ShotReplay.hoops(in: log[0]).count, 2)
+        let nearOnly = log.map { entry -> DetectionLogEntry in
+            var e = entry
+            e.baskets = [rim + [0.9]]
+            return e
+        }
+        XCTAssertEqual(ShotReplay.run(log), ShotReplay.run(nearOnly))
+        XCTAssertEqual(ShotReplay.run(log).map(\.result), [.make])
+    }
+
+    func test_replay_olderLogs_fallBackToTheTopBasket() {
+        // Before every basket was logged only `rb` was there: the replay
+        // then sees the far hoop on top on the first frame and locks on.
+        let log = twoHoopLog(logEveryBasket: false)
+        XCTAssertEqual(ShotReplay.hoops(in: log[0]), [CGRect(x: 0.80, y: 0.60, width: 0.04, height: 0.04)])
+        XCTAssertNotEqual(ShotReplay.run(log).map(\.result), [.make])
+    }
+
+    func test_replay_logEndingWhileACallWaitsForTheNet_stillCountsIt() {
+        // A graze (unsure miss) and the session ends 0.3 s later, inside the
+        // net check's wait. CVPipeline.stop() hands the call to the session
+        // (settled with the footage there is); the replay flushes it the same
+        // way at the end of the log.
+        let log = shotLog(start: 0, x: { 0.5 + 0.08 * $0 }).filter { $0.timestampSec <= 1.25 }
+        let calls = ShotReplay.run(log)
+        XCTAssertEqual(calls.map(\.result), [.miss])
+        XCTAssertLessThan(calls[0].confidence, 0.9, "an unsure call, so it was still held when the log ended")
+    }
+
+    // MARK: Pauses (known from cv-replay --pause or shot-eval --pause)
+
+    func test_replay_pause_dropsTheShotInTheAir_asTheAppDoes() {
+        // Paused 0.5–1.0 s into a make: the app logs nothing while paused and
+        // resets the tracker on its first paused frame.
+        let log = shotLog(start: 0).filter { !(0.5...1.0).contains($0.timestampSec) }
+        XCTAssertEqual(ShotReplay.run(log, pauses: [0.5...1.0]), [])
+    }
+
+    func test_replay_pause_settlesTheCallWaitingForTheNet_once() {
+        // A graze, then a pause 0.2 s later and a quiet second after it.
+        let shot = shotLog(start: 0, x: { 0.5 + 0.08 * $0 }).filter { $0.timestampSec <= 1.15 }
+        let after = stride(from: 3.0, through: 4.0, by: 1.0 / 60).map {
+            DetectionLogEntry(timestampSec: $0, ballConfidence: nil, ballBox: nil, rimConfidence: 0.9,
+                              rimBox: rim, state: "idle")
+        }
+        let calls = ShotReplay.run(shot + after, pauses: [1.2...2.9])
+        XCTAssertEqual(calls.map(\.result), [.miss])
+        XCTAssertLessThan(calls[0].confidence, 0.9)
+    }
+
+    func test_pauseClock_reportsWhenAPauseBegan_andSkipsPausedEntries() {
+        var clock = ShotReplay.PauseClock([1.0...2.0, 5.0...6.0])
+        XCTAssertNil(clock.step(to: 0.5).began)
+        let afterFirst = clock.step(to: 2.5)
+        XCTAssertEqual(afterFirst.began, 1.0)
+        XCTAssertFalse(afterFirst.inside)
+        let inSecond = clock.step(to: 5.5)
+        XCTAssertEqual(inSecond.began, 5.0)
+        XCTAssertTrue(inSecond.inside)
+        let stillInSecond = clock.step(to: 5.8)
+        XCTAssertNil(stillInSecond.began)
+        XCTAssertTrue(stillInSecond.inside)
+        XCTAssertEqual(clock.step(to: 7).inside, false)
     }
 
     func test_replay_netSwingRescuesABallLostAtTheRim() {

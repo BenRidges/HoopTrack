@@ -1,0 +1,37 @@
+# seconds from start of trimmed clip when the ball reaches the rim, make|miss
+# source offset: clip t = source t - 172.00
+1.45,make
+6.85,make
+12.30,miss
+17.60,miss
+24.72,make
+30.50,miss
+42.33,make
+48.22,make
+53.10,miss
+60.13,make
+65.90,make
+71.50,miss
+76.92,make
+86.55,make
+92.90,miss
+98.30,make
+104.17,make
+110.07,make
+115.00,miss
+122.90,miss
+134.65,make
+139.67,miss
+144.27,miss
+157.77,make
+164.10,make
+170.87,make
+175.90,miss
+180.75,miss
+186.33,make
+# --- notes (comment lines are ignored by ShotEvaluation.parseLabels) ---
+# Same session as somorin-dusk-cam1 after the camera moved; source 172.0 s = clip 0 s. It is darker: the ball is a dark silhouette with no visible orange.
+# 1.45 make: released ~0.6-0.8 s after the clip starts, so a tracker that still needs to lock onto the hoop will probably miss it.
+# Left out: 149.10 (ball drops down past the left edge of the backboard; unclear whether it was a shot).
+# Calls checked on contrast-boosted frames; makes swing the net. 180.75 miss bounces round the rim and falls off the left, outside the net.
+# The rebounder under the hoop passes the ball back after every shot; the ball usually leaves the top of the frame near its apex; there are dark lens smudges in the upper-left sky.

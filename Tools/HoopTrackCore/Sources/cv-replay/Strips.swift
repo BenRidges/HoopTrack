@@ -10,9 +10,11 @@
 //
 //   yellow   every ball candidate (with confidence in the close-up)
 //   orange   the tracker's shot ball
-//   cyan     the detector's most confident hoop (what the log keeps)
-//   blue     any other hoops the detector returned
-//   green    the smoothed hoop the tracker was given
+//   cyan     the detector's most confident hoop (the log's `rb`)
+//   blue     any other hoops the detector returned (the rest of `rs`)
+//   green    the smoothed hoop the tracker was given, from the log replay;
+//            dashed: the hoop the live pipeline last published (the two
+//            agree when consistency.txt says the hoop rects do)
 //   white    the rim the shot is judged against (held from release), dashed
 //   magenta  the detection crop (DetectionRegion), dashed
 //
@@ -77,7 +79,7 @@ struct StripWriter {
                               + "  zone \(s.zone.displayName)  court \(f(s.courtX, 2)),\(f(s.courtY, 2))"
                               + "  dist \(s.distanceFt.map { f($0, 1) + " ft" } ?? "-")"
                               + "  published \(f(live.video(l.pts), 2)) s"
-                              + (pair.matches ? "  [shot-eval agrees]" : "  [LIVE ≠ REPLAY: \(pair.problems.joined(separator: "; "))]"))
+                              + (pair.matches ? "  [log replay agrees]" : "  [LIVE ≠ REPLAY: \(pair.problems.joined(separator: "; "))]"))
             } else {
                 header.append("Replay-only call \(number)  \(result.uppercased())  (the delegate never received it): "
                               + pair.problems.joined(separator: "; "))
@@ -144,7 +146,12 @@ struct StripWriter {
             overlay.hoop = report.trace.frames[index].hoop
             overlay.shotBall = report.trace.frames[index].shotBall
         }
-        if let stat = live.probe.first(where: { abs($0.pts - pts) < 1e-6 }) {
+        if index < report.entryFed.count, let fed = report.entryFed[index] {
+            overlay.liveHoop = live.hoopChanges.last { $0.frame <= fed }?.state.hoopRect
+        }
+        if entry.baskets != nil {
+            overlay.otherBaskets = Array(ShotReplay.hoops(in: entry).dropFirst())
+        } else if let stat = live.probe.first(where: { abs($0.pts - pts) < 1e-6 }) {
             overlay.otherBaskets = stat.baskets.dropFirst().map(\.box)
         }
         overlay.shotRim = shotRim
@@ -189,6 +196,7 @@ enum StripRenderer {
         var rim: CGRect?
         var otherBaskets: [CGRect] = []
         var hoop: CGRect?
+        var liveHoop: CGRect?
         var shotRim: CGRect?
         var region: CGRect?
     }
@@ -199,8 +207,8 @@ enum StripRenderer {
         let overlay: Overlay
     }
 
-    static let legend = "yellow ball candidates · orange shot ball · cyan detector hoop (logged) · blue other hoops · "
-        + "green smoothed hoop · white dashed shot rim · magenta dashed detection crop"
+    static let legend = "yellow ball candidates · orange shot ball · cyan detector's top hoop · blue other hoops · "
+        + "green smoothed hoop (replay; dashed: live) · white dashed shot rim · magenta dashed detection crop"
 
     static let frameW: CGFloat = 1280, frameH: CGFloat = 720
     static let panelW: CGFloat = 640, thumbH: CGFloat = 360, zoomH: CGFloat = 360
@@ -290,6 +298,7 @@ enum StripRenderer {
         for other in o.otherBaskets { box(other, CGColor(red: 0.3, green: 0.5, blue: 1, alpha: 1), 1.5) }
         if let rim = o.rim { box(rim, CGColor(red: 0, green: 0.9, blue: 1, alpha: 1), 1.5) }
         if let hoop = o.hoop { box(hoop, CGColor(red: 0.2, green: 1, blue: 0.2, alpha: 1), 1) }
+        if let liveHoop = o.liveHoop { box(liveHoop, CGColor(red: 0.2, green: 1, blue: 0.2, alpha: 0.8), 2.5, dashed: true) }
         if let shotRim = o.shotRim { box(shotRim, CGColor(gray: 1, alpha: 1), 1, dashed: true) }
         for ball in o.balls {
             box(ball.box, CGColor(red: 1, green: 0.9, blue: 0, alpha: 1), 1)

@@ -1,11 +1,12 @@
 // Report.swift
-// Turns a live run into shots.csv, summary.txt, fidelity.txt and
+// Turns a live run into shots.csv, summary.txt, consistency.txt and
 // shot-eval.txt.
 //
-// Fidelity: the calls the delegate received are compared with what
-// shot-eval makes of the detections.jsonl the same run wrote — the check
-// that offline replay (which is how the tracker gets tuned) tells the same
-// story as the live pipeline. Three comparisons:
+// Log-replay consistency: the calls the delegate received are compared with
+// what shot-eval makes of the detections.jsonl the same run wrote — the
+// check that offline replay (which is how the tracker gets tuned) tells the
+// same story as the live pipeline. It compares the Mac's pipeline with a
+// replay of its own log, not with a phone. Three comparisons:
 //   1. shot-eval (the real binary, run on the log) vs ShotReplay.run in
 //      process — the same function, so they must agree;
 //   2. ReplayTrace (ShotReplay.run with the frame bookkeeping kept) vs
@@ -61,8 +62,9 @@ struct Report {
         self.options = options
         self.live = live
         self.entries = entries
-        trace = ReplayTrace.run(entries)
-        replayCalls = ShotReplay.run(entries)
+        // The run's pauses (--pause) aren't in the log; the replay is told.
+        trace = ReplayTrace.run(entries, pauses: live.pauses)
+        replayCalls = ShotReplay.run(entries, pauses: live.pauses)
 
         // Log entries ↔ fed frames: the log's t is (PTS − session start),
         // computed the same way here.
@@ -108,7 +110,7 @@ struct Report {
             labelsOutside = 0
         }
         let run = Self.runShotEval(options: options, logZero: live.logZero, labels: labels,
-                                   rewrite: labelsOutside > 0)
+                                   rewrite: labelsOutside > 0, pauses: live.pauses)
         shotEval = run.0
         shotEvalNote = run.1
     }
@@ -117,7 +119,8 @@ struct Report {
 
     /// Lines the two lists up by the frame each call was published on
     /// (both in order), so one missing call shows as one row rather than
-    /// shifting every row after it.
+    /// shifting every row after it. Calls settled when the session / log
+    /// ended (stop()'s hand-back, the replay's final flush) come last.
     private static func pair(live: [RecordingDelegate.Shot], replay: [ReplayTrace.Call],
                              sessionStart: Double) -> [CallPair] {
         var rows: [CallPair] = []
@@ -125,9 +128,11 @@ struct Report {
         while i < live.count || j < replay.count {
             let l = i < live.count ? live[i] : nil
             let r = j < replay.count ? replay[j] : nil
-            let livePublished = l.map { $0.pts - sessionStart }
+            // Log time of the publishing frame; infinity = at the end.
+            let liveKey = l.map { $0.atEnd ? Double.infinity : $0.pts - sessionStart }
+            let replayKey = r.map { $0.publishedAt ?? .infinity }
             var problems: [String] = []
-            if let l, let r, let at = r.publishedAt, let published = livePublished, abs(published - at) <= 1e-6 {
+            if let l, let r, let a = liveKey, let b = replayKey, a == b || abs(a - b) <= 1e-6 {
                 if l.shot.result != r.result {
                     problems.append("result: live \(name(l.shot.result)), replay \(name(r.result))")
                 }
@@ -145,16 +150,16 @@ struct Report {
                 rows.append(CallPair(index: rows.count, liveIndex: i, replayIndex: j, live: l, replay: r, problems: problems))
                 i += 1
                 j += 1
-            } else if let l, let published = livePublished,
-                      r.flatMap({ $0.publishedAt }).map({ published < $0 }) ?? true {
-                problems.append("live-only: replay published no call on that frame (\(f(published, 3)) s log time)")
+            } else if let l, let a = liveKey, replayKey.map({ a < $0 }) ?? true {
+                problems.append(l.atEnd
+                    ? "live-only: CVPipeline.stop() handed it back at the end; the replay flushed nothing"
+                    : "live-only: replay published no call on that frame (\(f(a, 3)) s log time)")
                 rows.append(CallPair(index: rows.count, liveIndex: i, replayIndex: nil, live: l, replay: nil, problems: problems))
                 i += 1
             } else if let r {
                 if r.publishedAt == nil {
-                    problems.append("replay-only: held by the net check when the session ended; "
-                                    + "CVPipeline.stop() drops a held call (NetCheck.drop), "
-                                    + "ShotReplay.run flushes it")
+                    problems.append("replay-only: held by the net check when the log ended and flushed; "
+                                    + "CVPipeline.stop() handed nothing back")
                 } else {
                     problems.append("replay-only: the delegate got no call on that frame (\(f(r.publishedAt ?? 0, 3)) s log time)")
                 }
@@ -167,14 +172,18 @@ struct Report {
 
     // MARK: - shot-eval
 
-    private static func runShotEval(options: Options, logZero: Double,
-                                    labels: [ShotEvaluation.Label]?, rewrite: Bool) -> (ShotEvalRun?, String?) {
+    private static func runShotEval(options: Options, logZero: Double, labels: [ShotEvaluation.Label]?,
+                                    rewrite: Bool, pauses: [ClosedRange<Double>]) -> (ShotEvalRun?, String?) {
         let binary = options.shotEval
             ?? Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("shot-eval")
         guard let binary, FileManager.default.isExecutableFile(atPath: binary.path) else {
             return (nil, "shot-eval binary not found next to cv-replay (swift build --product shot-eval)")
         }
         var arguments = [options.out.appendingPathComponent("detections.jsonl").path]
+        if !pauses.isEmpty {
+            arguments = ["--pause", pauses.map { String(format: "%.9f-%.9f", $0.lowerBound, $0.upperBound) }
+                .joined(separator: ",")] + arguments
+        }
         var shifted: URL?
         if let url = options.labels, let labels {
             if abs(logZero) < 1e-9 && !rewrite {
@@ -221,7 +230,7 @@ struct Report {
             calls.append(.init(time: time, result: tokens[2] == "make" ? .make : .miss,
                                confidence: confidence, flagged: tokens.count > 4 && tokens[4] == "(check)"))
         }
-        let command = ([binary.lastPathComponent] + arguments.map { URL(fileURLWithPath: $0).lastPathComponent })
+        let command = ([binary.lastPathComponent] + arguments.map { $0.hasPrefix("/") ? URL(fileURLWithPath: $0).lastPathComponent : $0 })
             .joined(separator: " ")
         guard process.terminationStatus == 0 else {
             return (ShotEvalRun(command: command, output: output, calls: calls),
@@ -246,7 +255,93 @@ struct Report {
 
     var liveMatchesReplay: Bool { pairs.allSatisfy(\.matches) }
 
-    var fidelityMatches: Bool { liveMatchesReplay && mirrorAgrees && (shotEvalAgrees ?? true) }
+    /// Log-replay consistency: the live calls, ShotReplay.run, the harness
+    /// trace and shot-eval all agree.
+    var consistent: Bool { liveMatchesReplay && mirrorAgrees && (shotEvalAgrees ?? true) }
+
+    /// Fed frames the pipeline skipped without pausing: its thermal load
+    /// shedding (odd frames while the Mac is hot) — which follows the Mac's
+    /// temperature, so it isn't reproducible run to run.
+    var thermalShed: Int { max(0, live.fedPTS.count - live.pausedFed - live.probe.count) }
+
+    /// "MATCH" / "MISMATCH", plus what the result depended on.
+    var verdict: String {
+        (consistent ? "MATCH" : "MISMATCH")
+            + (thermalShed > 0 ? " (\(thermalShed) frames shed by the Mac's thermal state — not reproducible; "
+               + "--stride 2 is the deterministic stand-in for a hot phone)" : "")
+    }
+
+    /// The hoop rect the delegate got (CVPipeline publishes it on every
+    /// state change and at ~15 Hz while tracking) against the replay's
+    /// smoothed hoop on that frame. Two different hoops both "tracking" only
+    /// show up here, not in the looking/tracking/lost comparison.
+    var hoopRectCheck: (compared: Int, differing: Int, largest: Double, firstAt: Double?, unmatched: Int) {
+        var entryForFed: [Int: Int] = [:]
+        for (i, k) in entryFed.enumerated() { if let k { entryForFed[k] = i } }
+        var compared = 0, differing = 0, unmatched = 0
+        var largest = 0.0
+        var firstAt: Double?
+        for change in live.hoopChanges {
+            guard let i = entryForFed[change.frame], i < trace.frames.count else { unmatched += 1; continue }
+            compared += 1
+            let replay = trace.frames[i].hoop
+            var delta = 0.0
+            switch (change.state.hoopRect, replay) {
+            case (nil, nil):
+                continue
+            case let (a?, b?):
+                delta = [a.minX - b.minX, a.minY - b.minY, a.width - b.width, a.height - b.height]
+                    .map { abs(Double($0)) }.max() ?? 0
+            default:
+                delta = 1
+            }
+            if delta > 1e-9 {
+                differing += 1
+                largest = max(largest, delta)
+                if firstAt == nil { firstAt = trace.frames[i].t }
+            }
+        }
+        return (compared, differing, largest, firstAt, unmatched)
+    }
+
+    /// Frames where HoopRectSmoother fed only the most confident basket (all
+    /// a log kept before `rs`) ends up on another hoop than the replay that
+    /// sees every basket — overlap below the 0.2 the smoother itself uses to
+    /// tell hoops apart. Nil for a log without `rs`.
+    var topBasketOnlyDiffers: Int? {
+        guard entries.contains(where: { $0.baskets != nil }) else { return nil }
+        var smoother = HoopRectSmoother()
+        var count = 0
+        let sorted = entries.sorted { $0.timestampSec < $1.timestampSec }
+        for (i, entry) in sorted.enumerated() where i < trace.frames.count {
+            let top = Array(ShotReplay.hoops(in: entry).prefix(1))
+            if let rim = smoother.choose(from: top) {
+                smoother.update(basketRect: rim, timestamp: entry.timestampSec)
+            } else {
+                smoother.updateNoDetection(timestamp: entry.timestampSec)
+            }
+            let topOnly = smoother.state == .looking ? nil : smoother.smoothedRect
+            switch (topOnly, trace.frames[i].hoop) {
+            case (nil, nil): break
+            case let (a?, b?): if HoopRectSmoother.overlap(a, b) < 0.2 { count += 1 }
+            default: count += 1
+            }
+        }
+        return count
+    }
+
+    /// Frames a camera with this clip's timestamps would have dropped as
+    /// late if each frame cost what it cost here (virtual clock over the
+    /// measured process() times of the frames fed).
+    var lateAtMeasuredCost: Int {
+        var busyUntil = -Double.infinity
+        var dropped = 0
+        for (pts, ms) in zip(live.fedPTS, live.processMs) {
+            if pts < busyUntil { dropped += 1; continue }
+            busyUntil = pts + ms / 1000
+        }
+        return dropped
+    }
 
     /// Each live call's time for scoring: when the ball reached the rim
     /// (from its replay twin), in video seconds; the publish time if it has
@@ -263,7 +358,7 @@ struct Report {
 
     func write(to out: URL) throws {
         try shotsCSV().write(to: out.appendingPathComponent("shots.csv"), atomically: true, encoding: .utf8)
-        try fidelityText().write(to: out.appendingPathComponent("fidelity.txt"), atomically: true, encoding: .utf8)
+        try consistencyText().write(to: out.appendingPathComponent("consistency.txt"), atomically: true, encoding: .utf8)
         if let shotEval {
             try ("$ " + shotEval.command + "\n" + shotEval.output)
                 .write(to: out.appendingPathComponent("shot-eval.txt"), atomically: true, encoding: .utf8)
@@ -295,13 +390,14 @@ struct Report {
         return rows.joined(separator: "\n") + "\n"
     }
 
-    func fidelityText() -> String {
+    func consistencyText() -> String {
         var lines: [String] = []
-        lines.append("Fidelity: calls the live delegate received vs shot-eval on the detections.jsonl this run wrote")
+        lines.append("Log-replay consistency: calls the live delegate received vs shot-eval on the detections.jsonl this run wrote")
+        lines.append("(the Mac's pipeline against a replay of its own log — not a comparison with a phone)")
         lines.append("Times are log seconds (0 = the session video's first frame = \(f(live.logZero, 3)) s into the file)."
                      + (live.ptsOffset != 0 ? " Frames were fed with PTS = video seconds + \(f(live.ptsOffset, 3))." : ""))
         lines.append("")
-        lines.append("Verdict: " + (fidelityMatches ? "MATCH" : "MISMATCH"))
+        lines.append("Verdict: " + verdict)
         lines.append("  live delegate vs replay: \(pairs.filter(\.matches).count)/\(pairs.count) calls match "
                      + "(live \(live.shots.count), replay \(trace.calls.count))")
         if let agrees = shotEvalAgrees, let shotEval {
@@ -318,7 +414,7 @@ struct Report {
         for pair in pairs {
             var row = String(format: "%2d  | ", pair.index + 1)
             if let l = pair.live {
-                row += "\(pad(f(l.pts - live.sessionStart, 3), 9))  \(pad(l.shot.videoOffset.map { f($0, 3) } ?? "-", 7))  "
+                row += "\(pad(l.atEnd ? "end" : f(l.pts - live.sessionStart, 3), 9))  \(pad(l.shot.videoOffset.map { f($0, 3) } ?? "-", 7))  "
                     + "\(pad(name(l.shot.result), 6))  \(f(l.shot.confidence, 3))  | "
             } else {
                 row += String(repeating: " ", count: 39) + "-  | "
@@ -366,12 +462,24 @@ struct Report {
         lines.append("Hoop state (looking/tracking/lost) per frame, live vs replay: "
                      + (differing == 0 ? "identical" : "\(differing) frames differ, first at \(f(firstDiff ?? 0, 3)) s")
                      + (unmapped > 0 ? " (\(unmapped) log lines not matched to a fed frame)" : ""))
+        let rects = hoopRectCheck
+        lines.append("Hoop rect at each of the \(rects.compared) updates the delegate got, live vs replay: "
+                     + (rects.differing == 0 ? "identical" : "\(rects.differing) differ (largest by \(f(rects.largest, 4)) of the frame), "
+                        + "first at \(f(rects.firstAt ?? 0, 3)) s")
+                     + (rects.unmatched > 0 ? " (\(rects.unmatched) not matched to a log line)" : ""))
+        if let topOnly = topBasketOnlyDiffers {
+            lines.append("A replay from the top basket only (as before the log kept every basket) would follow "
+                         + "another hoop on \(topOnly) of \(entries.count) frames")
+        }
         lines.append("Frames where the detector returned 2+ hoops: \(multiHoop) "
-                     + "(the log keeps only the most confident, so replay can pick a different hoop there)")
+                     + (entries.contains { $0.baskets != nil }
+                        ? "(all are logged, so the replay chooses among them as the app did)"
+                        : "(this log keeps only the most confident, so the replay can pick a different hoop there)"))
         let checked = entries.filter { $0.checkedEvent != nil }.count
         lines.append("Log lines with a published call (cv): \(checked) (one per frame; a frame publishing two calls logs the last)")
         lines.append("")
-        lines.append("Tolerances: confidence 1e-9, publish frame and release time 1e-6 s (they come from the same frame PTS).")
+        lines.append("Tolerances: confidence 1e-9, publish frame and release time 1e-6 s (they come from the same frame PTS), "
+                     + "hoop rect 1e-9.")
         return lines.joined(separator: "\n") + "\n"
     }
 
@@ -402,19 +510,50 @@ struct Report {
         lines.append("Pipeline:  CVPipeline + CoreMLBallDetector (\(options.model.lastPathComponent), all compute units), "
                      + "SessionRecorder + DetectionLogger; FOV \(f(options.fieldOfView, 1))°, "
                      + "\(options.court.displayName) three-point line")
+        let env = live.environment
+        lines.append("Mac:       \(env.os), \(env.chip), \(f(env.memoryGB, 0)) GB; model compiled at run time "
+                     + "(MLModel.compileModel; the app ships Xcode's build); \(env.computePlan)")
+        let warnings = SourceCheck.warnings(info: info, converter: converter, fit: options.fit,
+                                            decodedPTS: live.decodedPTS, stride: options.stride)
+        if warnings.isEmpty {
+            lines.append("Source:    16:9, 8-bit SDR, BT.709-tagged, a steady 60 fps — as the app's camera delivers")
+        } else {
+            lines.append("Source differs from the app's camera:")
+            lines += warnings.map { "  ! " + $0 }
+        }
         lines.append("")
 
         let logged = entries.count
+        var frameNotes: [String] = []
+        if let cost = live.frameCost {
+            frameNotes.append("\(live.lateDropped) dropped as late (--frame-cost-ms \(f(cost * 1000, 1)))")
+        }
+        if live.pausedFed > 0 { frameNotes.append("\(live.pausedFed) paused") }
+        if thermalShed > 0 { frameNotes.append("\(thermalShed) SHED (the Mac's thermal state)") }
+        let detectorNil = live.probe.count - logged
+        if detectorNil > 0 { frameNotes.append("\(detectorNil) with no detector result") }
         lines.append("Frames:    \(live.decoded) decoded, \(live.fedPTS.count) fed, \(logged) logged"
-                     + (live.fedPTS.count != logged ? " — \(live.fedPTS.count - logged) NOT PROCESSED (thermal load shedding)" : ""))
+                     + (frameNotes.isEmpty ? "" : " — " + frameNotes.joined(separator: ", ")))
         let fps = Double(live.fedPTS.count) / max(live.wallSeconds, 1e-9)
         let inference = live.probe.map(\.inferenceMs)
-        lines.append("Speed:     \(f(fps, 1)) frames/s (\(f(live.wallSeconds, 1)) s wall, model load \(f(live.modelSeconds, 1)) s); "
-                     + "detector \(f(mean(inference), 1)) ms mean, \(f(percentile(inference, 0.95), 1)) ms p95")
+        let process = live.processMs
+        lines.append("Speed:     \(f(fps, 1)) frames/s (\(f(live.wallSeconds, 1)) s wall, model load \(f(live.modelSeconds, 1)) s)")
+        lines.append("Per frame: whole process() \(f(mean(process), 1)) ms mean, \(f(percentile(process, 0.95), 1)) ms p95, "
+                     + "\(f(process.max() ?? 0, 1)) ms max; detector \(f(mean(inference), 1)) ms mean, "
+                     + "\(f(percentile(inference, 0.95), 1)) ms p95")
+        let budget = 1000 / SourceCheck.appFPS
+        let over = process.filter { $0 > budget }.count
+        lines.append("Late frames: \(pct(over, process.count)) of frames took over \(f(budget, 1)) ms (a 60 fps camera's interval); "
+                     + "at these Mac times a camera with this clip's timing would drop \(lateAtMeasuredCost) frames"
+                     + (live.frameCost == nil ? " (not applied; --frame-cost-ms N models a phone)" : ""))
         lines.append("Thermal:   \(Thermal.name(live.thermalStart)) → \(Thermal.name(live.thermalEnd)) "
                      + "(hottest \(Thermal.name(live.thermalMax)))"
                      + (live.thermalMax.rawValue >= HoopTrack.CV.throttleAtThermalState
                         ? " — the pipeline sheds alternate frames at this level" : ""))
+        if !live.pauses.isEmpty {
+            lines.append("Paused:    " + live.pauses.map { "\(f($0.lowerBound + live.logZero, 2))–\(f($0.upperBound + live.logZero, 2)) s" }
+                .joined(separator: ", ") + " of the video (the replay is told; a log alone doesn't show pauses)")
+        }
         lines.append("")
 
         let mapped = entryFed.compactMap { $0 }
@@ -460,12 +599,18 @@ struct Report {
             }
         }
         lines.append("")
-        lines.append("Fidelity:  " + (fidelityMatches
-            ? "MATCH — shot-eval on detections.jsonl makes the same \(replayCalls.count) calls the delegate received "
+        lines.append("Log-replay consistency: " + verdict + (consistent
+            ? " — shot-eval on detections.jsonl makes the same \(replayCalls.count) calls the delegate received "
               + "(same frames, release times, results, confidences)"
-            : "MISMATCH — live \(live.shots.count) calls, shot-eval \(shotEval?.calls.count ?? replayCalls.count); see fidelity.txt"))
+            : " — live \(live.shots.count) calls, shot-eval \(shotEval?.calls.count ?? replayCalls.count); see consistency.txt"))
+        lines.append("           (this Mac's pipeline against a replay of its own log; it says nothing about how a phone's "
+                     + "detections would differ)")
+        let rects = hoopRectCheck
+        if rects.differing > 0 {
+            lines.append("           hoop rect differs from the replay's at \(rects.differing) of \(rects.compared) updates; see consistency.txt")
+        }
         for pair in pairs where !pair.matches {
-            lines.append("           row \(pair.index + 1) of fidelity.txt: " + pair.problems.joined(separator: "; "))
+            lines.append("           row \(pair.index + 1) of consistency.txt: " + pair.problems.joined(separator: "; "))
         }
         if let shotEvalNote { lines.append("           \(shotEvalNote)") }
 

@@ -151,7 +151,7 @@ struct TrainTabView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Set up in ten seconds")
                         .font(.headline)
-                    Text("Stand the phone sideways behind where you shoot, about chest height, with the whole rim in view. HoopTrack does the rest.")
+                    Text("Stand the phone sideways at chest height, four big steps (3 m) behind where you shoot, with the whole rim in view. HoopTrack does the rest.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

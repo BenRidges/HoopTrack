@@ -11,11 +11,12 @@
 // the way CameraService's capture delegate does. After every frame the
 // session queue waits for the main queue, so the delegate's main-actor
 // hops (Task { @MainActor … }) for that frame have run before the next
-// frame is fed: each call can be pinned to its frame and none is lost at
-// the end.
+// frame is fed: each call can be pinned to its frame. At the end, stop()
+// hands back what the delegate hasn't been given (a call still waiting for
+// the net check) and it's recorded, as LiveSessionViewModel.end() does.
 //
 // Writes, to the output directory: detections.jsonl (the app's telemetry
-// log), shots.csv, summary.txt, fidelity.txt (live calls vs shot-eval on
+// log), shots.csv, summary.txt, consistency.txt (live calls vs shot-eval on
 // that log), shot-eval.txt, strips/*.png. See Tools/cv/README.md.
 //
 // Debug build (the default): @testable needs it, as for shot-eval. Core ML
@@ -92,6 +93,19 @@ struct LiveRun {
     let thermalMax: ProcessInfo.ThermalState
     let thermalEnd: ProcessInfo.ThermalState
     let recordedVideo: URL?
+    /// PTS of every decoded frame (before --stride / --frame-cost-ms).
+    let decodedPTS: [Double]
+    /// Wall time of the whole of process() for each fed frame, ms.
+    let processMs: [Double]
+    /// Frames --frame-cost-ms dropped as late, and the cost it used (s).
+    let lateDropped: Int
+    let frameCost: Double?
+    /// Fed frames the pipeline saw paused (--pause).
+    let pausedFed: Int
+    /// Each --pause as applied: first to last paused frame, in log seconds
+    /// (what ShotReplay.run needs to model it).
+    let pauses: [ClosedRange<Double>]
+    let environment: RunEnvironment
 
     /// Video seconds of log time 0.
     var logZero: Double { sessionStart - ptsOffset }
@@ -117,8 +131,8 @@ final class Runner {
         }
         let out = options.out
         try fileManager.createDirectory(at: out, withIntermediateDirectories: true)
-        for stale in ["detections.jsonl", "shots.csv", "summary.txt", "fidelity.txt", "shot-eval.txt",
-                      "session.mov", "strips"] {
+        for stale in ["detections.jsonl", "shots.csv", "summary.txt", "consistency.txt", "fidelity.txt",
+                      "shot-eval.txt", "session.mov", "strips"] {
             try? fileManager.removeItem(at: out.appendingPathComponent(stale))
         }
 
@@ -157,6 +171,7 @@ final class Runner {
         }
         let modelSeconds = Date().timeIntervalSince(modelStart)
         let probe = DetectorProbe(wrapping: coreML)
+        let environment = await RunEnvironment.current(model: compiled.url)
 
         let source = try await VideoFrames(url: options.video, fit: options.fit, timeRange: options.timeRange,
                                        ptsOffset: options.ptsOffset)
@@ -206,47 +221,84 @@ final class Runner {
         let stride = options.stride
         let ptsOffset = options.ptsOffset
         let quiet = options.quiet
+        let frameCost = options.frameCost
+        let pauses = options.pauses
         let estimate = Int(source.info.nominalFPS * min(source.info.duration, options.duration ?? .infinity))
         let sessionQueue = DispatchQueue(label: "cv-replay.session", qos: .userInitiated)
         let thermalStart = ProcessInfo.processInfo.thermalState
         let started = Date()
 
-        struct Fed { var pts: [Double] = []; var decoded = 0; var thermalMax = ProcessInfo.ThermalState.nominal }
-        let fed: Fed = try await withCheckedThrowingContinuation { continuation in
-            sessionQueue.async {
-                var fed = Fed()
-                var lastProgress = Date()
-                do {
-                    while let frame = try source.next() {
-                        fed.decoded += 1
-                        guard frame.index % stride == 0 else { continue }
-                        clock.set(index: fed.pts.count, pts: frame.seconds)
-                        frames.send(frame.sampleBuffer)
-                        // Let this frame's main-actor hops run before the next frame.
-                        DispatchQueue.main.sync {}
-                        fed.pts.append(frame.seconds)
-                        if fed.pts.count % 30 == 0 {
-                            fed.thermalMax = Thermal.hotter(fed.thermalMax, ProcessInfo.processInfo.thermalState)
-                            if !quiet, Date().timeIntervalSince(lastProgress) > 2 {
-                                lastProgress = Date()
-                                let rate = Double(fed.pts.count) / Date().timeIntervalSince(started)
-                                FileHandle.standardError.write(Data(String(
-                                    format: "\r  frame %d/~%d  %.1f s  %.1f fps   ",
-                                    fed.decoded, estimate, frame.seconds - ptsOffset, rate).utf8))
+        struct Fed {
+            var pts: [Double] = []
+            var decoded = 0
+            var decodedPTS: [Double] = []
+            var processMs: [Double] = []
+            var late = 0
+            var paused = 0
+            /// First and last paused PTS of each pause, by --pause index.
+            var pauseRuns: [Int: (first: Double, last: Double)] = [:]
+            var thermalMax = ProcessInfo.ThermalState.nominal
+        }
+        let fed: Fed
+        do {
+            fed = try await withCheckedThrowingContinuation { continuation in
+                sessionQueue.async {
+                    var fed = Fed()
+                    var lastProgress = Date()
+                    var busyUntil = -Double.infinity
+                    do {
+                        while let frame = try source.next() {
+                            fed.decoded += 1
+                            fed.decodedPTS.append(frame.seconds)
+                            guard frame.index % stride == 0 else { continue }
+                            // --frame-cost-ms: the phone's camera discards a frame
+                            // that arrives while the previous one is still being
+                            // processed (alwaysDiscardsLateVideoFrames; CVPipeline
+                            // works synchronously on the delivery queue).
+                            if let frameCost {
+                                if frame.seconds < busyUntil { fed.late += 1; continue }
+                                busyUntil = frame.seconds + frameCost
+                            }
+                            // --pause: the pause button sets isPaused between frames.
+                            let pause = pauses.firstIndex { $0.contains(frame.seconds - ptsOffset) }
+                            pipeline.isPaused = pause != nil
+                            if let pause {
+                                fed.paused += 1
+                                fed.pauseRuns[pause] = (fed.pauseRuns[pause]?.first ?? frame.seconds, frame.seconds)
+                            }
+                            clock.set(index: fed.pts.count, pts: frame.seconds)
+                            let begin = DispatchTime.now().uptimeNanoseconds
+                            frames.send(frame.sampleBuffer)      // the whole of process(), synchronously
+                            fed.processMs.append(Double(DispatchTime.now().uptimeNanoseconds - begin) / 1e6)
+                            // Let this frame's main-actor hops run before the next frame.
+                            DispatchQueue.main.sync {}
+                            fed.pts.append(frame.seconds)
+                            if fed.pts.count % 30 == 0 {
+                                fed.thermalMax = Thermal.hotter(fed.thermalMax, ProcessInfo.processInfo.thermalState)
+                                if !quiet, Date().timeIntervalSince(lastProgress) > 2 {
+                                    lastProgress = Date()
+                                    let rate = Double(fed.pts.count) / Date().timeIntervalSince(started)
+                                    FileHandle.standardError.write(Data(String(
+                                        format: "\r  frame %d/~%d  %.1f s  %.1f fps   ",
+                                        fed.decoded, estimate, frame.seconds - ptsOffset, rate).utf8))
+                                }
                             }
                         }
+                        if !quiet { FileHandle.standardError.write(Data("\n".utf8)) }
+                        continuation.resume(returning: fed)
+                    } catch {
+                        continuation.resume(throwing: error)
                     }
-                    // As LiveSessionViewModel.end(): stop() closes the log.
-                    pipeline.stop()
-                    DispatchQueue.main.sync {}
-                    if !quiet { FileHandle.standardError.write(Data("\n".utf8)) }
-                    continuation.resume(returning: fed)
-                } catch {
-                    pipeline.stop()
-                    continuation.resume(throwing: error)
                 }
             }
+        } catch {
+            _ = await pipeline.stop()
+            throw error
         }
+        // As LiveSessionViewModel.end(): stop() closes the log and hands back
+        // what the delegate hasn't been given (a call still waiting for the
+        // net check), which the session records.
+        delegate.sessionEnded(handingBack: await pipeline.stop())
         let wall = Date().timeIntervalSince(started)
 
         // The barrier after every frame means everything has arrived; make
@@ -272,14 +324,20 @@ final class Runner {
         try fileManager.moveItem(at: logFile, to: options.out.appendingPathComponent("detections.jsonl"))
 
         guard let firstPTS = fed.pts.first else { throw RunnerError("no frames decoded from \(options.video.path)") }
+        let sessionStart = recorder.startTime ?? firstPTS
         return LiveRun(info: source.info, converter: source.converter, fedPTS: fed.pts, decoded: fed.decoded,
                        wallSeconds: wall, modelSeconds: modelSeconds,
-                       sessionStart: recorder.startTime ?? firstPTS, ptsOffset: options.ptsOffset,
+                       sessionStart: sessionStart, ptsOffset: options.ptsOffset,
                        shots: delegate.shots, starts: delegate.starts, hoopChanges: delegate.hoopChanges,
                        probe: probe.stats,
                        thermalStart: thermalStart, thermalMax: fed.thermalMax,
                        thermalEnd: ProcessInfo.processInfo.thermalState,
-                       recordedVideo: kept)
+                       recordedVideo: kept,
+                       decodedPTS: fed.decodedPTS, processMs: fed.processMs,
+                       lateDropped: fed.late, frameCost: frameCost, pausedFed: fed.paused,
+                       pauses: fed.pauseRuns.values.map { ($0.first - sessionStart)...($0.last - sessionStart) }
+                           .sorted { $0.lowerBound < $1.lowerBound },
+                       environment: environment)
     }
 
     /// The model compiled for this Mac. An .mlmodel / .mlpackage is

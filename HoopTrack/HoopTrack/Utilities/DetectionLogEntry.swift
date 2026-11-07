@@ -49,6 +49,12 @@ nonisolated struct DetectionLogEntry: Codable, Sendable, Equatable {
     var checkedEvent: String? = nil
     var checkedConfidence: Double? = nil
 
+    /// Every hoop candidate: [x, y, w, h, confidence], most confident first —
+    /// all of what CourtCalibrationService chose the hoop from, as `balls` is
+    /// for balls. `rimBox`/`rimConfidence` stay the first of these, for older
+    /// readers; logs from before this field have only those.
+    var baskets: [[Double]]? = nil
+
     enum CodingKeys: String, CodingKey {
         case timestampSec    = "t"
         case ballConfidence  = "ci"
@@ -63,6 +69,7 @@ nonisolated struct DetectionLogEntry: Codable, Sendable, Equatable {
         case netActivity     = "na"
         case checkedEvent    = "cv"
         case checkedConfidence = "cc"
+        case baskets         = "rs"
     }
 
     /// Encode as a single-line JSON terminated with `\n`. Safe to append

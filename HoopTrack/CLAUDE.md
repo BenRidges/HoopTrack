@@ -53,11 +53,11 @@ On a Mac the package also links the camera-side files (`Sources/HoopTrack/Captur
 
 ### Shot tracking
 
-All per-frame work runs on the camera's session queue; results reach the main actor through `@MainActor` delegate protocols. See `docs/cv-review-2026-11.md` at the repo root for the design and the improvement plan.
+Per-frame work runs on `CVPipeline`'s own serial queue, called synchronously from the camera's session queue, and `stop()` runs there too, after the frame in progress. Results reach the main actor through `@MainActor` delegate protocols; a call made just before a session ends is handed back by `stop()` instead, exactly once. See `docs/cv-review-2026-11.md` at the repo root for the design and the improvement plan.
 
 - **`CameraService`** — `AVCaptureSession`, 720p at 60 fps where available, `framePublisher`. Live shooting is landscape-right only (capture is fixed at 0°).
 - **`CVPipeline`** — frame → `SessionRecorder` (HEVC video) → detector → `CourtCalibrationService` (smoothed hoop) → `ShotTracker` → `NetCheck` → `CourtPositionEstimator` + `ShotPhysics` → `ShotPipelineDelegate`.
-- **`ShotTracker`** (`Utilities/`) — pure make/miss state machine, unit tested. Tracks every ball between shots; from release a `BallFilter` (Kalman) picks the shot ball each frame. Tune via `ShotTracker.Tuning`, measured with `shot-eval`.
+- **`ShotTracker`** (`Utilities/`) — pure make/miss state machine, unit tested. Tracks every ball between shots; from release a `BallFilter` (Kalman, with gravity and perspective from the ball's apparent size) picks the shot ball each frame. Tune via `ShotTracker.Tuning`. Measure every change with `shot-sim` (seeds 1 and 2, plus one nobody tuned on) and the real-clip fixtures (`RealClipFixtureTests`, `Tools/cv/replay.sh` for the full pipeline); both are floors in `swift test`.
 - **`NetMotion`** (`NetWatch`, `NetCheck`, `ShotEvidence`) — samples the net's brightness every frame; calls the tracker wasn't sure of (confidence < 0.9) wait ≤ 0.7 s and are confirmed, flagged or rescued by whether the net swung. `ShotReplay` runs the same `NetCheck`, so `shot-eval` scores what the app publishes.
 - **`DetectionRegion`** — while a shot is in flight the detector runs on a crop around hoop + ball (`HoopTrack.CV.focusDuringShots`).
 - **Telemetry** (opt-in) — `detections.jsonl` per frame, then `TelemetryManifest` (sampled frames with their boxes + every shot's outcome). `Tools/dataset/build_dataset.py` turns those into a YOLO dataset; `Tools/training/train_detector.py` trains, gates against the shipped model and exports. See `docs/training-review-2026-11.md`.
@@ -80,7 +80,7 @@ All magic numbers live in `HoopTrack/Utilities/Constants.swift` as nested enums:
 - **Playoffs** — best of seven, four rounds, solo. `PlayoffRun` (`Utilities/PlayoffEngine.swift`, pure) is replayed from the shots of every `TrainingSession` tagged with the run's `playoffSeriesID`, so undo and corrections just work; `PlayoffSeries` only caches the result (`DataService.refreshPlayoff`). Sittings are ordinary shooting sessions (`TrainingLaunch.playoff(id)`) with a playoff HUD, so they count toward every stat.
 - **Progress** — FG% for a range with trend, shot chart, zones, skills, goals, badges, history, games.
 - **Profile** — career numbers and every setting (training, cloud backup, privacy, developer).
-- Sessions: `LiveSessionView` (landscape, via `LandscapeContainer`), `DribbleDrillView`, `AgilitySessionView`, `GameFlowView`. Each ends with `onFinish(SessionResult?)`; nil means nothing worth keeping (empty sessions are discarded).
+- Sessions: `LiveSessionView` (landscape, via `LandscapeContainer`), `DribbleDrillView`, `AgilitySessionView`, `GameFlowView`. Each ends with `onFinish(SessionEnd?)`: `.saved` shows the summary, `.discarded` (nothing recorded) shows a short notice over the tabs, and a failed save keeps the session on screen with Try again / Close.
 
 ### App Intents & Deep Links
 
