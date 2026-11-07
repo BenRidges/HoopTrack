@@ -157,7 +157,7 @@ final class BallFilterGravityTests: XCTestCase {
         XCTAssertLessThan(filter.predicted(at: 2.5).y, p.y - 0.5 * r)
     }
 
-    func test_bounce_widensTheGate() {
+    func test_bounce_widensTheGate_fromWhenItCouldHaveHappened() {
         let (filter, last) = follow(sideOn, until: 0.6)
         let t = last + 1.0 / 30
         // The ball comes off the rim going the other way.
@@ -166,7 +166,9 @@ final class BallFilterGravityTests: XCTestCase {
         let bounced = BallFilter.Point(x: truth.x - 2 * v.x / 30, y: truth.y - 2 * v.y / 30)
         let speed = (v.x * v.x + v.y * v.y).squareRoot()
         XCTAssertGreaterThan(filter.surprise(of: bounced, at: t), 5)
-        XCTAssertLessThan(filter.surprise(of: bounced, at: t, bounceSD: 0.8 * speed), 5)
+        XCTAssertLessThan(filter.surprise(of: bounced, at: t, bounce: .init(sd: 0.8 * speed, at: last)), 4)
+        // A contact that can't have come before now hasn't moved it yet.
+        XCTAssertGreaterThan(filter.surprise(of: bounced, at: t, bounce: .init(sd: 0.8 * speed, at: t)), 5)
     }
 
     func test_handledBall_filterFollowsAfterASurprise() {

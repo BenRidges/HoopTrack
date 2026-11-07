@@ -240,8 +240,8 @@ nonisolated struct ShotTracker: Sendable {
         if case .idle = phase {
             associate(plausible, rimUnitY: rimUnitY, time: time)
         } else {
-            let bounce = filter.map { bounceSD($0, at: time, hoop: hoop, rimUnitY: rimUnitY) } ?? 0
-            if let picked = pick(from: plausible, bounceSD: bounce, rimUnitY: rimUnitY, time: time) {
+            let bounce = filter.flatMap { self.bounce($0, by: time, hoop: hoop, rimUnitY: rimUnitY) }
+            if let picked = pick(from: plausible, bounce: bounce, rimUnitY: rimUnitY, time: time) {
                 history.append(Sample(box: picked.box, time: time))
                 lastSeen = time
                 let m = measurement(picked.box, rimUnitY: rimUnitY)
@@ -253,7 +253,7 @@ nonisolated struct ShotTracker: Sendable {
                     filter = makeFilter(at: m, velocity: loose.velocity, time: time, rimUnitY: rimUnitY)
                 } else {
                     filter?.update(with: m.point, diameter: m.diameter, at: time,
-                                   measurementSD: m.sd, bounceSD: bounce)
+                                   measurementSD: m.sd, bounce: bounce)
                 }
             } else if let filter, let size = filter.diameter(at: time),
                       filter.predicted(at: time).y - size / 2 > 1 {
@@ -319,7 +319,7 @@ nonisolated struct ShotTracker: Sendable {
     /// During a shot: the candidate the ball filter finds least surprising.
     /// Rejects implausible jumps so a second ball can't hijack the shot.
     /// `restart` when only the loose filter accepts it.
-    private func pick(from balls: [CGRect], bounceSD: Double, rimUnitY: Double,
+    private func pick(from balls: [CGRect], bounce: BallFilter.Bounce?, rimUnitY: Double,
                       time: Double) -> (box: CGRect, restart: Bool)? {
         guard !balls.isEmpty, let last = history.last else { return nil }
         // Hard cap on movement since the last sighting, whatever the filter says.
@@ -329,12 +329,12 @@ nonisolated struct ShotTracker: Sendable {
             let balls = balls.filter {
                 couldBeShotBall($0, filter: filter, time: time) && couldBeBackInFrame($0, filter: filter, time: time)
             }
-            func best(_ f: BallFilter, bounceSD: Double) -> (box: CGRect, surprise: Double)? {
+            func best(_ f: BallFilter, bounce: BallFilter.Bounce?) -> (box: CGRect, surprise: Double)? {
                 let predicted = f.predicted(at: time)
                 let scored = balls.map { box -> (box: CGRect, surprise: Double, distance: Double) in
                     let m = measurement(box, rimUnitY: rimUnitY)
                     let dx = m.point.x - predicted.x, dy = m.point.y - predicted.y
-                    let surprise = f.surprise(of: m.point, at: time, measurementSD: m.sd, bounceSD: bounceSD)
+                    let surprise = f.surprise(of: m.point, at: time, measurementSD: m.sd, bounce: bounce)
                     return (box, surprise, (dx * dx + dy * dy).squareRoot())
                 }
                 guard let best = scored.min(by: { $0.surprise < $1.surprise }),
@@ -342,13 +342,13 @@ nonisolated struct ShotTracker: Sendable {
                       best.surprise <= tuning.gateSigma else { return nil }
                 return (best.box, best.surprise)
             }
-            let flight = best(filter, bounceSD: bounceSD)
+            let flight = best(filter, bounce: bounce)
             if let flight, flight.surprise <= tuning.freeFlightSigma { return (flight.box, false) }
             // Not quite where gravity would have it. Just after the start the
             // hands may still have been on it: if the loose filter takes it,
             // start the flight model again rather than bend it to fit.
             if let looseFilter, time - shotStart <= tuning.handsTime,
-               let loose = best(looseFilter, bounceSD: 0) {
+               let loose = best(looseFilter, bounce: nil) {
                 return (loose.box, true)
             }
             return flight.map { ($0.box, false) }
@@ -627,21 +627,26 @@ nonisolated struct ShotTracker: Sendable {
         return true
     }
 
-    /// Velocity kick SD (height units/s) for a ball that may have hit the
-    /// rim or board since the filter last saw it: when it should now be
-    /// within the board's reach of the rim. The board is 1.83 m wide and
-    /// rises ~0.9 m above the rim (≈ 1.95 R each way) and the ball's radius
-    /// adds 0.25 R; the hoop box takes in the net below.
-    private func bounceSD(_ filter: BallFilter, at time: Double, hoop: CGRect, rimUnitY: Double) -> Double {
-        let p = filter.predicted(at: time)
+    /// The rim or board contact a ball may have had since the filter last
+    /// saw it: from when its predicted path first came within the board's
+    /// reach of the rim. The board is 1.83 m wide and rises ~0.9 m above the
+    /// rim (≈ 1.95 R each way) and the ball's radius adds 0.25 R; the hoop
+    /// box takes in the net below.
+    private func bounce(_ filter: BallFilter, by time: Double, hoop: CGRect,
+                        rimUnitY: Double) -> BallFilter.Bounce? {
         let reach = 2.2 * rimUnitY
-        let nearHoop = abs(p.x - Double(hoop.midX) * aspect) <= reach
-            && p.y >= Double(hoop.minY) - 0.25 * rimUnitY
-            && p.y <= Double(hoop.maxY) + reach
-        guard nearHoop else { return 0 }
+        func nearHoop(_ p: BallFilter.Point) -> Bool {
+            abs(p.x - Double(hoop.midX) * aspect) <= reach
+                && p.y >= Double(hoop.minY) - 0.25 * rimUnitY
+                && p.y <= Double(hoop.maxY) + reach
+        }
+        guard let entry = filter.path(to: time, every: 1.0 / 120).first(where: { nearHoop($0.point) }) else {
+            return nil
+        }
         let v = filter.velocity
         let speed = (v.x * v.x + v.y * v.y).squareRoot()
-        return tuning.bounceKick * speed + tuning.bounceKickFloor * rimUnitY
+        return BallFilter.Bounce(sd: tuning.bounceKick * speed + tuning.bounceKickFloor * rimUnitY,
+                                 at: entry.time)
     }
 
     /// Distance between a sample and a box centre, in height units.

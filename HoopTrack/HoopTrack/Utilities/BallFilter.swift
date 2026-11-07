@@ -30,7 +30,7 @@
 // bigger than the ball — goes into a residual acceleration b per axis,
 // estimated from the detections and allowed to wander slowly, plus white
 // acceleration noise. A bounce off the rim or board is a kick to the
-// velocity that the caller declares (`bounceSD`), since only it knows
+// velocity that the caller declares (`Bounce`), since only it knows
 // where the hoop is.
 //
 // Units are whatever the caller uses consistently: ShotTracker feeds it
@@ -46,6 +46,14 @@ nonisolated struct BallFilter: Sendable, Equatable {
     struct Point: Sendable, Equatable {
         var x: Double
         var y: Double
+    }
+
+    /// A velocity change the ball may have had since the last update (a
+    /// rim or board contact): SD `sd` (units/s), no earlier than `at`
+    /// (when it could first have reached the rim or board).
+    struct Bounce: Sendable, Equatable {
+        var sd: Double
+        var at: Double
     }
 
     /// How much the ball may stray from the model, in the caller's units.
@@ -214,7 +222,7 @@ nonisolated struct BallFilter: Sendable, Equatable {
 
     /// Where the ball should be at `time`, without changing the filter.
     func predicted(at time: Double) -> Point {
-        let (px, py) = advanced(to: time, bounceSD: 0)
+        let (px, py) = advanced(to: time, bounce: nil)
         return Point(x: px.p, y: py.p)
     }
 
@@ -240,11 +248,10 @@ nonisolated struct BallFilter: Sendable, Equatable {
     /// - Parameters:
     ///   - measurementSD: this detection's centre SD, if not the usual (a
     ///     box cut off by the frame edge).
-    ///   - bounceSD: SD of a velocity change the ball may have had since
-    ///     the last update (a rim or board contact), units / s.
+    ///   - bounce: a rim or board contact it may have had since the last update.
     func surprise(of point: Point, at time: Double,
-                  measurementSD: Double? = nil, bounceSD: Double = 0) -> Double {
-        let (px, py) = advanced(to: time, bounceSD: bounceSD)
+                  measurementSD: Double? = nil, bounce: Bounce? = nil) -> Double {
+        let (px, py) = advanced(to: time, bounce: bounce)
         let sd = measurementSD ?? noise.measurementSD
         let r = sd * sd
         let dx = point.x - px.p, dy = point.y - py.p
@@ -253,9 +260,9 @@ nonisolated struct BallFilter: Sendable, Equatable {
 
     /// Advances to `time` and folds in a measurement.
     mutating func update(with point: Point, diameter: Double? = nil, at time: Double,
-                         measurementSD: Double? = nil, bounceSD: Double = 0) {
+                         measurementSD: Double? = nil, bounce: Bounce? = nil) {
         let dt = max(0, time - self.time)
-        (x, y) = advanced(to: self.time + dt, bounceSD: bounceSD)
+        (x, y) = advanced(to: self.time + dt, bounce: bounce)
         let q = depthDrift
         depth?.advance(dt: dt, q: q)
         let sd = measurementSD ?? noise.measurementSD
@@ -296,16 +303,19 @@ nonisolated struct BallFilter: Sendable, Equatable {
         depth = Depth(w: w, rate: 0, ww: sdW * sdW, wr: 0, rr: sdRate * sdRate)
     }
 
-    private func advanced(to time: Double, bounceSD: Double) -> (Axis, Axis) {
+    private func advanced(to time: Double, bounce: Bounce?) -> (Axis, Axis) {
         var px = x, py = y
-        // A bounce could have come any time since the last sighting; taking
-        // it at the start lets it move the predicted position too.
-        if bounceSD > 0 {
-            px.kick(variance: bounceSD * bounceSD)
-            py.kick(variance: bounceSD * bounceSD)
+        let dt = max(0, time - self.time)
+        // The kick goes in at the earliest the contact could have been, so
+        // it moves the predicted position for as long as it could have.
+        var done = 0.0
+        if let bounce, bounce.sd > 0 {
+            done = min(dt, max(0, bounce.at - self.time))
+            if done > 0 { Self.advance(&px, &py, depth: depth, from: 0, by: done, noise: noise) }
+            px.kick(variance: bounce.sd * bounce.sd)
+            py.kick(variance: bounce.sd * bounce.sd)
         }
-        let dt = time - self.time
-        if dt > 0 { Self.advance(&px, &py, depth: depth, from: 0, by: dt, noise: noise) }
+        if dt > done { Self.advance(&px, &py, depth: depth, from: done, by: dt - done, noise: noise) }
         return (px, py)
     }
 
