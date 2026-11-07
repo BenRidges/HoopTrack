@@ -118,6 +118,10 @@ nonisolated struct ShotTracker: Sendable {
         /// White acceleration noise of the loose filter, R²/s³: a hand pushes
         /// at up to ~5 g (≈ 100 R/s²) for ~0.15 s.
         var looseAccelerationNoise: Double = 400
+        /// A detection within this many SDs of the flight model's prediction
+        /// fits free flight; one further out (but inside `gateSigma`) during
+        /// `handsTime` restarts the flight model from the loose filter.
+        var freeFlightSigma: Double = 3
         /// A box this close to the frame's edge (fraction of the frame, ~3 px
         /// at 720p) and clearly shorter across it than along it is a ball
         /// cut off by the edge.
@@ -320,7 +324,7 @@ nonisolated struct ShotTracker: Sendable {
             let balls = balls.filter {
                 couldBeShotBall($0, filter: filter, time: time) && couldBeBackInFrame($0, filter: filter, time: time)
             }
-            func best(_ f: BallFilter, bounceSD: Double) -> CGRect? {
+            func best(_ f: BallFilter, bounceSD: Double) -> (box: CGRect, surprise: Double)? {
                 let predicted = f.predicted(at: time)
                 let scored = balls.map { box -> (box: CGRect, surprise: Double, distance: Double) in
                     let m = measurement(box, rimUnitY: rimUnitY)
@@ -331,13 +335,18 @@ nonisolated struct ShotTracker: Sendable {
                 guard let best = scored.min(by: { $0.surprise < $1.surprise }),
                       best.distance <= cap,
                       best.surprise <= tuning.gateSigma || best.distance <= 0.75 * rimUnitY else { return nil }
-                return best.box
+                return (best.box, best.surprise)
             }
-            if let box = best(filter, bounceSD: bounceSD) { return (box, false) }
-            // Not where gravity would have it. Just after the start the hands
-            // may still have been on it: try the loose filter.
-            guard let looseFilter, time - shotStart <= tuning.handsTime else { return nil }
-            return best(looseFilter, bounceSD: 0).map { ($0, true) }
+            let flight = best(filter, bounceSD: bounceSD)
+            if let flight, flight.surprise <= tuning.freeFlightSigma { return (flight.box, false) }
+            // Not quite where gravity would have it. Just after the start the
+            // hands may still have been on it: if the loose filter takes it,
+            // start the flight model again rather than bend it to fit.
+            if let looseFilter, time - shotStart <= tuning.handsTime,
+               let loose = best(looseFilter, bounceSD: 0) {
+                return (loose.box, true)
+            }
+            return flight.map { ($0.box, false) }
         }
 
         var predictedX = last.x

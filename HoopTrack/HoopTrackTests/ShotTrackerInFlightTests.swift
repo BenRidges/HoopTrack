@@ -54,6 +54,29 @@ final class ShotTrackerInFlightTests: XCTestCase {
         XCTAssertEqual(outcomes.map(\.result), [.miss])
     }
 
+    // MARK: - Still in the hands
+
+    func test_shotStartedOnTheLift_isFollowedThroughThePush() {
+        // The ball is lifted to the set point (where the start rule already
+        // fires), held, pushed and released into the same arc as arcY from
+        // t = 0.55: the flight model has to let go of the lift.
+        var tracker = ShotTracker()
+        let release = 0.55
+        func y(_ t: Double) -> Double {
+            if t < 0.3 { return 0.30 + 1.3 * t }                    // lift
+            if t < 0.45 { return 0.69 }                             // set point
+            if t < release {                                        // push
+                let k = (t - 0.45) / (release - 0.45)
+                return 0.69 + 0.04 * k * k
+            }
+            return 0.73 + self.arcY(t - release + 0.15) - self.arcY(0.15)
+        }
+        let outcomes = run(duration: 2.4, tracker: &tracker) { t in
+            t <= 1.6 ? [self.box(0.5, y(t))] : []
+        }
+        XCTAssertEqual(outcomes.map(\.result), [.make])
+    }
+
     // MARK: - Out of the top of the frame
 
     /// A high arc under gravity at the ball's own scale (g = 41 apparent
