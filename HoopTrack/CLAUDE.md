@@ -30,6 +30,8 @@ swift run shot-eval detections.jsonl labels.csv   # replay a session log through
 
 When adding pure logic, keep the file free of SwiftUI/UIKit/CoreGraphics imports, mark its types `nonisolated`, and add a symlink for it (and its test) in the package so it's covered there too.
 
+On a Mac the package also links the camera-side files (`Sources/HoopTrack/Capture/`: `CVPipeline`, `CoreMLBallDetector`, `CourtCalibrationService`, `DetectionLogger`, `SessionRecorder`) and builds `cv-replay`, which runs the real pipeline on a video file and checks `shot-eval` agrees with it (`Tools/cv/README.md`; `Tools/cv/replay.sh` drives it from Linux). Linux builds leave both out.
+
 ## Architecture
 
 **MVVM + SwiftData + Combine.** `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is set project-wide, so view models and services are main-actor by default. Pure value types and anything that runs on the camera queue must be marked `nonisolated` (all enums in `Models/Enums.swift` are).

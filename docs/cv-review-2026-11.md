@@ -179,6 +179,13 @@ The report shows how many shots were detected, how many calls were right,
 which way the wrong calls went, phantom shots and missed shots. Change
 `ShotTracker.Tuning`, re-run, compare.
 
+Without a phone, `cv-replay` (macOS) runs the shipped pipeline itself —
+`CVPipeline`, `CoreMLBallDetector` on the bundled model, net check, crops —
+on any video file, writes the same `detections.jsonl`, the calls, annotated
+frames per shot, and checks that `shot-eval` on that log makes the calls the
+pipeline made. `Tools/cv/replay.sh clip.mp4 labels.csv` runs it from Linux
+over ssh. See `Tools/cv/README.md`.
+
 ## Next, in order of payoff
 
 1. **Label 20–30 real sessions** and tune `ShotTracker.Tuning` with
