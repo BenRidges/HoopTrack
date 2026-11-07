@@ -89,6 +89,27 @@ struct VideoInfo {
     let displaySize: CGSize
     let nominalFPS: Double
     let duration: Double
+    /// Colour tags from the format description (nil when the file has none).
+    let colorPrimaries: String?
+    let transferFunction: String?
+    let yCbCrMatrix: String?
+    /// Bits per component when the file says (10 for HDR / Main10).
+    let bitsPerComponent: Int?
+    /// AVFoundation's own "contains HDR video".
+    let isHDR: Bool
+
+    /// HLG or PQ transfer, 10-bit or flagged HDR: not what the app's camera
+    /// delivers (8-bit SDR 420f).
+    var hdrDescription: String? {
+        var parts: [String] = []
+        if let t = transferFunction {
+            if t == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String) { parts.append("HLG") }
+            if t == (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String) { parts.append("PQ") }
+        }
+        if let bits = bitsPerComponent, bits > 8 { parts.append("\(bits)-bit") }
+        if isHDR && parts.isEmpty { parts.append("HDR") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
 }
 
 struct DecodedFrame {
@@ -144,9 +165,18 @@ final class VideoFrames: @unchecked Sendable {
         let display = orientation.quarterTurnsCW % 2 == 1
             ? CGSize(width: naturalSize.height, height: naturalSize.width) : naturalSize
         let codec = formats.first.map { Self.fourCC(CMFormatDescriptionGetMediaSubType($0)) } ?? "?"
+        func tag(_ key: CFString) -> Any? {
+            formats.first.flatMap { CMFormatDescriptionGetExtension($0, extensionKey: key) }
+        }
+        let characteristics = (try? await track.load(.mediaCharacteristics)) ?? []
         info = VideoInfo(url: url, codec: codec, naturalSize: naturalSize, transform: transform,
                          orientation: orientation, displaySize: display,
-                         nominalFPS: Double(fps), duration: CMTimeGetSeconds(duration))
+                         nominalFPS: Double(fps), duration: CMTimeGetSeconds(duration),
+                         colorPrimaries: tag(kCMFormatDescriptionExtension_ColorPrimaries) as? String,
+                         transferFunction: tag(kCMFormatDescriptionExtension_TransferFunction) as? String,
+                         yCbCrMatrix: tag(kCMFormatDescriptionExtension_YCbCrMatrix) as? String,
+                         bitsPerComponent: (tag(kCMFormatDescriptionExtension_BitsPerComponent) as? NSNumber)?.intValue,
+                         isHDR: characteristics.contains(.containsHDRVideo))
 
         do {
             reader = try AVAssetReader(asset: asset)

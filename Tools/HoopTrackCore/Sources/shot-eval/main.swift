@@ -3,6 +3,8 @@
 //   swift run shot-eval detections.jsonl              list the calls
 //   swift run shot-eval detections.jsonl labels.csv   …and score them
 //   swift run shot-eval --no-net …                    tracker alone, no net check
+//   swift run shot-eval --pause 30-45,90-95 …         the session was paused then
+//                                                     (log seconds; the log can't show it)
 //
 // detections.jsonl is written to Documents/Telemetry/<session id>/ when
 // "Help improve shot tracking" is on (pull it with Xcode → Devices →
@@ -24,8 +26,18 @@ extension String {
 var args = Array(CommandLine.arguments.dropFirst())
 let useNet = !args.contains("--no-net")
 args.removeAll { $0 == "--no-net" }
+var pauses: [ClosedRange<Double>] = []
+while let flag = args.firstIndex(of: "--pause") {
+    guard flag + 1 < args.count else { print("--pause needs A-B[,C-D]"); exit(2) }
+    for part in args[flag + 1].split(separator: ",") {
+        let ends = part.split(separator: "-", maxSplits: 1).compactMap { Double($0) }
+        guard ends.count == 2, ends[0] < ends[1] else { print("--pause wants A-B[,C-D], got \(part)"); exit(2) }
+        pauses.append(ends[0]...ends[1])
+    }
+    args.removeSubrange(flag...(flag + 1))
+}
 guard let logPath = args.first else {
-    print("usage: shot-eval [--no-net] <detections.jsonl> [labels.csv]")
+    print("usage: shot-eval [--no-net] [--pause A-B[,C-D]] <detections.jsonl> [labels.csv]")
     exit(2)
 }
 
@@ -43,7 +55,7 @@ guard !entries.isEmpty else {
     print("no readable frames in \(logPath)")
     exit(1)
 }
-let calls = ShotReplay.run(entries, netCheck: useNet)
+let calls = ShotReplay.run(entries, netCheck: useNet, pauses: pauses)
 let span = (entries.last?.timestampSec ?? 0) - (entries.first?.timestampSec ?? 0)
 print("\(entries.count) frames over \(Int(span)) s, \(calls.count) shots called\n")
 for (index, call) in calls.enumerated() {

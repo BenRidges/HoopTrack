@@ -109,6 +109,42 @@ final class ShotReplayTests: XCTestCase {
         XCTAssertLessThan(calls[0].confidence, 0.9, "an unsure call, so it was still held when the log ended")
     }
 
+    // MARK: Pauses (known from cv-replay --pause or shot-eval --pause)
+
+    func test_replay_pause_dropsTheShotInTheAir_asTheAppDoes() {
+        // Paused 0.5–1.0 s into a make: the app logs nothing while paused and
+        // resets the tracker on its first paused frame.
+        let log = shotLog(start: 0).filter { !(0.5...1.0).contains($0.timestampSec) }
+        XCTAssertEqual(ShotReplay.run(log, pauses: [0.5...1.0]), [])
+    }
+
+    func test_replay_pause_settlesTheCallWaitingForTheNet_once() {
+        // A graze, then a pause 0.2 s later and a quiet second after it.
+        let shot = shotLog(start: 0, x: { 0.5 + 0.08 * $0 }).filter { $0.timestampSec <= 1.15 }
+        let after = stride(from: 3.0, through: 4.0, by: 1.0 / 60).map {
+            DetectionLogEntry(timestampSec: $0, ballConfidence: nil, ballBox: nil, rimConfidence: 0.9,
+                              rimBox: rim, state: "idle")
+        }
+        let calls = ShotReplay.run(shot + after, pauses: [1.2...2.9])
+        XCTAssertEqual(calls.map(\.result), [.miss])
+        XCTAssertLessThan(calls[0].confidence, 0.9)
+    }
+
+    func test_pauseClock_reportsWhenAPauseBegan_andSkipsPausedEntries() {
+        var clock = ShotReplay.PauseClock([1.0...2.0, 5.0...6.0])
+        XCTAssertNil(clock.step(to: 0.5).began)
+        let afterFirst = clock.step(to: 2.5)
+        XCTAssertEqual(afterFirst.began, 1.0)
+        XCTAssertFalse(afterFirst.inside)
+        let inSecond = clock.step(to: 5.5)
+        XCTAssertEqual(inSecond.began, 5.0)
+        XCTAssertTrue(inSecond.inside)
+        let stillInSecond = clock.step(to: 5.8)
+        XCTAssertNil(stillInSecond.began)
+        XCTAssertTrue(stillInSecond.inside)
+        XCTAssertEqual(clock.step(to: 7).inside, false)
+    }
+
     func test_replay_netSwingRescuesABallLostAtTheRim() {
         // Off-centre and lost just above the rim (behind it, say), then the net jumps.
         let log = stride(from: 0.0, through: 2.0, by: 1.0 / 60).map { t -> DetectionLogEntry in

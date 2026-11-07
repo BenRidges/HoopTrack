@@ -137,4 +137,4 @@ fi
 echo
 cat "$out/summary.txt"
 echo
-echo "Results: $out  (summary.txt, shots.csv, fidelity.txt, shot-eval.txt, detections.jsonl, strips/)"
+echo "Results: $out  (summary.txt, shots.csv, consistency.txt, shot-eval.txt, detections.jsonl, strips/)"

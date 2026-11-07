@@ -43,11 +43,13 @@ enum ReplayTrace {
     static func run(_ entries: [DetectionLogEntry],
                     aspect: Double = 16.0 / 9.0,
                     tuning: ShotTracker.Tuning = ShotTracker.Tuning(),
-                    netCheck useNet: Bool = true) -> (calls: [Call], frames: [Frame]) {
+                    netCheck useNet: Bool = true,
+                    pauses: [ClosedRange<Double>] = []) -> (calls: [Call], frames: [Frame]) {
         var tracker = ShotTracker(aspect: aspect, tuning: tuning)
         var smoother = HoopRectSmoother()
         var meter = NetMotionMeter()
         var check = NetCheck<Void>()
+        var pauseClock = ShotReplay.PauseClock(pauses)
         var calls: [Call] = []
         var frames: [Frame] = []
 
@@ -60,6 +62,18 @@ enum ReplayTrace {
         let sorted = entries.sorted(by: { $0.timestampSec < $1.timestampSec })
         for (index, entry) in sorted.enumerated() {
             let t = entry.timestampSec
+            let pause = pauseClock.step(to: t)
+            if let start = pause.began {
+                // Published on the first paused frame, which isn't logged.
+                tracker.reset()
+                if let call = check.flush(meter: meter) { add(call, at: index, t: start) }
+                meter.reset()
+            }
+            if pause.inside {
+                // Not processed by the app; kept so frames line up with entries.
+                frames.append(Frame(t: t, hoop: nil, hoopKind: -1, shotBall: nil, event: nil))
+                continue
+            }
             if let rim = smoother.choose(from: ShotReplay.hoops(in: entry)) {
                 smoother.update(basketRect: rim, timestamp: t)
             } else {
@@ -90,7 +104,11 @@ enum ReplayTrace {
             }
             frames.append(Frame(t: t, hoop: hoop, hoopKind: kind, shotBall: tracker.shotBallBox, event: event))
         }
-        if let call = check.flush(meter: meter) { add(call, at: nil, t: nil) }
+        // Held at the end of the log: the app settled it on its first paused
+        // frame if a pause ran to the end, else stop() handed it back.
+        let lastT = sorted.last?.timestampSec ?? -.infinity
+        let tailPause = pauses.map(\.lowerBound).filter { $0 > lastT }.min()
+        if let call = check.flush(meter: meter) { add(call, at: tailPause == nil ? nil : sorted.count - 1, t: tailPause) }
         return (calls, frames)
     }
 }
