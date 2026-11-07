@@ -153,9 +153,13 @@ final class ShotTrackerStartTests: XCTestCase {
         // timeout. The next shot leaves the hands just after; its image
         // rise lasts 0.35 s. The cooldown used to run 0.6 s from the call
         // and covered all of it (cam2 28.50 → 30.50).
+        // The first ball is a slow lob (gravity ≈ 2.2 frame heights/s² for
+        // a ball this size) whose path stays inside the frame. One lost
+        // while heading out of the top isn't lost: the tracker waits for it
+        // to come back down, and the next ball would be taken for it.
         var tracker = ShotTracker()
         let events = run(duration: 2.2, tracker: &tracker) { t in
-            if t <= 0.3 { return [self.ball(0.5, self.arcY(t))] }
+            if t <= 0.3 { return [self.ball(0.5, 0.35 + 1.4 * t - 1.1 * t * t)] }
             let s = t - 1.25
             if s >= 0 && s <= 0.35 { return [self.ball(0.3, 0.40 + 2.0 * s - 1.6667 * s * s)] }
             return []
