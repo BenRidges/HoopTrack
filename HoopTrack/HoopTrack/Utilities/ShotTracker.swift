@@ -115,6 +115,10 @@ nonisolated struct ShotTracker: Sendable {
         /// White acceleration noise of the loose filter, R²/s³: a hand pushes
         /// at up to ~5 g (≈ 100 R/s²) for ~0.15 s.
         var looseAccelerationNoise: Double = 400
+        /// A box this close to the frame's edge (fraction of the frame, ~3 px
+        /// at 720p) and clearly shorter across it than along it is a ball
+        /// cut off by the edge.
+        var frameEdge: Double = 0.004
     }
 
     var tuning = Tuning()
@@ -492,10 +496,36 @@ nonisolated struct ShotTracker: Sendable {
     /// What a ball box tells the filter: its centre (height units, x scaled
     /// by the aspect ratio), its apparent diameter (the shorter side, since
     /// motion blur stretches the box along the ball's path) and how far to
-    /// trust the centre.
+    /// trust the centre (nil: as usual).
+    ///
+    /// A ball going out of the frame is cut off by the edge: its box
+    /// shrinks towards the edge, so its centre lags the ball's and its
+    /// shorter side is no longer its size. The ball is round, so the side
+    /// along the edge still gives its size, and its centre is half that
+    /// in from the box's inner side; that's less certain (the side along the
+    /// edge carries any blur), and says nothing about depth.
     private func measurement(_ box: CGRect, rimUnitY: Double) -> (point: BallFilter.Point, diameter: Double?, sd: Double?) {
-        let diameter = min(Double(box.width) * aspect, Double(box.height))
-        return (point(box), diameter > 0 ? diameter : nil, nil)
+        let width = Double(box.width) * aspect, height = Double(box.height)
+        let edge = tuning.frameEdge
+        let cutVertically = height < 0.9 * width
+            && (Double(box.maxY) >= 1 - edge || Double(box.minY) <= edge)
+        let cutSideways = width < 0.9 * height
+            && (Double(box.minX) <= edge || Double(box.maxX) >= 1 - edge)
+        guard cutVertically || cutSideways else {
+            let diameter = min(width, height)
+            return (point(box), diameter > 0 ? diameter : nil, nil)
+        }
+        let size = max(width, height)
+        var centre = point(box)
+        if cutVertically {
+            centre.y = Double(box.maxY) >= 1 - edge ? Double(box.minY) + size / 2 : Double(box.maxY) - size / 2
+        }
+        if cutSideways {
+            centre.x = Double(box.minX) <= edge ? Double(box.maxX) * aspect - size / 2
+                                                : Double(box.minX) * aspect + size / 2
+        }
+        let usual = tuning.flightMeasurementSD * rimUnitY, extra = 0.25 * size
+        return (centre, nil, (usual * usual + extra * extra).squareRoot())
     }
 
     /// Velocity kick SD (height units/s) for a ball that may have hit the
