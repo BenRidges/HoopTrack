@@ -20,3 +20,6 @@ __pycache__/
 
 # SwiftPM build output (Tools/HoopTrackCore)
 .build/
+
+# cv-replay default output directory (Tools/cv/README.md)
+cv-replay-out/
