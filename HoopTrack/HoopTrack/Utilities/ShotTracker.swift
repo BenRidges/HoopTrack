@@ -10,6 +10,7 @@
 //
 // The model:
 //   idle ──(any ball rising fast at/above rim height)──▶ inFlight
+//   inFlight ──(comes back at the lens before reaching the rim)──▶ idle, no call
 //   inFlight ──(drops through rim height inside the rim)──▶ atRim
 //   inFlight ──(drops through rim height outside it)──▶ MISS
 //   atRim ──(falls out the bottom of the net / vanishes in it)──▶ MAKE
