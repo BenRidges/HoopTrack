@@ -72,7 +72,8 @@ nonisolated struct ShotTracker: Sendable {
         var lostTimeout: Double = 0.9
         /// After dropping into the rim, no bounce for this long counts as a make.
         var settleTime: Double = 0.45
-        /// Ignore new shots for this long after a resolution.
+        /// Ignore new shots for this long after a resolution (counted from
+        /// when the shot ball was last seen).
         var cooldown: Double = 0.6
         /// Max jump between frames for the tracked ball, rim diameters.
         var gate: Double = 4.0
@@ -528,7 +529,11 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         shotHoop = nil
-        cooldownUntil = time + tuning.cooldown
+        // The cooldown keeps the ball just called from starting another
+        // shot, so it runs from when that ball was last seen: after a
+        // lost-ball call it has been gone 0.9 s already, and a cooldown
+        // from the call swallowed a real shot released meanwhile.
+        cooldownUntil = min(time, lastSeen) + tuning.cooldown
         let seen = lastSeen
         history.removeAll()
         candidates.removeAll()

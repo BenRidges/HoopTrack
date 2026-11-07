@@ -146,6 +146,25 @@ final class ShotTrackerStartTests: XCTestCase {
         XCTAssertEqual(outcomes(events).map(\.result), [.make])
     }
 
+    // MARK: - A lost shot doesn't block the next one
+
+    func test_shotReleasedAsALostShotTimesOut_stillStarts() {
+        // A start whose ball vanishes is called after the 0.9 s lost
+        // timeout. The next shot leaves the hands just after; its image
+        // rise lasts 0.35 s. The cooldown used to run 0.6 s from the call
+        // and covered all of it (cam2 28.50 → 30.50).
+        var tracker = ShotTracker()
+        let events = run(duration: 2.2, tracker: &tracker) { t in
+            if t <= 0.3 { return [self.ball(0.5, self.arcY(t))] }
+            let s = t - 1.25
+            if s >= 0 && s <= 0.35 { return [self.ball(0.3, 0.40 + 2.0 * s - 1.6667 * s * s)] }
+            return []
+        }
+        let started = starts(events)
+        XCTAssertEqual(started.count, 2)
+        XCTAssertEqual(started.last?.time ?? 0, 1.27, accuracy: 0.1)
+    }
+
     // MARK: - Phone close behind the shooter
 
     func test_closeCamera_bigBallMovingAway_startsAShot() {
