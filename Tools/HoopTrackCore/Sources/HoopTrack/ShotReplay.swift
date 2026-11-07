@@ -24,15 +24,19 @@ nonisolated enum ShotReplay {
     /// Runs `entries` (in time order) through a new tracker, then the net
     /// check (NetCheck) as the app does, unless `netCheck` is off. Logs from
     /// before net sampling have no `netActivity`, so the check never changes
-    /// their calls.
+    /// their calls. The hoop smoother gets every logged basket, as the app's
+    /// did (`hoops(in:)`). `pauses` (log seconds) are the session's pauses
+    /// when known — see PauseClock.
     static func run(_ entries: [DetectionLogEntry],
                     aspect: Double = 16.0 / 9.0,
                     tuning: ShotTracker.Tuning = ShotTracker.Tuning(),
-                    netCheck useNet: Bool = true) -> [Call] {
+                    netCheck useNet: Bool = true,
+                    pauses: [ClosedRange<Double>] = []) -> [Call] {
         var tracker = ShotTracker(aspect: aspect, tuning: tuning)
         var smoother = HoopRectSmoother()
         var meter = NetMotionMeter()
         var check = NetCheck<Void>()
+        var pauseClock = PauseClock(pauses)
         var calls: [Call] = []
 
         func add(_ call: NetCheck<Void>.Call) {
@@ -42,7 +46,17 @@ nonisolated enum ShotReplay {
 
         for entry in entries.sorted(by: { $0.timestampSec < $1.timestampSec }) {
             let t = entry.timestampSec
-            if let rim = smoother.choose(from: entry.rimBox.flatMap(rect).map { [$0] } ?? []) {
+            let pause = pauseClock.step(to: t)
+            if pause.began != nil {
+                // CVPipeline's first paused frame: the shot in the air is
+                // dropped, a call waiting for the net is settled now.
+                tracker.reset()
+                if let call = check.flush(meter: meter) { add(call) }
+                meter.reset()
+            }
+            if pause.inside { continue }
+            // CourtCalibrationService.updateBaskets, from the same candidates.
+            if let rim = smoother.choose(from: hoops(in: entry)) {
                 smoother.update(basketRect: rim, timestamp: t)
             } else {
                 smoother.updateNoDetection(timestamp: t)
@@ -56,9 +70,7 @@ nonisolated enum ShotReplay {
                 meter.reset()
             }
 
-            let balls = entry.balls?.compactMap { rect(Array($0.prefix(4))) }
-                ?? entry.ballBox.flatMap(rect).map { [$0] } ?? []
-            switch tracker.update(balls: balls, hoop: hoop, time: t) {
+            switch tracker.update(balls: balls(in: entry), hoop: hoop, time: t) {
             case .started:
                 if let call = check.flush(meter: meter) { add(call) }
             case .resolved(let outcome):
@@ -67,8 +79,37 @@ nonisolated enum ShotReplay {
                 if let call = check.due(now: t, meter: meter) { add(call) }
             }
         }
+        // The end of the log is the end of the session: CVPipeline.stop()
+        // settles a call still waiting for the net with the footage there is
+        // and hands it to the session, which records it. A shot still in the
+        // air is dropped, there as here.
         if let call = check.flush(meter: meter) { add(call) }
         return calls
+    }
+
+    /// A session's pauses, when known (log seconds). The app logs nothing
+    /// while paused, so a log alone can't show one — a gap could as well be
+    /// the camera interrupted — but cv-replay knows where it paused, and a
+    /// phone session's pauses can be given to shot-eval by hand.
+    nonisolated struct PauseClock {
+        let ranges: [ClosedRange<Double>]
+        private var previous = -Double.infinity
+        private var inPause = false
+
+        init(_ ranges: [ClosedRange<Double>]) { self.ranges = ranges }
+
+        /// For each log time in order: when a pause began since the previous
+        /// one, if one did (the app resets on its first paused frame), and
+        /// whether `t` is itself paused (the app wouldn't have processed it).
+        mutating func step(to t: Double) -> (began: Double?, inside: Bool) {
+            guard !ranges.isEmpty else { return (nil, false) }
+            let current = ranges.first { $0.contains(t) }
+            let startedSince = ranges.filter { $0.lowerBound > previous && $0.lowerBound <= t }.map(\.lowerBound).max()
+            let began = startedSince ?? (current != nil && !inPause ? current?.lowerBound : nil)
+            previous = t
+            inPause = current != nil
+            return (began, current != nil)
+        }
     }
 
     /// Reads a detections.jsonl file's contents, skipping unreadable lines.
@@ -76,6 +117,21 @@ nonisolated enum ShotReplay {
         text.split(whereSeparator: \.isNewline).compactMap {
             try? DetectionLogEntry.decode(jsonLine: String($0))
         }
+    }
+
+    /// The hoop candidates the app's smoother chose from on this frame:
+    /// every basket the detector returned (`baskets`), most confident first.
+    /// Older logs kept only the top one (`rimBox`).
+    static func hoops(in entry: DetectionLogEntry) -> [CGRect] {
+        entry.baskets?.compactMap { rect(Array($0.prefix(4))) }
+            ?? entry.rimBox.flatMap(rect).map { [$0] } ?? []
+    }
+
+    /// The ball candidates the tracker was given on this frame (older logs:
+    /// the top one only).
+    static func balls(in entry: DetectionLogEntry) -> [CGRect] {
+        entry.balls?.compactMap { rect(Array($0.prefix(4))) }
+            ?? entry.ballBox.flatMap(rect).map { [$0] } ?? []
     }
 
     private static func rect(_ values: [Double]) -> CGRect? {

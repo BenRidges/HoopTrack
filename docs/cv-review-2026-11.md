@@ -114,7 +114,8 @@ the phone itself.
 
 **Logging**: with "Help improve shot tracking" on, these go to
 `detections.jsonl` for every frame:
-- the ball candidates and the raw rim box;
+- the ball candidates and every hoop candidate (the hoop smoother chooses
+  among them, and so does the replay);
 - the detection crop;
 - net movement;
 - the tracker's call, and the call as published after the net check.
@@ -178,6 +179,12 @@ To get a scored session:
 The report shows how many shots were detected, how many calls were right,
 which way the wrong calls went, phantom shots and missed shots. Change
 `ShotTracker.Tuning`, re-run, compare.
+
+Four labelled real clips (118 shots, CC BY footage) are already in
+`Tools/HoopTrackCore/Tests/Fixtures/RealClips` as the logs the shipped
+pipeline wrote for them (gzipped; the videos stay out of git), and
+`RealClipFixtureTests` holds each to a floor in `swift test`. Raise the
+floors when a change does better.
 
 Until there are labelled sessions, `swift run shot-sim` benchmarks the same
 code path on simulated footage. It covers shot physics with rim, board and

@@ -19,6 +19,10 @@ struct Options {
     var shotEval: URL?
     var quiet = false
     var ptsOffset = 0.0
+    /// --frame-cost-ms, in seconds: late frames are dropped as on the phone.
+    var frameCost: Double?
+    /// --pause, video seconds.
+    var pauses: [ClosedRange<Double>] = []
 
     static let usage = """
     usage: cv-replay <video> [options]
@@ -42,11 +46,17 @@ struct Options {
                          (default: the app's ML/BallDetector.mlmodel)
       --no-strips        don't draw the annotated PNG strips
       --keep-video       keep the HEVC video SessionRecorder wrote (session.mov)
-      --shot-eval PATH   shot-eval binary for the fidelity check
+      --shot-eval PATH   shot-eval binary for the log-replay consistency check
                          (default: next to this executable)
       --pts-offset S     add S seconds to every frame's timestamp before the
                          pipeline sees it, like the camera's host-clock PTS
                          (e.g. 250000); outputs stay in video seconds
+      --frame-cost-ms N  drop late frames as the phone's camera does
+                         (alwaysDiscardsLateVideoFrames): a frame that arrives
+                         while the previous one would still be in process()
+                         — N ms each, a phone figure — is skipped and counted
+      --pause A-B[,C-D]  pause the session from A to B s of the video (the
+                         pause button: CVPipeline.isPaused), e.g. 30-45,90-95
       --quiet            no progress line
     """
 
@@ -101,6 +111,12 @@ struct Options {
             case "--pts-offset":
                 options.ptsOffset = try number(arg)
                 guard options.ptsOffset >= 0 else { throw OptionsError("--pts-offset must be ≥ 0") }
+            case "--frame-cost-ms":
+                let ms = try number(arg)
+                guard ms > 0, ms < 1000 else { throw OptionsError("--frame-cost-ms must be between 0 and 1000") }
+                options.frameCost = ms / 1000
+            case "--pause":
+                options.pauses += try Self.pauses(try value(arg))
             default:
                 guard !arg.hasPrefix("-"), video == nil else { throw OptionsError("unknown option \(arg)") }
                 video = URL(fileURLWithPath: arg)
@@ -113,6 +129,17 @@ struct Options {
         if let start = options.start, start < 0 { throw OptionsError("--start must be ≥ 0") }
         if let duration = options.duration, duration <= 0 { throw OptionsError("--duration must be > 0") }
         return options
+    }
+
+    /// "30-45,90.5-95" → [30...45, 90.5...95].
+    static func pauses(_ text: String) throws -> [ClosedRange<Double>] {
+        try text.split(separator: ",").map { part in
+            let ends = part.split(separator: "-", maxSplits: 1).map { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard ends.count == 2, let a = ends[0], let b = ends[1], a >= 0, b > a else {
+                throw OptionsError("--pause wants A-B[,C-D] with 0 ≤ A < B, got \(part)")
+            }
+            return a...b
+        }
     }
 
     /// The app's model, found from this source file's place in the repo:

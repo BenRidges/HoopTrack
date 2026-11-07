@@ -60,6 +60,19 @@ final class DetectionLogEntryTests: XCTestCase {
         XCTAssertEqual(entry.timestampSec, 1.5)
         XCTAssertNil(entry.balls)
         XCTAssertNil(entry.event)
+        XCTAssertNil(entry.baskets)
+    }
+
+    func test_everyBasket_isLoggedUnderItsOwnKey_andTheTopOneStaysInRb() throws {
+        // Older readers only know "rb"/"ri"; the full list rides alongside.
+        var entry = DetectionLogEntry(timestampSec: 3.0, ballConfidence: nil, ballBox: nil,
+                                      rimConfidence: 0.8, rimBox: [0.6, 0.6, 0.03, 0.03], state: "idle")
+        entry.baskets = [[0.6, 0.6, 0.03, 0.03, 0.8], [0.4, 0.5, 0.1, 0.1, 0.7]]
+        let line = try entry.jsonLine()
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        XCTAssertEqual(object["rs"] as? [[Double]], [[0.6, 0.6, 0.03, 0.03, 0.8], [0.4, 0.5, 0.1, 0.1, 0.7]])
+        XCTAssertEqual(object["rb"] as? [Double], [0.6, 0.6, 0.03, 0.03])
+        XCTAssertEqual(try DetectionLogEntry.decode(jsonLine: line), entry)
     }
 
     func test_replayFields_roundTrip() throws {
@@ -67,6 +80,7 @@ final class DetectionLogEntryTests: XCTestCase {
                                       ballBox: [0.5, 0.6, 0.02, 0.04], rimConfidence: 0.9,
                                       rimBox: [0.45, 0.7, 0.1, 0.1], state: "tracking")
         entry.balls = [[0.5, 0.6, 0.02, 0.04, 0.7], [0.1, 0.1, 0.03, 0.05, 0.4]]
+        entry.baskets = [[0.45, 0.7, 0.1, 0.1, 0.9]]
         entry.region = [0.3, 0.3, 0.35, 0.62]
         entry.event = "make"
         entry.eventConfidence = 0.95
