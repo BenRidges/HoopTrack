@@ -67,6 +67,11 @@ nonisolated struct ShotTracker: Sendable {
         /// rim or board.
         static let cameBack = Doubts(rawValue: 1 << 1)
 
+        /// Another ball was within about a rim width of the shot ball at
+        /// the rim: the two can't be told apart by position, so the call
+        /// may be about the other ball.
+        static let secondBall = Doubts(rawValue: 1 << 2)
+
         /// The ball may not have been at the rim's depth at all.
         static let depth: Doubts = [.tooBigForRim, .cameBack]
     }
@@ -135,6 +140,18 @@ nonisolated struct ShotTracker: Sendable {
         /// Under 0.9 so the net check sees it, over `HoopTrack.CV.lowConfidence`
         /// so it isn't flagged without the net's say.
         var doubtfulMakeConfidence: Double = 0.75
+
+        // A second ball at the rim (two people shooting at one hoop).
+
+        /// Another ball whose centre comes within this many rim widths of
+        /// the shot ball's is close enough to be mistaken for it: two
+        /// balls side by side are one ball diameter (~0.5 rim) apart.
+        var secondBallRadius: Double = 1.0
+        /// …while the shot ball is at the rim or in this many seconds before
+        /// it drops through the rim line.
+        var secondBallLookback: Double = 0.3
+        /// Such a call is flagged: below `HoopTrack.CV.lowConfidence`.
+        var secondBallConfidence: Double = 0.55
     }
 
     var tuning = Tuning()
@@ -167,6 +184,8 @@ nonisolated struct ShotTracker: Sendable {
     private var filter: BallFilter?
     /// The rim box at release, used until the shot resolves.
     private var shotHoop: CGRect?
+    /// Last time another ball was right next to the shot ball.
+    private var secondBallTime: Double = -.infinity
 
     /// Image aspect ratio (width / height). Converts width-normalised sizes
     /// into height-normalised units for vertical thresholds.
@@ -200,6 +219,7 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         shotHoop = nil
+        secondBallTime = -.infinity
     }
 
     // MARK: Per-frame update
@@ -225,6 +245,7 @@ nonisolated struct ShotTracker: Sendable {
             let measured = point(ball)
             filter?.update(with: measured, at: time)
         }
+        if isTrackingShot { noteSecondBall(among: plausible, hoop: hoop, time: time) }
         history.removeAll { time - $0.time > 1.5 }
 
         switch phase {
@@ -470,6 +491,30 @@ nonisolated struct ShotTracker: Sendable {
         return doubts
     }
 
+    /// During a shot: remembers when another ball was right next to the
+    /// shot ball (see Tuning, "A second ball at the rim"). Boxes overlapping
+    /// the shot ball are the same ball boxed twice; boxes much wider than
+    /// tall are the rim taken for a ball (2026-11 clips: ~1.9:1, a ball's
+    /// box is ~1:1 or taller with blur); a ball of a very different size is
+    /// at a different depth. Only frames where the shot ball itself was
+    /// picked count: otherwise a box near its last sighting is most likely
+    /// the shot ball, moved on and turned down by the filter.
+    private mutating func noteSecondBall(among balls: [CGRect], hoop: CGRect, time: Double) {
+        func ballShaped(_ box: CGRect) -> Bool { Double(box.width) * aspect <= 1.4 * Double(box.height) }
+        guard let shot = history.last, shot.time == time, ballShaped(shot.box) else { return }
+        let shotSize = min(Double(shot.box.width), Double(shot.box.height) / aspect)
+        guard shotSize > 0 else { return }
+        for box in balls where box != shot.box && !box.intersects(shot.box) {
+            let size = min(Double(box.width), Double(box.height) / aspect)
+            guard ballShaped(box), size >= shotSize / 1.5, size <= shotSize * 1.5 else { continue }
+            let dx = Double(box.midX) - shot.x, dy = (Double(box.midY) - shot.y) / aspect
+            if (dx * dx + dy * dy).squareRoot() <= tuning.secondBallRadius * Double(hoop.width) {
+                secondBallTime = time
+                return
+            }
+        }
+    }
+
     private static func isInsideFrame(_ box: CGRect) -> Bool {
         box.minX > 0.005 && box.maxX < 0.995 && box.minY > 0.005 && box.maxY < 0.995
     }
@@ -526,6 +571,13 @@ nonisolated struct ShotTracker: Sendable {
         let seen = lastSeen
         history.removeAll()
         candidates.removeAll()
+        // Another ball next to it at the rim: the call may be about that one.
+        var doubts = doubts, confidence = confidence
+        if secondBallTime >= (arrival ?? seen) - tuning.secondBallLookback {
+            doubts.insert(.secondBall)
+            confidence = min(confidence, tuning.secondBallConfidence)
+        }
+        secondBallTime = -.infinity
         return .resolved(Outcome(result: result, confidence: confidence, release: release,
                                  rimArrivalTime: arrival, hoop: hoop, lastSeenTime: seen, doubts: doubts))
     }

@@ -119,7 +119,11 @@ nonisolated enum ShotEvidence {
         switch result {
         case .make:
             // A make the tracker saw leave the bottom of the net (0.95) stands.
-            if swing >= strongSwing { return (.make, max(confidence, 0.9)) }
+            // With a second ball at the rim the net can't say which one
+            // went in, so it doesn't clear the flag.
+            if swing >= strongSwing {
+                return (.make, doubts.contains(.secondBall) ? confidence : max(confidence, 0.9))
+            }
             if swing <= quietSwing && confidence < 0.9 {
                 // Its size put the ball off the rim's depth, and a net known
                 // to swing on clean makes stayed still: it dropped in front

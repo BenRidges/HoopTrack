@@ -295,6 +295,11 @@ enum TraceReport {
     }
 
     private static func how(_ o: ShotTracker.Outcome) -> String {
+        let explanation = explain(o)
+        return o.doubts.contains(.secondBall) ? explanation + "; another ball right next to it at the rim" : explanation
+    }
+
+    private static func explain(_ o: ShotTracker.Outcome) -> String {
         var doubts: [String] = []
         if o.doubts.contains(.tooBigForRim) { doubts.append("too big for the rim's depth") }
         if o.doubts.contains(.cameBack) { doubts.append("came back off the rim or board") }
