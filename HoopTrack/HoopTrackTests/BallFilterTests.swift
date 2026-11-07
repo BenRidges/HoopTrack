@@ -5,8 +5,12 @@ import XCTest
 
 final class BallFilterTests: XCTestCase {
 
+    /// No diameter, so no gravity or perspective: a plain constant-velocity
+    /// filter (white acceleration noise of density 0.05 ≈ the 2.0 per-frame
+    /// SD these tests used at 60 fps).
     private func makeFilter(at p: BallFilter.Point, time: Double = 0) -> BallFilter {
-        BallFilter(at: p, time: time, accelerationSD: 2.0, measurementSD: 0.01, initialVelocitySD: 2.0)
+        BallFilter(at: p, time: time,
+                   noise: .init(measurementSD: 0.01, acceleration: 0.05, initialVelocitySD: 2.0))
     }
 
     func test_learnsVelocity_fromSteadyMotion() {

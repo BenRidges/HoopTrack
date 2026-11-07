@@ -46,11 +46,13 @@ tracking / lost, with a coach card until the hoop is found.
 - Between shots it keeps a short track for every ball in view, so any of
   them can start a shot. Another ball higher in the frame no longer blocks
   it.
-- From release on, a constant-velocity Kalman filter
-  (`Utilities/BallFilter.swift`) predicts where the ball should be. It picks
-  the least surprising detection each frame: one noisy box doesn't derail
-  the track, a crossing ball or a second shooter's ball can't take it over,
-  and the gate widens on its own across missed frames.
+- From release on, a Kalman filter (`Utilities/BallFilter.swift`) predicts
+  where the ball should be: free flight under gravity, with gravity and
+  perspective taken from the ball's apparent size. It picks the least
+  surprising detection each frame: one noisy box doesn't derail the track,
+  a crossing ball or a second shooter's ball can't take it over, and the
+  gate widens on its own across missed frames. A ball that goes out of the
+  top of the frame is followed back in through that edge.
 - Release is the frame of peak upward speed: close to where the ball left
   the hands, not the apex.
 - The rim is held where it was at release until the shot resolves. The
