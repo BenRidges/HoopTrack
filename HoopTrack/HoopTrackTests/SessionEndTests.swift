@@ -106,6 +106,17 @@ final class SessionEndTests: XCTestCase {
         XCTAssertEqual(result.session.shotsAttempted, 2)
     }
 
+    func test_shooting_theCallSettledAsAPauseStarts_counts() async throws {
+        // On its first paused frame CVPipeline settles a call still waiting
+        // for the net and publishes it; it arrives after isPaused is set.
+        let model = try await liveModelWithPipeline()
+        model.vm.togglePause()
+        XCTAssertTrue(model.pipeline.isPaused)
+        model.vm.pipelineShotResolved(detected(.make, confidence: 0.7))
+        XCTAssertEqual(model.vm.attempts, 1)
+        XCTAssertEqual(model.vm.makes, 1)
+    }
+
     // MARK: - Helpers
 
     /// Stands in for CVPipeline once the session is running.

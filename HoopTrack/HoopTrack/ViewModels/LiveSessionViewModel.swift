@@ -340,7 +340,10 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     func pipelineShotResolved(_ shot: DetectedShot) {
         shotInFlight = false
-        guard !isPaused, phase == .live || isStoppingPipeline else { return }
+        // Paused or not: the pipeline calls nothing while paused, but on the
+        // first paused frame it settles a call still waiting for the net
+        // ("a call already made stands") and that lands here after the pause.
+        guard phase == .live || isStoppingPipeline else { return }
         record(result: shot.result, zone: shot.zone, courtX: shot.courtX, courtY: shot.courtY,
                science: shot.science, videoOffset: shot.videoOffset,
                detectionConfidence: shot.confidence)
