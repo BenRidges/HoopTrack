@@ -81,6 +81,40 @@ nonisolated struct ShotTracker: Sendable {
         var gateSigma: Double = 5.0
         /// Ball boxes bigger than this many rim widths are false positives.
         var maxBallToRim: Double = 1.6
+
+        // The ball in flight (BallFilter: gravity and perspective from the
+        // ball's apparent size). In rim diameters R, so it behaves the same
+        // near or far; 1 R ≈ 0.47 m at the rim's depth, where gravity is
+        // ≈ 21 R/s².
+        /// SD of a detected ball's centre, rim diameters. The ball's box is
+        /// ~0.5 R; its centre wobbles a few % of that, more with blur or a
+        /// hand or the net over part of it.
+        var flightMeasurementSD: Double = 0.08
+        /// White acceleration noise, R²/s³: what neither gravity nor
+        /// perspective explains frame to frame (drag is ~2 R/s²).
+        var flightAccelerationNoise: Double = 4
+        /// How fast the filter's residual acceleration may wander, R²/s⁵.
+        /// Camera tilt and drag change it by a few R/s² over a flight.
+        var flightResidualDrift: Double = 25
+        /// SD of that residual at release, R/s²: camera tilt, drag and
+        /// boxes that aren't exactly the ball's size, ~30% of gravity.
+        var flightInitialResidualSD: Double = 6
+        /// Near the rim and board the ball may bounce: a velocity kick with
+        /// this SD as a fraction of its speed. A hit at restitution 0.55
+        /// (rim) to 0.68 (glass) changes it by at most ~1.7× the speed,
+        /// which this puts at the gate's 5σ…
+        var bounceKick: Double = 0.35
+        /// …plus this, R/s, for a ball dropping slowly onto the rim.
+        var bounceKickFloor: Double = 1
+        /// For this long after a shot starts (s) the ball may still be in
+        /// the hands: the start rule fires on the lift, and the set point and
+        /// push take up to ~0.3 s more. A ball the flight model can't explain
+        /// then is left to the loose filter. A ball that goes out of the top
+        /// of the frame isn't back near the rim this soon.
+        var handsTime: Double = 0.4
+        /// White acceleration noise of the loose filter, R²/s³: a hand pushes
+        /// at up to ~5 g (≈ 100 R/s²) for ~0.15 s.
+        var looseAccelerationNoise: Double = 400
     }
 
     var tuning = Tuning()
@@ -109,8 +143,15 @@ nonisolated struct ShotTracker: Sendable {
     private var lastSeen: Double = -.infinity
     private var cooldownUntil: Double = -.infinity
     private var reachedApex = false
-    /// Follows the ball from release until the shot resolves.
+    /// Follows the ball from release until the shot resolves: free flight
+    /// under gravity, seen through the camera.
     private var filter: BallFilter?
+    /// A plain constant-velocity filter with generous noise that follows the
+    /// ball whatever moves it. Until the ball has left the hands, or just
+    /// after something touched it, the flight model is wrong and this isn't.
+    private var looseFilter: BallFilter?
+    /// When the shot in flight started.
+    private var shotStart: Double = -.infinity
     /// The rim box at release, used until the shot resolves.
     private var shotHoop: CGRect?
 
@@ -145,6 +186,7 @@ nonisolated struct ShotTracker: Sendable {
         cooldownUntil = -.infinity
         reachedApex = false
         filter = nil
+        looseFilter = nil
         shotHoop = nil
     }
 
@@ -165,11 +207,22 @@ nonisolated struct ShotTracker: Sendable {
 
         if case .idle = phase {
             associate(plausible, rimUnitY: rimUnitY, time: time)
-        } else if let ball = pick(from: plausible, rimUnitY: rimUnitY, time: time) {
-            history.append(Sample(box: ball, time: time))
-            lastSeen = time
-            let measured = point(ball)
-            filter?.update(with: measured, at: time)
+        } else {
+            let bounce = filter.map { bounceSD($0, at: time, hoop: hoop, rimUnitY: rimUnitY) } ?? 0
+            if let picked = pick(from: plausible, bounceSD: bounce, rimUnitY: rimUnitY, time: time) {
+                history.append(Sample(box: picked.box, time: time))
+                lastSeen = time
+                let m = measurement(picked.box, rimUnitY: rimUnitY)
+                looseFilter?.update(with: m.point, at: time)
+                if picked.restart, let loose = looseFilter {
+                    // Gravity didn't put the ball here, so it wasn't flying
+                    // freely: start the flight model again from this sighting.
+                    filter = makeFilter(at: m, velocity: loose.velocity, time: time, rimUnitY: rimUnitY)
+                } else {
+                    filter?.update(with: m.point, diameter: m.diameter, at: time,
+                                   measurementSD: m.sd, bounceSD: bounce)
+                }
+            }
         }
         history.removeAll { time - $0.time > 1.5 }
 
@@ -229,22 +282,32 @@ nonisolated struct ShotTracker: Sendable {
 
     /// During a shot: the candidate the ball filter finds least surprising.
     /// Rejects implausible jumps so a second ball can't hijack the shot.
-    private func pick(from balls: [CGRect], rimUnitY: Double, time: Double) -> CGRect? {
+    /// `restart` when only the loose filter accepts it.
+    private func pick(from balls: [CGRect], bounceSD: Double, rimUnitY: Double,
+                      time: Double) -> (box: CGRect, restart: Bool)? {
         guard !balls.isEmpty, let last = history.last else { return nil }
         // Hard cap on movement since the last sighting, whatever the filter says.
         let cap = tuning.gate * rimUnitY * max(1, (time - last.time) * 30)
 
         if let filter {
-            let predicted = filter.predicted(at: time)
-            let scored = balls.map { box -> (box: CGRect, surprise: Double, distance: Double) in
-                let p = point(box)
-                let dx = p.x - predicted.x, dy = p.y - predicted.y
-                return (box, filter.surprise(of: p, at: time), (dx * dx + dy * dy).squareRoot())
+            func best(_ f: BallFilter, bounceSD: Double) -> CGRect? {
+                let predicted = f.predicted(at: time)
+                let scored = balls.map { box -> (box: CGRect, surprise: Double, distance: Double) in
+                    let m = measurement(box, rimUnitY: rimUnitY)
+                    let dx = m.point.x - predicted.x, dy = m.point.y - predicted.y
+                    let surprise = f.surprise(of: m.point, at: time, measurementSD: m.sd, bounceSD: bounceSD)
+                    return (box, surprise, (dx * dx + dy * dy).squareRoot())
+                }
+                guard let best = scored.min(by: { $0.surprise < $1.surprise }),
+                      best.distance <= cap,
+                      best.surprise <= tuning.gateSigma || best.distance <= 0.75 * rimUnitY else { return nil }
+                return best.box
             }
-            guard let best = scored.min(by: { $0.surprise < $1.surprise }),
-                  best.distance <= cap,
-                  best.surprise <= tuning.gateSigma || best.distance <= 0.75 * rimUnitY else { return nil }
-            return best.box
+            if let box = best(filter, bounceSD: bounceSD) { return (box, false) }
+            // Not where gravity would have it. Just after the start the hands
+            // may still have been on it: try the loose filter.
+            guard let looseFilter, time - shotStart <= tuning.handsTime else { return nil }
+            return best(looseFilter, bounceSD: 0).map { ($0, true) }
         }
 
         var predictedX = last.x
@@ -265,7 +328,7 @@ nonisolated struct ShotTracker: Sendable {
             return (box, (dx * dx + dy * dy).squareRoot())
         }
         guard let best = scored.min(by: { $0.1 < $1.1 }), best.1 <= limit else { return nil }
-        return best.0
+        return (best.0, false)
     }
 
     // MARK: Phases
@@ -310,7 +373,8 @@ nonisolated struct ShotTracker: Sendable {
         history = track
         candidates = []
         lastSeen = time
-        filter = makeFilter(following: run[releaseIndex...], rimUnitY: rimUnitY)
+        (filter, looseFilter) = makeFilters(following: run[releaseIndex...], rimUnitY: rimUnitY)
+        shotStart = time
         return .started(release)
     }
 
@@ -386,21 +450,69 @@ nonisolated struct ShotTracker: Sendable {
         BallFilter.Point(x: Double(box.midX) * aspect, y: Double(box.midY))
     }
 
-    /// A filter seeded from the release onwards. Noise scales with the rim,
-    /// so it behaves the same whether the hoop is near or far.
-    private func makeFilter(following samples: ArraySlice<Sample>, rimUnitY: Double) -> BallFilter? {
-        guard let first = samples.first else { return nil }
+    /// The flight and loose filters, seeded from the release onwards. Noise
+    /// scales with the rim, so they behave the same whether the hoop is near
+    /// or far.
+    private func makeFilters(following samples: ArraySlice<Sample>,
+                             rimUnitY: Double) -> (BallFilter?, BallFilter?) {
+        guard let first = samples.first else { return (nil, nil) }
         let last = samples.last ?? first
         let dt = last.time - first.time
         let velocity = dt > 0
             ? BallFilter.Point(x: (last.x - first.x) * aspect / dt, y: (last.y - first.y) / dt)
             : BallFilter.Point(x: 0, y: 0)
-        var filter = BallFilter(at: point(first.box), velocity: velocity, time: first.time,
-                                accelerationSD: 40 * rimUnitY,
-                                measurementSD: 0.12 * rimUnitY,
-                                initialVelocitySD: 30 * rimUnitY)
-        for sample in samples.dropFirst() { filter.update(with: point(sample.box), at: sample.time) }
-        return filter
+        let start = measurement(first.box, rimUnitY: rimUnitY)
+        var flight = makeFilter(at: start, velocity: velocity, time: first.time, rimUnitY: rimUnitY)
+        let r = rimUnitY
+        var loose = BallFilter(at: start.point, velocity: velocity, time: first.time,
+                               noise: .init(measurementSD: 0.12 * r,
+                                            acceleration: tuning.looseAccelerationNoise * r * r,
+                                            initialVelocitySD: 30 * r))
+        for sample in samples.dropFirst() {
+            let m = measurement(sample.box, rimUnitY: rimUnitY)
+            flight.update(with: m.point, diameter: m.diameter, at: sample.time, measurementSD: m.sd)
+            loose.update(with: m.point, at: sample.time)
+        }
+        return (flight, loose)
+    }
+
+    /// A flight filter starting at one sighting.
+    private func makeFilter(at start: (point: BallFilter.Point, diameter: Double?, sd: Double?),
+                            velocity: BallFilter.Point, time: Double, rimUnitY: Double) -> BallFilter {
+        let r = rimUnitY
+        let noise = BallFilter.Noise(measurementSD: tuning.flightMeasurementSD * r,
+                                     acceleration: tuning.flightAccelerationNoise * r * r,
+                                     residualDrift: tuning.flightResidualDrift * r * r,
+                                     initialResidualSD: tuning.flightInitialResidualSD * r,
+                                     initialVelocitySD: 30 * r)
+        return BallFilter(at: start.point, diameter: start.diameter, velocity: velocity,
+                          time: time, noise: noise)
+    }
+
+    /// What a ball box tells the filter: its centre (height units, x scaled
+    /// by the aspect ratio), its apparent diameter (the shorter side, since
+    /// motion blur stretches the box along the ball's path) and how far to
+    /// trust the centre.
+    private func measurement(_ box: CGRect, rimUnitY: Double) -> (point: BallFilter.Point, diameter: Double?, sd: Double?) {
+        let diameter = min(Double(box.width) * aspect, Double(box.height))
+        return (point(box), diameter > 0 ? diameter : nil, nil)
+    }
+
+    /// Velocity kick SD (height units/s) for a ball that may have hit the
+    /// rim or board since the filter last saw it: when it should now be
+    /// within the board's reach of the rim. The board is 1.83 m wide and
+    /// rises ~0.9 m above the rim (≈ 1.95 R each way) and the ball's radius
+    /// adds 0.25 R; the hoop box takes in the net below.
+    private func bounceSD(_ filter: BallFilter, at time: Double, hoop: CGRect, rimUnitY: Double) -> Double {
+        let p = filter.predicted(at: time)
+        let reach = 2.2 * rimUnitY
+        let nearHoop = abs(p.x - Double(hoop.midX) * aspect) <= reach
+            && p.y >= Double(hoop.minY) - 0.25 * rimUnitY
+            && p.y <= Double(hoop.maxY) + reach
+        guard nearHoop else { return 0 }
+        let v = filter.velocity
+        let speed = (v.x * v.x + v.y * v.y).squareRoot()
+        return tuning.bounceKick * speed + tuning.bounceKickFloor * rimUnitY
     }
 
     /// Distance between a sample and a box centre, in height units.
@@ -426,6 +538,7 @@ nonisolated struct ShotTracker: Sendable {
         phase = .idle
         reachedApex = false
         filter = nil
+        looseFilter = nil
         shotHoop = nil
         cooldownUntil = time + tuning.cooldown
         let seen = lastSeen
