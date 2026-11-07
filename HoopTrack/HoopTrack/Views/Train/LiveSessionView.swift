@@ -313,7 +313,7 @@ private struct LiveSessionContent: View {
                 .foregroundStyle(Color.leather)
             Text("Point the camera at the hoop")
                 .font(.title3.bold())
-            Text("Phone sideways and steady, behind where you shoot. The whole rim should be in view.")
+            Text("Phone sideways and steady, about 3 m behind where you shoot. The whole rim should be in view.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.75))
                 .multilineTextAlignment(.center)

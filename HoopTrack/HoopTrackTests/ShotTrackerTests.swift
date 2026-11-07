@@ -141,8 +141,10 @@ final class ShotTrackerTests: XCTestCase {
 
     func test_oversizedBox_isIgnored() {
         var tracker = ShotTracker()
+        // 4 rim widths. (Was 3: a ball 2–3 rim widths wide is real when the
+        // phone is 1–2 m behind the shooter, see ShotTrackerStartTests.)
         let events = run(duration: 1.6, tracker: &tracker) { t in
-            t <= 1.2 ? [self.box(0.5, self.arcY(t), size: 0.3)] : []
+            t <= 1.2 ? [self.box(0.5, self.arcY(t), size: 0.4)] : []
         }
         XCTAssertTrue(events.isEmpty)
     }

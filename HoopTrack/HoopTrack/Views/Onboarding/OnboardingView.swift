@@ -95,7 +95,7 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 22) {
                 tip(number: 1, title: "Phone sideways on a stand",
-                    detail: "A tripod, a water bottle, a bag — about chest height, a few steps behind where you shoot.")
+                    detail: "A tripod, a water bottle, a bag — about chest height, four big steps (3 m) behind where you shoot.")
                 tip(number: 2, title: "Whole rim in the picture",
                     detail: "You'll see brackets lock onto the hoop when it's found.")
                 tip(number: 3, title: "Shoot",

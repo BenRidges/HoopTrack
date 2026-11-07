@@ -10,6 +10,7 @@
 //
 // The model:
 //   idle ──(any ball rising fast at/above rim height)──▶ inFlight
+//   inFlight ──(comes back at the lens before reaching the rim)──▶ idle, no call
 //   inFlight ──(drops through rim height inside the rim)──▶ atRim
 //   inFlight ──(drops through rim height outside it)──▶ MISS
 //   atRim ──(falls out the bottom of the net / vanishes in it)──▶ MAKE
@@ -72,7 +73,8 @@ nonisolated struct ShotTracker: Sendable {
         var lostTimeout: Double = 0.9
         /// After dropping into the rim, no bounce for this long counts as a make.
         var settleTime: Double = 0.45
-        /// Ignore new shots for this long after a resolution.
+        /// Ignore new shots for this long after a resolution (counted from
+        /// when the shot ball was last seen).
         var cooldown: Double = 0.6
         /// Max jump between frames for the tracked ball, rim diameters.
         var gate: Double = 4.0
@@ -81,6 +83,57 @@ nonisolated struct ShotTracker: Sendable {
         var gateSigma: Double = 5.0
         /// Ball boxes bigger than this many rim widths are false positives.
         var maxBallToRim: Double = 1.6
+
+        // Shot start — which boxes may start a shot (see `startable`).
+        /// A box at least this much wider than tall (in pixels) that sits
+        /// on the hoop is the rim, not a ball. A ball is round: blur only
+        /// stretches it along its path, which near the rim is mostly
+        /// vertical. On the 4 real clips (2026-11) the detector's
+        /// rim-as-ball boxes run 1.6–2.2:1; real balls away from the rim
+        /// median 1.15–1.3:1 (the model draws balls slightly wide).
+        var rimShapedAspect: Double = 1.4
+        /// …and at least this many rim widths wide. A ball at the rim's
+        /// depth is about 0.49 rim widths (0.239 m ball / 0.489 m ring),
+        /// about 0.6 with the model's wide boxes; the rim-as-ball boxes
+        /// on the real clips are 0.75–1.0.
+        var rimShapedMinWidth: Double = 0.7
+        /// Between shots, ball boxes up to this many rim widths are tracked.
+        /// Ball / rim box width is 0.49 × (rim distance / ball distance),
+        /// so with the phone 1–2 m behind the shooter the ball at release
+        /// is 1.5–2.5 rim widths: dropping it at `maxBallToRim` cut off the
+        /// start of its rise, and perspective flattens the rest. 3.0 keeps
+        /// a ball down to 0.16 of the rim's distance from the lens (~1.1 m
+        /// for a rim 7 m away). A shot still only starts once its ball is
+        /// back under `maxBallToRim`, i.e. flying away from the lens:
+        /// lifting the ball to the set point or a pump fake that close
+        /// rises just as far in the image but doesn't move away.
+        var maxBallToRimIdle: Double = 3.0
+        /// Fastest a basketball moves on court, m/s: a long three leaves the
+        /// hand at ~9 m/s, a hard pass at 10–12. Between shots a track may
+        /// only link boxes this speed apart (see `canLink`).
+        var maxBallSpeed: Double = 13
+        /// Slack per link, ball diameters: box centres jitter by a few % of
+        /// the box, and blur moves the centre by up to half the streak.
+        var linkSlack: Double = 0.5
+        /// A rising run must rise at least this share of `minRise` outside
+        /// its biggest single step, so one link between two different
+        /// things (a ball lost for a frame as a false positive shows up
+        /// higher) can't make the whole rise.
+        var minRiseOutsideJump: Double = 0.5
+        /// A shot flies to the hoop, so its ball's size heads for that of a
+        /// ball at the rim's depth, about 0.5 rim widths (0.239 m ball /
+        /// 0.46–0.49 m rim box): from behind the shooter it shrinks. A
+        /// pass or lob back from under the hoop comes at the lens and
+        /// keeps growing. Until the ball first reaches the rim, one that
+        /// started nearer the lens than the rim (over 0.5 rim widths) and
+        /// has since grown by this factor…
+        var towardLensGrowth: Double = 1.25
+        /// …to at least this many rim widths (1.2 × a ball at the rim) is
+        /// no shot: the track is dropped without a call. In shot-sim this
+        /// catches 68 of 96 rebounder lobs and 2 of 6,901 real shots from
+        /// behind. With the camera behind the hoop the shooter's ball
+        /// starts smaller than at the rim's depth, so it doesn't apply.
+        var towardLensMinSize: Double = 0.6
     }
 
     var tuning = Tuning()
@@ -113,6 +166,11 @@ nonisolated struct ShotTracker: Sendable {
     private var filter: BallFilter?
     /// The rim box at release, used until the shot resolves.
     private var shotHoop: CGRect?
+    /// The ball's apparent diameter when the shot started (height units),
+    /// and whether it has reached the rim since; see `comingAtTheLens`.
+    private var startDiameter: Double = 0
+    private var startTime: Double = 0
+    private var reachedRim = false
 
     /// Image aspect ratio (width / height). Converts width-normalised sizes
     /// into height-normalised units for vertical thresholds.
@@ -146,6 +204,7 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         shotHoop = nil
+        reachedRim = false
     }
 
     // MARK: Per-frame update
@@ -164,7 +223,7 @@ nonisolated struct ShotTracker: Sendable {
         let plausible = balls.filter { Double($0.width) <= tuning.maxBallToRim * Double(hoop.width) }
 
         if case .idle = phase {
-            associate(plausible, rimUnitY: rimUnitY, time: time)
+            associate(startable(balls, hoop: hoop), rimUnitY: rimUnitY, time: time)
         } else if let ball = pick(from: plausible, rimUnitY: rimUnitY, time: time) {
             history.append(Sample(box: ball, time: time))
             lastSeen = time
@@ -184,16 +243,44 @@ nonisolated struct ShotTracker: Sendable {
             return nil
 
         case .inFlight(let release):
+            if comingAtTheLens(rimUnitY: rimUnitY, time: time) {
+                dropShot()
+                return nil
+            }
             return advanceFlight(release: release, hoop: hoop, rimLine: rimLine,
                                  rimUnitY: rimUnitY, time: time)
 
         case .atRim(let release, let since, let arrival):
+            reachedRim = true
             return advanceAtRim(release: release, since: since, arrival: arrival,
                                 hoop: hoop, rimLine: rimLine, rimUnitY: rimUnitY, time: time)
         }
     }
 
     // MARK: Ball association
+
+    /// Between shots: the ball boxes that could be a ball about to be shot.
+    private func startable(_ balls: [CGRect], hoop: CGRect) -> [CGRect] {
+        balls.filter { box in
+            Double(box.width) <= tuning.maxBallToRimIdle * Double(hoop.width) && !isRimShaped(box, hoop: hoop)
+        }
+    }
+
+    /// The detector sometimes labels the rim itself "ball": a box about
+    /// as wide as the rim, half as tall, sitting on it. Tracked between
+    /// shots it chains onto a real ball as a fast "rise" and starts a
+    /// phantom shot, which then holds the tracker through the real one.
+    func isRimShaped(_ box: CGRect, hoop: CGRect) -> Bool {
+        guard box.width > 0, box.height > 0, hoop.width > 0 else { return false }
+        // Mostly on the hoop box.
+        let overlapW = min(box.maxX, hoop.maxX) - max(box.minX, hoop.minX)
+        let overlapH = min(box.maxY, hoop.maxY) - max(box.minY, hoop.minY)
+        guard overlapW > 0, overlapH > 0,
+              Double(overlapW * overlapH) >= 0.5 * Double(box.width * box.height) else { return false }
+        let pixelAspect = Double(box.width) * aspect / Double(box.height)
+        return pixelAspect >= tuning.rimShapedAspect
+            && Double(box.width) >= tuning.rimShapedMinWidth * Double(hoop.width)
+    }
 
     /// Between shots: extends each track with its nearest ball (closest pairs
     /// first), starts new tracks for the rest, drops tracks that went quiet.
@@ -204,7 +291,7 @@ nonisolated struct ShotTracker: Sendable {
             let limit = tuning.gate * rimUnitY * max(1, (time - last.time) * 30)
             for (b, ball) in balls.enumerated() {
                 let d = distance(from: last, to: ball)
-                if d <= limit { pairs.append((t, b, d)) }
+                if d <= limit, canLink(last, to: ball, dt: time - last.time) { pairs.append((t, b, d)) }
             }
         }
         pairs.sort { $0.distance < $1.distance }
@@ -225,6 +312,30 @@ nonisolated struct ShotTracker: Sendable {
         if candidates.count > 6 {
             candidates = Array(candidates.sorted { $0.count > $1.count }.prefix(6))
         }
+    }
+
+    /// Between shots: could `box` be the ball last seen as `sample`, `dt`
+    /// seconds later? Measured in the ball's own diameters, a sideways
+    /// step doesn't depend on how far the ball is from the lens, so a
+    /// speed limit in m/s is a limit in diameters per second. The rim
+    /// gate alone allowed 4 rim widths a frame (~55 m/s at 30 fps) and
+    /// grew without limit across gaps, so a ball low in the frame could
+    /// link to a false positive near the rim as one fast "rise".
+    /// (Box size isn't compared: the ball clipped by the frame edge
+    /// changes size more than a different object does.)
+    private func canLink(_ sample: Sample, to box: CGRect, dt: Double) -> Bool {
+        let near = max(diameter(of: sample.box), diameter(of: box))
+        guard near > 0, dt >= 0 else { return false }
+        // Moving along the line of sight off-centre also shifts the image
+        // (up to ~tan 34° of the depth change at the frame edge): ×1.25.
+        let diametersPerSecond = 1.25 * tuning.maxBallSpeed / CourtPositionEstimator.ballDiameterM
+        return distance(from: sample, to: box) <= near * (diametersPerSecond * dt + tuning.linkSlack)
+    }
+
+    /// Apparent ball diameter, height units: the shorter side, since blur
+    /// stretches the box along the ball's path.
+    private func diameter(of box: CGRect) -> Double {
+        min(Double(box.width) * aspect, Double(box.height))
     }
 
     /// During a shot: the candidate the ball filter finds least surprising.
@@ -282,17 +393,34 @@ nonisolated struct ShotTracker: Sendable {
         }
         let run = Array(track[runStart...])
         guard run.count >= 4 else { return nil }
+        // Still nearer the lens than a ball in flight can be: not released
+        // yet (see Tuning.maxBallToRimIdle).
+        guard Double(latest.box.width) <= tuning.maxBallToRim * rimUnitY / aspect else { return nil }
 
         let rise = (latest.y - run[0].y) / rimUnitY
         let speed = upwardSpeed(at: run.count - 1, in: run) / rimUnitY
         let nearRimHeight = latest.y >= rimLine - tuning.startBelowRimTolerance * rimUnitY
         guard rise >= tuning.minRise, speed >= tuning.minRiseSpeed, nearRimHeight else { return nil }
 
+        // The rise has to come from a ball moving, not from one link
+        // between two things: outside its biggest step the run still rises.
+        var biggestStep = 0.0
+        for i in 1..<run.count { biggestStep = max(biggestStep, run[i].y - run[i - 1].y) }
+        guard rise - biggestStep / rimUnitY >= tuning.minRiseOutsideJump * tuning.minRise else { return nil }
+
         // Release = fastest upward moment of the run (hands push until release,
-        // gravity only slows it after).
-        var releaseIndex = 0
+        // gravity only slows it after) since the ball was last held: rising
+        // slower than a shot starts, as at the set point. Close to the lens
+        // the lift to the set point moves faster in the image than the
+        // shot, and a release (and ball filter) taken there loses the ball.
+        var firstAfterHold = 1
+        for i in 1..<run.count where upwardSpeed(at: i, in: run) < tuning.minRiseSpeed * rimUnitY {
+            firstAfterHold = i + 1
+        }
+        firstAfterHold = min(firstAfterHold, run.count - 1)
+        var releaseIndex = firstAfterHold
         var fastest = -Double.infinity
-        for i in 1..<run.count {
+        for i in firstAfterHold..<run.count {
             let v = upwardSpeed(at: i, in: run)
             if v > fastest { fastest = v; releaseIndex = i }
         }
@@ -310,8 +438,38 @@ nonisolated struct ShotTracker: Sendable {
         history = track
         candidates = []
         lastSeen = time
+        startDiameter = Self.median(run.suffix(3).map { diameter(of: $0.box) })
+        startTime = time
+        reachedRim = false
         filter = makeFilter(following: run[releaseIndex...], rimUnitY: rimUnitY)
         return .started(release)
+    }
+
+    /// Before it first reaches the rim: is the "shot" ball coming at the
+    /// lens from nearer than the rim (a pass or lob back to the shooter),
+    /// growing instead of heading for its size at the rim? See
+    /// Tuning.towardLensGrowth.
+    private func comingAtTheLens(rimUnitY: Double, time: Double) -> Bool {
+        guard !reachedRim, startDiameter >= 0.5 * rimUnitY,
+              let last = history.last, last.time == time else { return false }
+        let since = history.reversed().prefix { $0.time > startTime }
+        guard since.count >= 5 else { return false }
+        let now = Self.median(since.prefix(5).map { diameter(of: $0.box) })
+        return now >= tuning.towardLensGrowth * startDiameter
+            && now >= tuning.towardLensMinSize * rimUnitY
+    }
+
+    /// Lets go of a start that turned out not to be a shot: no call, no
+    /// cooldown (the shooter may shoot that ball straight back). The live
+    /// view's "in flight" marker clears on its own timeout.
+    private mutating func dropShot() {
+        phase = .idle
+        reachedApex = false
+        filter = nil
+        shotHoop = nil
+        reachedRim = false
+        history.removeAll()
+        candidates.removeAll()
     }
 
     private mutating func advanceFlight(release: Release, hoop: CGRect, rimLine: Double,
@@ -427,7 +585,11 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         shotHoop = nil
-        cooldownUntil = time + tuning.cooldown
+        // The cooldown keeps the ball just called from starting another
+        // shot, so it runs from when that ball was last seen: after a
+        // lost-ball call it has been gone 0.9 s already, and a cooldown
+        // from the call swallowed a real shot released meanwhile.
+        cooldownUntil = min(time, lastSeen) + tuning.cooldown
         let seen = lastSeen
         history.removeAll()
         candidates.removeAll()

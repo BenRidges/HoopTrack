@@ -347,12 +347,13 @@ enum TraceReport {
     }
 
     /// Why no shot started: the true ball's detections from the tracker's
-    /// point of view — dropped as too big (maxBallToRim), then the best
-    /// rising run judged like tryStart.
+    /// point of view — dropped as too big (maxBallToRimIdle), then the best
+    /// rising run judged like tryStart (which also waits until the ball is
+    /// back under maxBallToRim, i.e. flying away from the lens).
     private static func startStory(_ run: SimulationRun, replay: TraceReplay, shot: ShotTruth, range: Range<Int>) -> String {
         let tuning = ShotTracker.Tuning()
         var samples: [(t: Double, y: Double)] = []
-        var tooBig = 0, usable = 0, maxRatio = 0.0
+        var tooBig = 0, usable = 0, tooNear = 0, maxRatio = 0.0
         var lastTooBig: Double?
         var best: (rise: Double, speed: Double, count: Int, height: Double)?
         var bestScore = -Double.infinity
@@ -362,12 +363,13 @@ enum TraceReport {
                   let box = run.entries[k].balls?[i], let hoop = replay.frames[k].hoop else { continue }
             let ratio = box[2] / Double(hoop.width)
             if fr.time >= shot.releaseTime - 0.1 { maxRatio = max(maxRatio, ratio) }
-            if ratio > tuning.maxBallToRim {
+            if ratio > tuning.maxBallToRimIdle {
                 tooBig += 1
                 lastTooBig = fr.time
                 continue
             }
             usable += 1
+            if ratio > tuning.maxBallToRim { tooNear += 1 }
             let y = box[1] + box[3] / 2
             let rimUnit = Double(hoop.width) * 16 / 9
             let rimLine = Double(hoop.maxY) - 0.15 * Double(hoop.height)
@@ -385,8 +387,11 @@ enum TraceReport {
         }
         var text = "no start: "
         if tooBig > 0 {
-            text += "\(tooBig) detections dropped as too big (ball/rim width up to \(f(maxRatio, 1)) > \(f(tuning.maxBallToRim, 1))"
+            text += "\(tooBig) detections dropped as too big (ball/rim width up to \(f(maxRatio, 1)) > \(f(tuning.maxBallToRimIdle, 1))"
                 + (lastTooBig.map { ", until \(f($0))" } ?? "") + "); "
+        }
+        if tooNear > 0 {
+            text += "\(tooNear) tracked but too near the lens to start (> \(f(tuning.maxBallToRim, 1))); "
         }
         guard let best else { return text + "\(usable) usable detections, never 4 in a rising run" }
         return text + "best rising run \(best.count) detections: rise \(f(best.rise, 1)) rim (need \(f(tuning.minRise, 1))), "
