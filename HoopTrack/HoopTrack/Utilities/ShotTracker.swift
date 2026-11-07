@@ -174,6 +174,9 @@ nonisolated struct ShotTracker: Sendable {
     /// ball whatever moves it. Until the ball has left the hands, or just
     /// after something touched it, the flight model is wrong and this isn't.
     private var looseFilter: BallFilter?
+    /// The flight filter as it was at the previous sighting, so a rim
+    /// crossing between two sightings can follow the ball's arc.
+    private var filterAtPrevious: BallFilter?
     /// When the shot in flight started.
     private var shotStart: Double = -.infinity
     /// Last frame the flight filter had the ball above the top of the frame
@@ -214,6 +217,7 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         looseFilter = nil
+        filterAtPrevious = nil
         aboveFrameAt = -.infinity
         shotHoop = nil
     }
@@ -241,6 +245,7 @@ nonisolated struct ShotTracker: Sendable {
                 history.append(Sample(box: picked.box, time: time))
                 lastSeen = time
                 let m = measurement(picked.box, rimUnitY: rimUnitY)
+                filterAtPrevious = filter
                 looseFilter?.update(with: m.point, at: time)
                 if picked.restart, let loose = looseFilter {
                     // Gravity didn't put the ball here, so it wasn't flying
@@ -435,9 +440,7 @@ nonisolated struct ShotTracker: Sendable {
         guard reachedApex, prev.y > rimLine, cur.y <= rimLine else { return nil }
 
         // Dropped through rim height — where?
-        let t = (prev.y - rimLine) / max(prev.y - cur.y, 1e-9)
-        let crossX = prev.x + (cur.x - prev.x) * t
-        let crossTime = prev.time + (cur.time - prev.time) * t
+        let (crossX, crossTime) = rimCrossing(from: prev, to: cur, rimLine: rimLine, rimUnitY: rimUnitY)
         let offset = abs(crossX - Double(hoop.midX)) / Double(hoop.width)
 
         if offset <= tuning.columnHalfWidth {
@@ -483,6 +486,38 @@ nonisolated struct ShotTracker: Sendable {
     }
 
     // MARK: Helpers
+
+    /// Where (image x) and when the ball dropped through the rim line
+    /// between the last two sightings: along the flight filter's arc,
+    /// shifted to pass through both. Across a gap (the ball out of the top
+    /// of the frame, hidden by a hand or the net) a straight line from the
+    /// earlier sighting puts the crossing too early and too far back
+    /// towards where the ball was last seen; between frames the two agree.
+    private func rimCrossing(from prev: Sample, to cur: Sample, rimLine: Double,
+                             rimUnitY: Double) -> (x: Double, time: Double) {
+        let k = (prev.y - rimLine) / max(prev.y - cur.y, 1e-9)
+        let straight = (x: prev.x + (cur.x - prev.x) * k, time: prev.time + (cur.time - prev.time) * k)
+        let span = cur.time - prev.time
+        guard let arc = filterAtPrevious, span > 0, abs(arc.time - prev.time) < 1e-9 else { return straight }
+        let path = arc.path(to: cur.time, every: min(1.0 / 240, span / 4))
+        guard let first = path.first, let last = path.last else { return straight }
+        let start = measurement(prev.box, rimUnitY: rimUnitY).point
+        let end = measurement(cur.box, rimUnitY: rimUnitY).point
+        let shift0 = (x: start.x - first.point.x, y: start.y - first.point.y)
+        let shift1 = (x: end.x - last.point.x, y: end.y - last.point.y)
+        var above: (t: Double, x: Double, y: Double)?
+        for step in path {
+            let u = (step.time - prev.time) / span
+            let x = step.point.x + shift0.x * (1 - u) + shift1.x * u
+            let y = step.point.y + shift0.y * (1 - u) + shift1.y * u
+            if let a = above, a.y > rimLine, y <= rimLine {
+                let f = (a.y - rimLine) / max(a.y - y, 1e-12)
+                return ((a.x + (x - a.x) * f) / aspect, a.t + (step.time - a.t) * f)
+            }
+            above = (step.time, x, y)
+        }
+        return straight
+    }
 
     /// Box centre in height units on both axes (x scaled by the aspect ratio).
     private func point(_ box: CGRect) -> BallFilter.Point {
@@ -633,6 +668,7 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         looseFilter = nil
+        filterAtPrevious = nil
         aboveFrameAt = -.infinity
         shotHoop = nil
         cooldownUntil = time + tuning.cooldown

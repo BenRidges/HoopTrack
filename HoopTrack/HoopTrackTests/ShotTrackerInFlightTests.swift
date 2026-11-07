@@ -54,6 +54,21 @@ final class ShotTrackerInFlightTests: XCTestCase {
         XCTAssertEqual(outcomes.map(\.result), [.miss])
     }
 
+    // MARK: - Rim crossing across a gap
+
+    func test_crossingAcrossAGap_followsTheArc() {
+        // Unseen from just after the apex until just under the rim line: a
+        // straight line from the apex would put the drop through rim
+        // height at ~0.91 s; the ball got there at 0.96 s.
+        var tracker = ShotTracker()
+        let outcomes = run(duration: 2.0, tracker: &tracker) { t in
+            guard t <= 1.2, !(t > 0.55 && t < 1.0) else { return [] }
+            return [self.box(0.40 + 0.1 * t, self.arcY(t))]
+        }
+        XCTAssertEqual(outcomes.map(\.result), [.make])
+        XCTAssertEqual(outcomes.first?.rimArrivalTime ?? 0, 0.96, accuracy: 0.02)
+    }
+
     // MARK: - Still in the hands
 
     func test_shotStartedOnTheLift_isFollowedThroughThePush() {
