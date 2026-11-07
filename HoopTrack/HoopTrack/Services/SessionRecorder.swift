@@ -77,9 +77,9 @@ nonisolated final class SessionRecorder: @unchecked Sendable {
         let url = self.url
         // The callback runs once, after writing has ended; nothing else
         // touches the writer by then.
-        nonisolated(unsafe) let writer = writer
+        nonisolated(unsafe) let finishingWriter = writer
         writer.finishWriting {
-            guard writer.status == .completed else {
+            guard finishingWriter.status == .completed else {
                 try? FileManager.default.removeItem(at: url)
                 completion(nil)
                 return
