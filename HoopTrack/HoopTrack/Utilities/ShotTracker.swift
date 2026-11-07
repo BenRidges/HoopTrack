@@ -127,6 +127,11 @@ nonisolated struct ShotTracker: Sendable {
         /// Longest exposure assumed for motion blur, s. Phone video exposes
         /// for at most the frame time; outdoors, far less.
         var maxExposure: Double = 1.0 / 60
+        /// While the filter has the ball out of the frame, it can only be
+        /// seen within this many diameters of the edge it went out by: it
+        /// comes back through it, and the filter's return time is good to
+        /// a frame or two (~7 R/s × 2/30 s ≈ 1 diameter).
+        var reentryDepth: Double = 1.5
     }
 
     var tuning = Tuning()
@@ -164,6 +169,9 @@ nonisolated struct ShotTracker: Sendable {
     private var looseFilter: BallFilter?
     /// When the shot in flight started.
     private var shotStart: Double = -.infinity
+    /// Last frame the flight filter had the ball above the top of the frame
+    /// (and didn't see it). It's coming back down, so it isn't lost yet.
+    private var aboveFrameAt: Double = -.infinity
     /// The rim box at release, used until the shot resolves.
     private var shotHoop: CGRect?
 
@@ -199,6 +207,7 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         looseFilter = nil
+        aboveFrameAt = -.infinity
         shotHoop = nil
     }
 
@@ -234,6 +243,9 @@ nonisolated struct ShotTracker: Sendable {
                     filter?.update(with: m.point, diameter: m.diameter, at: time,
                                    measurementSD: m.sd, bounceSD: bounce)
                 }
+            } else if let filter, let size = filter.diameter(at: time),
+                      filter.predicted(at: time).y - size / 2 > 1 {
+                aboveFrameAt = time
             }
         }
         history.removeAll { time - $0.time > 1.5 }
@@ -302,7 +314,9 @@ nonisolated struct ShotTracker: Sendable {
         let cap = tuning.gate * rimUnitY * max(1, (time - last.time) * 30)
 
         if let filter {
-            let balls = balls.filter { couldBeShotBall($0, filter: filter, time: time) }
+            let balls = balls.filter {
+                couldBeShotBall($0, filter: filter, time: time) && couldBeBackInFrame($0, filter: filter, time: time)
+            }
             func best(_ f: BallFilter, bounceSD: Double) -> CGRect? {
                 let predicted = f.predicted(at: time)
                 let scored = balls.map { box -> (box: CGRect, surprise: Double, distance: Double) in
@@ -397,7 +411,7 @@ nonisolated struct ShotTracker: Sendable {
             return finish(lostGuess(hoop: hoop, rimUnitY: rimUnitY), confidence: 0.3,
                           release: release, arrival: nil, hoop: hoop, time: time)
         }
-        if time - lastSeen > tuning.lostTimeout {
+        if time - max(lastSeen, aboveFrameAt) > tuning.lostTimeout {
             return finish(lostGuess(hoop: hoop, rimUnitY: rimUnitY), confidence: 0.35,
                           release: release, arrival: nil, hoop: hoop, time: time)
         }
@@ -549,6 +563,23 @@ nonisolated struct ShotTracker: Sendable {
         return long <= tuning.maxBallStretch * diameter + blur
     }
 
+    /// Whether a box is somewhere the ball could be if the filter has it out
+    /// of the frame. A ball that went out of the top (or a side) comes back
+    /// through that edge, so it's seen at the edge first; a box deeper in is
+    /// something else, however unsure the filter is after the gap (on the
+    /// real clips, the rim taken for a ball while the shot is above the
+    /// frame).
+    private func couldBeBackInFrame(_ box: CGRect, filter: BallFilter, time: Double) -> Bool {
+        guard let size = filter.diameter(at: time) else { return true }
+        let p = filter.predicted(at: time)
+        let out = size / 2, depth = tuning.reentryDepth * size
+        if p.y - out > 1, Double(box.maxY) < 1 - depth { return false }
+        if p.y + out < 0, Double(box.minY) > depth { return false }
+        if p.x - out > aspect, Double(box.maxX) * aspect < aspect - depth { return false }
+        if p.x + out < 0, Double(box.minX) * aspect > depth { return false }
+        return true
+    }
+
     /// Velocity kick SD (height units/s) for a ball that may have hit the
     /// rim or board since the filter last saw it: when it should now be
     /// within the board's reach of the rim. The board is 1.83 m wide and
@@ -590,6 +621,7 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         looseFilter = nil
+        aboveFrameAt = -.infinity
         shotHoop = nil
         cooldownUntil = time + tuning.cooldown
         let seen = lastSeen

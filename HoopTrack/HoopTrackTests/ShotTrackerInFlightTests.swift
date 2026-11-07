@@ -54,6 +54,46 @@ final class ShotTrackerInFlightTests: XCTestCase {
         XCTAssertEqual(outcomes.map(\.result), [.miss])
     }
 
+    // MARK: - Out of the top of the frame
+
+    /// A high arc under gravity at the ball's own scale (g = 41 apparent
+    /// diameters/s², the 0.03-wide box being 0.053 high): wholly above the
+    /// frame from 0.42 s to 1.37 s, back through rim height at ≈ 1.56 s.
+    private let gravity = BallFilter.gravityPerDiameter * 0.03 * 16 / 9
+    private func highArcY(_ t: Double) -> Double { 0.40 + 1.957 * t - 0.5 * gravity * t * t }
+    private let highArcRimTime = 1.562
+
+    /// The ball's box, cut off by the top of the frame as a detector would
+    /// box it; nil while it's wholly out.
+    private func framed(_ b: CGRect) -> CGRect? {
+        guard b.minY < 1 else { return nil }
+        return CGRect(x: b.minX, y: b.minY, width: b.width, height: min(b.maxY, 1) - b.minY)
+    }
+
+    func test_ballOutOfTheTopForLongerThanTheLostTimeout_isFollowedBack() {
+        var tracker = ShotTracker()
+        let outcomes = run(duration: 2.6, tracker: &tracker) { t in
+            t <= 1.9 ? [self.box(0.5, self.highArcY(t))].compactMap(self.framed) : []
+        }
+        XCTAssertEqual(outcomes.map(\.result), [.make])
+        XCTAssertEqual(outcomes.first?.rimArrivalTime ?? 0, highArcRimTime, accuracy: 0.03)
+    }
+
+    func test_ballSizedBoxAtTheRim_whileTheBallIsAboveTheFrame_isIgnored() {
+        // A ball-sized false detection at the rim while the shot is above
+        // the frame: the ball can only come back through the top edge.
+        var tracker = ShotTracker()
+        let fragment = box(0.5, 0.76)
+        let outcomes = run(duration: 2.6, tracker: &tracker) { t in
+            var balls = [self.box(0.5, self.highArcY(t))].compactMap(self.framed)
+            if t > 1.9 { balls = [] }
+            if t > 0.9 && t < 1.25 { balls.append(fragment) }
+            return balls
+        }
+        XCTAssertEqual(outcomes.map(\.result), [.make])
+        XCTAssertEqual(outcomes.first?.rimArrivalTime ?? 0, highArcRimTime, accuracy: 0.03)
+    }
+
     func test_rimShapedBall_doesNotStopAMakeBeingSeen() {
         var tracker = ShotTracker()
         let outcomes = run(duration: 2.0, tracker: &tracker) { t in
