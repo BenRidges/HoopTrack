@@ -112,6 +112,9 @@ Differences that remain:
 - `DetectionLogger` and `SessionRecorder` write under `~/Documents`; the
   harness points `CFFIXED_USER_HOME` at a scratch folder in the output
   directory first and moves the files out, so the Mac's Documents stay clean.
+  Both make their folders with `FileProtectionType.complete`, and while the
+  Mac's screen is locked (normal over ssh) nothing can be created inside such
+  a folder, so the harness makes the two folders first, unprotected.
 
 ## Outputs
 

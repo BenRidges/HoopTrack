@@ -173,6 +173,18 @@ final class Runner {
                                   threePointDistanceFt: options.court.threePointDistanceFt,
                                   fieldOfView: { fov })
         let sessionID = UUID()
+        let documents = scratchHome.appendingPathComponent("Documents")
+        let logDirectory = documents.appendingPathComponent(HoopTrack.Telemetry.telemetryDirectoryName)
+            .appendingPathComponent(sessionID.uuidString)
+        // DetectionLogger and SessionRecorder create their folders with
+        // FileProtectionType.complete, as on the phone. On a Mac whose screen
+        // is locked (the usual case over ssh) nothing can be created inside
+        // such a folder: the logger's file never appears and the recorder
+        // fails. Make the folders first, unprotected; creating an existing
+        // folder leaves it as it is, and the files inside then open fine.
+        for folder in [logDirectory, documents.appendingPathComponent(HoopTrack.Storage.sessionVideoDirectory)] {
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
         let recorder = SessionRecorder(sessionID: sessionID)
         pipeline.recorder = recorder
         pipeline.publishesBall = false        // the developer overlay is off by default
@@ -180,9 +192,7 @@ final class Runner {
         let logger = try DetectionLogger(sessionID: sessionID)
         pipeline.attachTelemetry(logger: logger)
 
-        let documents = scratchHome.appendingPathComponent("Documents")
-        let logFile = documents.appendingPathComponent(HoopTrack.Telemetry.telemetryDirectoryName)
-            .appendingPathComponent(sessionID.uuidString).appendingPathComponent("detections.jsonl")
+        let logFile = logDirectory.appendingPathComponent("detections.jsonl")
         guard fileManager.fileExists(atPath: logFile.path) else {
             throw RunnerError("DetectionLogger didn't write under the scratch home (\(logFile.path)); "
                               + "was the home directory read before CFFIXED_USER_HOME was set?")
