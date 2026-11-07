@@ -133,7 +133,7 @@ struct TrainTabView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 StatValue(value: viewModel.week.fgPercent.map { "\(Int($0.rounded()))%" } ?? "–",
                           caption: "field goal",
-                          color: viewModel.week.fgPercent.map(Color.shooting) ?? .secondary)
+                          color: viewModel.week.fgPercent.map { Color.shooting($0) } ?? .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 StatValue(value: "\(viewModel.week.sessions)", caption: viewModel.week.sessions == 1 ? "session" : "sessions")
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -47,7 +47,8 @@ enum SupabaseContainer {
         let config = StorageClientConfiguration(
             url: HoopTrack.Backend.supabaseURL.appendingPathComponent("storage/v1"),
             headers: headers,
-            session: StorageHTTPSession(session: unmeteredSession)
+            session: StorageHTTPSession(session: unmeteredSession),
+            logger: nil
         )
         return SupabaseStorageClient(configuration: config)
     }

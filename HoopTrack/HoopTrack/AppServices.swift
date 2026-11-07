@@ -29,7 +29,9 @@ final class AppServices: ObservableObject {
     private let telemetryUpload: TelemetryUploadService
     private var isSyncing = false
 
-    init(container: ModelContainer = HoopTrackStore.shared) {
+    /// `container` defaults to the app's on-disk store.
+    init(container: ModelContainer? = nil) {
+        let container = container ?? HoopTrackStore.shared
         self.container = container
         let context = container.mainContext
         let dataService = DataService(modelContext: context)
@@ -90,7 +92,7 @@ final class AppServices: ObservableObject {
            !report.isEmpty {
             try? dataService.recomputeCareerStats()
         }
-        try? await syncCoordinator.backUpEverything(userID: userID, context: context)
+        _ = try? await syncCoordinator.backUpEverything(userID: userID, context: context)
     }
 
     /// Profile → Restore from backup: adds whatever's in the cloud and not here.
