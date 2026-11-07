@@ -113,6 +113,11 @@ nonisolated struct ShotTracker: Sendable {
         /// Slack per link, ball diameters: box centres jitter by a few % of
         /// the box, and blur moves the centre by up to half the streak.
         var linkSlack: Double = 0.5
+        /// A rising run must rise at least this share of `minRise` outside
+        /// its biggest single step, so one link between two different
+        /// things (a ball lost for a frame as a false positive shows up
+        /// higher) can't make the whole rise.
+        var minRiseOutsideJump: Double = 0.5
     }
 
     var tuning = Tuning()
@@ -369,6 +374,12 @@ nonisolated struct ShotTracker: Sendable {
         let speed = upwardSpeed(at: run.count - 1, in: run) / rimUnitY
         let nearRimHeight = latest.y >= rimLine - tuning.startBelowRimTolerance * rimUnitY
         guard rise >= tuning.minRise, speed >= tuning.minRiseSpeed, nearRimHeight else { return nil }
+
+        // The rise has to come from a ball moving, not from one link
+        // between two things: outside its biggest step the run still rises.
+        var biggestStep = 0.0
+        for i in 1..<run.count { biggestStep = max(biggestStep, run[i].y - run[i - 1].y) }
+        guard rise - biggestStep / rimUnitY >= tuning.minRiseOutsideJump * tuning.minRise else { return nil }
 
         // Release = fastest upward moment of the run (hands push until release,
         // gravity only slows it after) since the ball was last held: rising

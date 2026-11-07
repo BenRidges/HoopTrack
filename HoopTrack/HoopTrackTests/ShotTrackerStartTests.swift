@@ -121,6 +121,19 @@ final class ShotTrackerStartTests: XCTestCase {
         XCTAssertTrue(starts(events).isEmpty)
     }
 
+    func test_jumpAcrossAGap_isNotARise() {
+        // A link a ball could make across a 0.2 s gap (≈ 2 m), but the
+        // whole "rise" is that one link: nothing seen actually moved.
+        var tracker = ShotTracker()
+        let rimLine = 0.80 - 0.15 * 0.10, rimUnit = 0.10 * aspect
+        let events = run(duration: 1.0, fps: 30, tracker: &tracker) { t in
+            if t < 0.3 { return [self.ball(0.30, rimLine - 1.8 * rimUnit)] }
+            if t < 0.5 { return [] }
+            return [self.ball(0.33, rimLine - 0.2 * rimUnit)]
+        }
+        XCTAssertTrue(starts(events).isEmpty)
+    }
+
     func test_shotAt30fps_missedAtRelease_stillStarts() {
         // The shooter's arms hide the ball for 0.2 s at release: one long
         // step, then the ball keeps rising on its own.
