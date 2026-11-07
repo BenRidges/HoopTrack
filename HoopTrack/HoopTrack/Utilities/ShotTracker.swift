@@ -49,6 +49,32 @@ nonisolated struct ShotTracker: Sendable {
         /// When the shot ball was last detected. For a lost ball, roughly
         /// when it reached the rim.
         let lastSeenTime: Double
+        /// What argued against the call although the picture looked clean.
+        /// The net check (ShotEvidence.fuse) weighs these.
+        var doubts: Doubts = []
+    }
+
+    /// Evidence against a call that the 2D picture alone would have made.
+    struct Doubts: OptionSet, Sendable, Equatable {
+        let rawValue: Int
+        init(rawValue: Int) { self.rawValue = rawValue }
+
+        /// At the rim the ball looked bigger than a ball at the rim's depth
+        /// can: it was nearer the camera than the rim (dropping in front).
+        static let tooBigForRim = Doubts(rawValue: 1 << 0)
+        /// Its size stopped changing the way the flight had been changing
+        /// it: it came back toward the camera (or, facing the shooter, went
+        /// back out) before reaching the rim line, i.e. it bounced off the
+        /// rim or board.
+        static let cameBack = Doubts(rawValue: 1 << 1)
+
+        /// Another ball was within about a rim width of the shot ball at
+        /// the rim: the two can't be told apart by position, so the call
+        /// may be about the other ball.
+        static let secondBall = Doubts(rawValue: 1 << 2)
+
+        /// The ball may not have been at the rim's depth at all.
+        static let depth: Doubts = [.tooBigForRim, .cameBack]
     }
 
     enum Event: Sendable, Equatable {
@@ -192,6 +218,51 @@ nonisolated struct ShotTracker: Sendable {
         /// comes back through it, and the filter's return time is good to
         /// a frame or two (~7 R/s × 2/30 s ≈ 1 diameter).
         var reentryDepth: Double = 1.5
+
+        // Depth at the rim (the make decision). From one camera the rim's
+        // column is a ray: a ball dropping in front of the rim (camera
+        // behind the shooter) or beyond it (camera behind the board)
+        // crosses the rim line inside the column and leaves below the net
+        // box just like a make. Its apparent size is the only depth cue.
+
+        /// Ball diameter over the rim box's width for a ball at the rim's
+        /// depth: a 0.239 m ball in a 0.49 m ring (0.457 m inside plus the
+        /// rod). The shipped detector measured 0.32–0.51 on the labelled
+        /// real makes (2026-11 clips: its basket boxes are a little loose).
+        var ballToRimAtRim: Double = 0.239 / 0.49
+        /// A ball this much bigger than one at the rim's depth is in front
+        /// of the rim. Box sizes jitter ~6% a frame; the median of the
+        /// frames around the crossing is good to ~3%, so 10% is a ball
+        /// clearly nearer the camera (0.7 m in front from 7 m away).
+        var inFrontOfRim: Double = 1.10
+        /// The flight has to change the ball's size by this factor (release
+        /// over at the rim) before its size trend says which way it travels
+        /// in depth: behind the shooter it shrinks all the way to the rim,
+        /// facing the shooter it grows. Side-on there's no usable trend.
+        /// 1.3 leaves the last 0.35 s of a make ≥ 2 noise widths from "no
+        /// change".
+        var depthTrend: Double = 1.3
+        /// Size near the rim line over its size 0.2–0.5 s earlier at or
+        /// past this (behind the shooter; the inverse facing it): the ball
+        /// stopped moving away from the camera, so it bounced back off the
+        /// rim or board.
+        var cameBackGrowth: Double = 1.0
+        /// A make out of the bottom of the net that the depth cues doubt.
+        /// Under 0.9 so the net check sees it, over `HoopTrack.CV.lowConfidence`
+        /// so it isn't flagged without the net's say.
+        var doubtfulMakeConfidence: Double = 0.75
+
+        // A second ball at the rim (two people shooting at one hoop).
+
+        /// Another ball whose centre comes within this many rim widths of
+        /// the shot ball's is close enough to be mistaken for it: two
+        /// balls side by side are one ball diameter (~0.5 rim) apart.
+        var secondBallRadius: Double = 1.0
+        /// …while the shot ball is at the rim or in this many seconds before
+        /// it drops through the rim line.
+        var secondBallLookback: Double = 0.3
+        /// Such a call is flagged: below `HoopTrack.CV.lowConfidence`.
+        var secondBallConfidence: Double = 0.55
     }
 
     var tuning = Tuning()
@@ -242,6 +313,8 @@ nonisolated struct ShotTracker: Sendable {
     /// `comingAtTheLens`.
     private var startDiameter: Double = 0
     private var reachedRim = false
+    /// Last time another ball was right next to the shot ball.
+    private var secondBallTime: Double = -.infinity
 
     /// Image aspect ratio (width / height). Converts width-normalised sizes
     /// into height-normalised units for vertical thresholds.
@@ -279,6 +352,7 @@ nonisolated struct ShotTracker: Sendable {
         aboveFrameAt = -.infinity
         shotHoop = nil
         reachedRim = false
+        secondBallTime = -.infinity
     }
 
     // MARK: Per-frame update
@@ -319,6 +393,7 @@ nonisolated struct ShotTracker: Sendable {
                 aboveFrameAt = time
             }
         }
+        if isTrackingShot { noteSecondBall(among: plausible, hoop: hoop, time: time) }
         history.removeAll { time - $0.time > 1.5 }
 
         switch phase {
@@ -578,6 +653,7 @@ nonisolated struct ShotTracker: Sendable {
         aboveFrameAt = -.infinity
         shotHoop = nil
         reachedRim = false
+        secondBallTime = -.infinity
         history.removeAll()
         candidates.removeAll()
     }
@@ -625,10 +701,12 @@ nonisolated struct ShotTracker: Sendable {
                 reachedApex = false
                 return nil
             }
-            // Out the bottom of the net, still in the column.
+            // Out the bottom of the net, still in the column. Sure only if
+            // the ball's size says it was at the rim's depth.
             if cur.y < Double(hoop.minY), offset <= tuning.columnHalfWidth + 0.15 {
-                return finish(.make, confidence: 0.95, release: release,
-                              arrival: arrival, hoop: hoop, time: time)
+                let doubts = depthDoubts(release: release, hoop: hoop, arrival: arrival, time: time)
+                return finish(.make, confidence: doubts.isEmpty ? 0.95 : tuning.doubtfulMakeConfidence,
+                              release: release, arrival: arrival, hoop: hoop, time: time, doubts: doubts)
             }
             // Kicked out sideways.
             if offset > 1.0 {
@@ -639,10 +717,73 @@ nonisolated struct ShotTracker: Sendable {
         // Nothing dramatic happened: it sat in the net (or the net hid it).
         if time - since >= tuning.settleTime {
             let confidence = seenNow ? 0.8 : 0.7
-            return finish(.make, confidence: confidence, release: release,
-                          arrival: arrival, hoop: hoop, time: time)
+            return finish(.make, confidence: confidence, release: release, arrival: arrival, hoop: hoop, time: time,
+                          doubts: depthDoubts(release: release, hoop: hoop, arrival: arrival, time: time))
         }
         return nil
+    }
+
+    /// Depth cues for a ball the picture shows dropping through the rim
+    /// (see Tuning, "Depth at the rim"). Box sizes are the shorter side,
+    /// since motion blur stretches the box along the flight, and only boxes
+    /// clear of the frame edge count: a box cut by the edge is smaller than
+    /// the ball.
+    private func depthDoubts(release: Release, hoop: CGRect, arrival: Double, time: Double) -> Doubts {
+        let whole = history.filter { Self.isInsideFrame($0.box) }
+        func size(from start: Double, to end: Double, atLeast count: Int) -> Double? {
+            let sizes = whole.filter { $0.time >= start && $0.time <= end }.map { sample in
+                min(Double(sample.box.width), Double(sample.box.height) / aspect)
+            }
+            return sizes.count >= count ? Self.median(sizes) : nil
+        }
+        // From just before the crossing through the net.
+        guard let atRim = size(from: arrival - 0.15, to: time, atLeast: 1), atRim > 0 else { return [] }
+        var doubts: Doubts = []
+        if atRim > tuning.ballToRimAtRim * tuning.inFrontOfRim * Double(hoop.width) {
+            doubts.insert(.tooBigForRim)
+        }
+        // How the size was changing just before the crossing, against the
+        // way the whole flight changed it.
+        let trend = release.ballDiameter / atRim
+        if let near = size(from: arrival - 0.15, to: arrival + 0.05, atLeast: 2),
+           let earlier = size(from: arrival - 0.5, to: arrival - 0.2, atLeast: 2) {
+            let growth = near / earlier
+            let awayFromCamera = trend >= tuning.depthTrend          // camera behind the shooter
+            let towardCamera = trend <= 1 / tuning.depthTrend        // camera behind the board
+            if (awayFromCamera && growth >= tuning.cameBackGrowth)
+                || (towardCamera && growth <= 1 / tuning.cameBackGrowth) {
+                doubts.insert(.cameBack)
+            }
+        }
+        return doubts
+    }
+
+    /// During a shot: remembers when another ball was right next to the
+    /// shot ball (see Tuning, "A second ball at the rim"). Boxes overlapping
+    /// the shot ball are the same ball boxed twice; boxes much wider than
+    /// tall are the rim taken for a ball (2026-11 clips: ~1.9:1, a ball's
+    /// box is ~1:1 or taller with blur); a ball of a very different size is
+    /// at a different depth. Only frames where the shot ball itself was
+    /// picked count: otherwise a box near its last sighting is most likely
+    /// the shot ball, moved on and turned down by the filter.
+    private mutating func noteSecondBall(among balls: [CGRect], hoop: CGRect, time: Double) {
+        func ballShaped(_ box: CGRect) -> Bool { Double(box.width) * aspect <= 1.4 * Double(box.height) }
+        guard let shot = history.last, shot.time == time, ballShaped(shot.box) else { return }
+        let shotSize = min(Double(shot.box.width), Double(shot.box.height) / aspect)
+        guard shotSize > 0 else { return }
+        for box in balls where box != shot.box && !box.intersects(shot.box) {
+            let size = min(Double(box.width), Double(box.height) / aspect)
+            guard ballShaped(box), size >= shotSize / 1.5, size <= shotSize * 1.5 else { continue }
+            let dx = Double(box.midX) - shot.x, dy = (Double(box.midY) - shot.y) / aspect
+            if (dx * dx + dy * dy).squareRoot() <= tuning.secondBallRadius * Double(hoop.width) {
+                secondBallTime = time
+                return
+            }
+        }
+    }
+
+    private static func isInsideFrame(_ box: CGRect) -> Bool {
+        box.minX > 0.005 && box.maxX < 0.995 && box.minY > 0.005 && box.maxY < 0.995
     }
 
     // MARK: Helpers
@@ -828,7 +969,7 @@ nonisolated struct ShotTracker: Sendable {
     }
 
     private mutating func finish(_ result: ShotResult, confidence: Double, release: Release,
-                                 arrival: Double?, hoop: CGRect, time: Double) -> Event {
+                                 arrival: Double?, hoop: CGRect, time: Double, doubts: Doubts = []) -> Event {
         phase = .idle
         reachedApex = false
         filter = nil
@@ -844,8 +985,15 @@ nonisolated struct ShotTracker: Sendable {
         let seen = lastSeen
         history.removeAll()
         candidates.removeAll()
+        // Another ball next to it at the rim: the call may be about that one.
+        var doubts = doubts, confidence = confidence
+        if secondBallTime >= (arrival ?? seen) - tuning.secondBallLookback {
+            doubts.insert(.secondBall)
+            confidence = min(confidence, tuning.secondBallConfidence)
+        }
+        secondBallTime = -.infinity
         return .resolved(Outcome(result: result, confidence: confidence, release: release,
-                                 rimArrivalTime: arrival, hoop: hoop, lastSeenTime: seen))
+                                 rimArrivalTime: arrival, hoop: hoop, lastSeenTime: seen, doubts: doubts))
     }
 
     /// Upward speed (height units/s) at index `i`, smoothed over two steps.

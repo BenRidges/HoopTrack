@@ -290,6 +290,15 @@ enum TraceReport {
     }
 
     private static func how(_ o: ShotTracker.Outcome) -> String {
+        let explanation = explain(o)
+        return o.doubts.contains(.secondBall) ? explanation + "; another ball right next to it at the rim" : explanation
+    }
+
+    private static func explain(_ o: ShotTracker.Outcome) -> String {
+        var doubts: [String] = []
+        if o.doubts.contains(.tooBigForRim) { doubts.append("too big for the rim's depth") }
+        if o.doubts.contains(.cameBack) { doubts.append("came back off the rim or board") }
+        if !doubts.isEmpty { return "out of the net in 2D, doubted: " + doubts.joined(separator: ", ") }
         switch (o.result, o.confidence) {
         case (.make, 0.95): return "left the bottom of the net in the column"
         case (.make, 0.8): return "sat 0.45 s at the rim, still seen"
