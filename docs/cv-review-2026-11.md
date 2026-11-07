@@ -179,6 +179,15 @@ The report shows how many shots were detected, how many calls were right,
 which way the wrong calls went, phantom shots and missed shots. Change
 `ShotTracker.Tuning`, re-run, compare.
 
+Until there are labelled sessions, `swift run shot-sim` benchmarks the same
+code path on simulated footage. It covers shot physics with rim, board and
+net, a phone behind the shooter or behind the hoop, a detector noise model
+and a rendered net for NetWatch. Run it with `--list` to see the scenarios,
+`--trace` to see what the tracker did on each failure, and `--dump <dir>` to
+write `detections.jsonl` and `labels.csv` for `shot-eval`. The sources are
+in `Tools/HoopTrackCore/Sources/ShotSimulation`. In release builds,
+`@testable` needs `swift run -c release -Xswiftc -enable-testing shot-sim`.
+
 ## Next, in order of payoff
 
 1. **Label 20–30 real sessions** and tune `ShotTracker.Tuning` with
