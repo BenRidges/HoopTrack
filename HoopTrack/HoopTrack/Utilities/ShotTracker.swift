@@ -119,6 +119,14 @@ nonisolated struct ShotTracker: Sendable {
         /// at 720p) and clearly shorter across it than along it is a ball
         /// cut off by the edge.
         var frameEdge: Double = 0.004
+        /// A box longer than this many times the followed ball's apparent
+        /// diameter, plus its motion blur, isn't that ball: detector size
+        /// jitter is ~10%, and the ball's size drifts a little between
+        /// sightings. The rim taken for a ball is ~2× the ball.
+        var maxBallStretch: Double = 1.5
+        /// Longest exposure assumed for motion blur, s. Phone video exposes
+        /// for at most the frame time; outdoors, far less.
+        var maxExposure: Double = 1.0 / 60
     }
 
     var tuning = Tuning()
@@ -294,6 +302,7 @@ nonisolated struct ShotTracker: Sendable {
         let cap = tuning.gate * rimUnitY * max(1, (time - last.time) * 30)
 
         if let filter {
+            let balls = balls.filter { couldBeShotBall($0, filter: filter, time: time) }
             func best(_ f: BallFilter, bounceSD: Double) -> CGRect? {
                 let predicted = f.predicted(at: time)
                 let scored = balls.map { box -> (box: CGRect, surprise: Double, distance: Double) in
@@ -526,6 +535,18 @@ nonisolated struct ShotTracker: Sendable {
         }
         let usual = tuning.flightMeasurementSD * rimUnitY, extra = 0.25 * size
         return (centre, nil, (usual * usual + extra * extra).squareRoot())
+    }
+
+    /// Whether a box could be the ball being followed. A ball's box is about
+    /// its apparent diameter across, stretched along its path by motion
+    /// blur at most; a box much longer than that (the rim taken for a ball,
+    /// two balls in one box) isn't it.
+    private func couldBeShotBall(_ box: CGRect, filter: BallFilter, time: Double) -> Bool {
+        guard let diameter = filter.diameter(at: time) else { return true }
+        let v = filter.velocity
+        let blur = (v.x * v.x + v.y * v.y).squareRoot() * tuning.maxExposure
+        let long = max(Double(box.width) * aspect, Double(box.height))
+        return long <= tuning.maxBallStretch * diameter + blur
     }
 
     /// Velocity kick SD (height units/s) for a ball that may have hit the
