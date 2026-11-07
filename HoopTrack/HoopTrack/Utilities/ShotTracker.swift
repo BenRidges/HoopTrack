@@ -81,6 +81,20 @@ nonisolated struct ShotTracker: Sendable {
         var gateSigma: Double = 5.0
         /// Ball boxes bigger than this many rim widths are false positives.
         var maxBallToRim: Double = 1.6
+
+        // Shot start — which boxes may start a shot (see `startable`).
+        /// A box at least this much wider than tall (in pixels) that sits
+        /// on the hoop is the rim, not a ball. A ball is round: blur only
+        /// stretches it along its path, which near the rim is mostly
+        /// vertical. On the 4 real clips (2026-11) the detector's
+        /// rim-as-ball boxes run 1.6–2.2:1; real balls away from the rim
+        /// median 1.15–1.3:1 (the model draws balls slightly wide).
+        var rimShapedAspect: Double = 1.4
+        /// …and at least this many rim widths wide. A ball at the rim's
+        /// depth is about 0.49 rim widths (0.239 m ball / 0.489 m ring),
+        /// about 0.6 with the model's wide boxes; the rim-as-ball boxes
+        /// on the real clips are 0.75–1.0.
+        var rimShapedMinWidth: Double = 0.7
     }
 
     var tuning = Tuning()
@@ -164,7 +178,7 @@ nonisolated struct ShotTracker: Sendable {
         let plausible = balls.filter { Double($0.width) <= tuning.maxBallToRim * Double(hoop.width) }
 
         if case .idle = phase {
-            associate(plausible, rimUnitY: rimUnitY, time: time)
+            associate(startable(balls, hoop: hoop), rimUnitY: rimUnitY, time: time)
         } else if let ball = pick(from: plausible, rimUnitY: rimUnitY, time: time) {
             history.append(Sample(box: ball, time: time))
             lastSeen = time
@@ -194,6 +208,29 @@ nonisolated struct ShotTracker: Sendable {
     }
 
     // MARK: Ball association
+
+    /// Between shots: the ball boxes that could be a ball about to be shot.
+    private func startable(_ balls: [CGRect], hoop: CGRect) -> [CGRect] {
+        balls.filter { box in
+            Double(box.width) <= tuning.maxBallToRim * Double(hoop.width) && !isRimShaped(box, hoop: hoop)
+        }
+    }
+
+    /// The detector sometimes labels the rim itself "ball": a box about
+    /// as wide as the rim, half as tall, sitting on it. Tracked between
+    /// shots it chains onto a real ball as a fast "rise" and starts a
+    /// phantom shot, which then holds the tracker through the real one.
+    func isRimShaped(_ box: CGRect, hoop: CGRect) -> Bool {
+        guard box.width > 0, box.height > 0, hoop.width > 0 else { return false }
+        // Mostly on the hoop box.
+        let overlapW = min(box.maxX, hoop.maxX) - max(box.minX, hoop.minX)
+        let overlapH = min(box.maxY, hoop.maxY) - max(box.minY, hoop.minY)
+        guard overlapW > 0, overlapH > 0,
+              Double(overlapW * overlapH) >= 0.5 * Double(box.width * box.height) else { return false }
+        let pixelAspect = Double(box.width) * aspect / Double(box.height)
+        return pixelAspect >= tuning.rimShapedAspect
+            && Double(box.width) >= tuning.rimShapedMinWidth * Double(hoop.width)
+    }
 
     /// Between shots: extends each track with its nearest ball (closest pairs
     /// first), starts new tracks for the rest, drops tracks that went quiet.
