@@ -5,7 +5,7 @@
 // twice. App target only: it needs AVFoundation sample buffers.
 import XCTest
 import AVFoundation
-import Combine
+@preconcurrency import Combine
 @testable import HoopTrack
 
 @MainActor
@@ -146,10 +146,13 @@ final class CVPipelineStopTests: XCTestCase {
         let detector = ScriptedDetector(balls: [:], hoop: rim, gate: gate)
         let delegate = Delegate()
         let (pipeline, frames) = pipeline(detector, delegate: delegate)
-        let buffer = frame(0)
+        // Handed to one other thread and not touched here meanwhile, as the
+        // camera does with its frames.
+        nonisolated(unsafe) let feed = frames
+        nonisolated(unsafe) let buffer = frame(0)
         let processed = expectation(description: "frame processed")
         DispatchQueue.global(qos: .userInitiated).async {
-            frames.send(buffer)
+            feed.send(buffer)
             processed.fulfill()
         }
         for _ in 0..<200 where !detector.entered { try await Task.sleep(for: .milliseconds(5)) }
