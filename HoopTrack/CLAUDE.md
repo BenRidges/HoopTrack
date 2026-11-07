@@ -26,6 +26,7 @@ Minimum deployment target: **iOS 17.0** (SwiftData, `onChange(of:_:)` two-parame
 cd ../Tools/HoopTrackCore
 swift test                                        # pure-logic tests, seconds
 swift run shot-eval detections.jsonl labels.csv   # replay a session log through ShotTracker and score it
+swift run shot-sim --scenario 'mixed-*' --trace  # benchmark make/miss on simulated footage (Sources/ShotSimulation)
 ```
 
 When adding pure logic, keep the file free of SwiftUI/UIKit/CoreGraphics imports, mark its types `nonisolated`, and add a symlink for it (and its test) in the package so it's covered there too.
