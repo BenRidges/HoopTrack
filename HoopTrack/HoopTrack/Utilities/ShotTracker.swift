@@ -119,6 +119,20 @@ nonisolated struct ShotTracker: Sendable {
         /// things (a ball lost for a frame as a false positive shows up
         /// higher) can't make the whole rise.
         var minRiseOutsideJump: Double = 0.5
+        /// A shot flies to the hoop, so its ball's size heads for that of a
+        /// ball at the rim's depth, about 0.5 rim widths (0.239 m ball /
+        /// 0.46–0.49 m rim box): from behind the shooter it shrinks. A
+        /// pass or lob back from under the hoop comes at the lens and
+        /// keeps growing. Until the ball first reaches the rim, one that
+        /// started nearer the lens than the rim (over 0.5 rim widths) and
+        /// has since grown by this factor…
+        var towardLensGrowth: Double = 1.25
+        /// …to at least this many rim widths (1.2 × a ball at the rim) is
+        /// no shot: the track is dropped without a call. In shot-sim this
+        /// catches 68 of 96 rebounder lobs and 2 of 6,901 real shots from
+        /// behind. With the camera behind the hoop the shooter's ball
+        /// starts smaller than at the rim's depth, so it doesn't apply.
+        var towardLensMinSize: Double = 0.6
     }
 
     var tuning = Tuning()
@@ -151,6 +165,11 @@ nonisolated struct ShotTracker: Sendable {
     private var filter: BallFilter?
     /// The rim box at release, used until the shot resolves.
     private var shotHoop: CGRect?
+    /// The ball's apparent diameter when the shot started (height units),
+    /// and whether it has reached the rim since; see `comingAtTheLens`.
+    private var startDiameter: Double = 0
+    private var startTime: Double = 0
+    private var reachedRim = false
 
     /// Image aspect ratio (width / height). Converts width-normalised sizes
     /// into height-normalised units for vertical thresholds.
@@ -184,6 +203,7 @@ nonisolated struct ShotTracker: Sendable {
         reachedApex = false
         filter = nil
         shotHoop = nil
+        reachedRim = false
     }
 
     // MARK: Per-frame update
@@ -222,10 +242,15 @@ nonisolated struct ShotTracker: Sendable {
             return nil
 
         case .inFlight(let release):
+            if comingAtTheLens(rimUnitY: rimUnitY, time: time) {
+                dropShot()
+                return nil
+            }
             return advanceFlight(release: release, hoop: hoop, rimLine: rimLine,
                                  rimUnitY: rimUnitY, time: time)
 
         case .atRim(let release, let since, let arrival):
+            reachedRim = true
             return advanceAtRim(release: release, since: since, arrival: arrival,
                                 hoop: hoop, rimLine: rimLine, rimUnitY: rimUnitY, time: time)
         }
@@ -412,8 +437,38 @@ nonisolated struct ShotTracker: Sendable {
         history = track
         candidates = []
         lastSeen = time
+        startDiameter = Self.median(run.suffix(3).map { diameter(of: $0.box) })
+        startTime = time
+        reachedRim = false
         filter = makeFilter(following: run[releaseIndex...], rimUnitY: rimUnitY)
         return .started(release)
+    }
+
+    /// Before it first reaches the rim: is the "shot" ball coming at the
+    /// lens from nearer than the rim (a pass or lob back to the shooter),
+    /// growing instead of heading for its size at the rim? See
+    /// Tuning.towardLensGrowth.
+    private func comingAtTheLens(rimUnitY: Double, time: Double) -> Bool {
+        guard !reachedRim, startDiameter >= 0.5 * rimUnitY,
+              let last = history.last, last.time == time else { return false }
+        let since = history.reversed().prefix { $0.time > startTime }
+        guard since.count >= 5 else { return false }
+        let now = Self.median(since.prefix(5).map { diameter(of: $0.box) })
+        return now >= tuning.towardLensGrowth * startDiameter
+            && now >= tuning.towardLensMinSize * rimUnitY
+    }
+
+    /// Lets go of a start that turned out not to be a shot: no call, no
+    /// cooldown (the shooter may shoot that ball straight back). The live
+    /// view's "in flight" marker clears on its own timeout.
+    private mutating func dropShot() {
+        phase = .idle
+        reachedApex = false
+        filter = nil
+        shotHoop = nil
+        reachedRim = false
+        history.removeAll()
+        candidates.removeAll()
     }
 
     private mutating func advanceFlight(release: Release, hoop: CGRect, rimLine: Double,

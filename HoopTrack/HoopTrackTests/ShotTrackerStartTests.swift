@@ -165,6 +165,41 @@ final class ShotTrackerStartTests: XCTestCase {
         XCTAssertEqual(started.last?.time ?? 0, 1.27, accuracy: 0.1)
     }
 
+    // MARK: - Passes back from under the hoop
+
+    func test_lobBackTowardTheCamera_isDroppedWithoutACall() {
+        // F4: the rebounder lobs the ball back over the hoop's height to a
+        // shooter beside the phone. It rises fast and near the rim line,
+        // so it starts like a shot, then grows as it comes at the lens and
+        // used to be logged as a confident MISS 0.90.
+        var tracker = ShotTracker()
+        let events = run(duration: 1.6, tracker: &tracker) { t in
+            t <= 1.2 ? [self.ball(0.52 - 0.18 * t, self.arcY(t), size: 0.055 + 0.05 * t)] : []
+        }
+        XCTAssertEqual(starts(events).count, 1)
+        XCTAssertTrue(outcomes(events).isEmpty)
+    }
+
+    func test_shotFromBehind_shrinkingTowardTheRim_isStillCalled() {
+        // The shooter's ball leaves the hands nearer the lens than the rim
+        // and shrinks toward its size at the rim's depth.
+        var tracker = ShotTracker()
+        let events = run(duration: 1.6, tracker: &tracker) { t in
+            t <= 1.2 ? [self.ball(0.5, self.arcY(t), size: 0.12 - 0.06 * min(t, 1.0))] : []
+        }
+        XCTAssertEqual(outcomes(events).map(\.result), [.make])
+    }
+
+    func test_shotTowardACameraBehindTheHoop_growing_isStillCalled() {
+        // Camera behind the board: the shot comes toward the lens and
+        // grows, but from smaller than a ball at the rim's depth.
+        var tracker = ShotTracker()
+        let events = run(duration: 1.6, tracker: &tracker) { t in
+            t <= 1.2 ? [self.ball(0.5, self.arcY(t), size: 0.03 + 0.02 * min(t, 1.0))] : []
+        }
+        XCTAssertEqual(outcomes(events).map(\.result), [.make])
+    }
+
     // MARK: - Phone close behind the shooter
 
     func test_closeCamera_bigBallMovingAway_startsAShot() {
