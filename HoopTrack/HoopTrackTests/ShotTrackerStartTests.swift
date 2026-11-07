@@ -105,4 +105,49 @@ final class ShotTrackerStartTests: XCTestCase {
         XCTAssertEqual(started.first?.time ?? 0, 1.1, accuracy: 0.1)
         XCTAssertEqual(outcomes(events).map(\.result), [.make])
     }
+
+    // MARK: - Phone close behind the shooter
+
+    func test_closeCamera_bigBallMovingAway_startsAShot() {
+        // Phone ~1.5 m behind the release: the ball leaves the hands 2.4
+        // rim widths wide and shrinks as it flies away. Its image rise
+        // lasts only a few tenths of a second; dropping boxes over 1.6 rim
+        // widths left too little of it to start (camback1-real: 21%).
+        var tracker = ShotTracker()
+        let events = run(duration: 0.35, tracker: &tracker) { t in
+            [self.ball(0.30 + 0.3 * t, 0.45 + 1.2 * t, size: 0.24 - 0.4 * t)]
+        }
+        let started = starts(events)
+        XCTAssertEqual(started.count, 1)
+        XCTAssertLessThan(started.first?.time ?? 1, 0.1, "release is where the big ball leaves the hands")
+        XCTAssertGreaterThan(started.first?.box.width ?? 0, 0.16, "the release box is over the in-flight cap")
+    }
+
+    func test_closeCamera_liftOrPumpFakeAtConstantDepth_doesNotStart() {
+        // The same ball raised fast just as close to the lens (lift to the
+        // set point, a pump fake): as much image rise, but it isn't flying
+        // away, so it never gets back under the in-flight size.
+        var tracker = ShotTracker()
+        let events = run(duration: 0.6, tracker: &tracker) { t in
+            [self.ball(0.30, 0.40 + min(t, 0.3) * 1.5, size: 0.22)]
+        }
+        XCTAssertTrue(starts(events).isEmpty)
+    }
+
+    func test_release_isAfterTheSetPoint_notInTheLift() {
+        // Lift to the set point (fast in the image when the ball is close),
+        // hold, then shoot. The release is the push after the hold; a
+        // release in the lift seeds the ball filter with the wrong speed.
+        var tracker = ShotTracker()
+        let events = run(duration: 0.6, tracker: &tracker) { t in
+            let y: Double
+            if t < 0.15 { y = 0.20 + 1.67 * t }
+            else if t < 0.30 { y = 0.45 }
+            else { let s = t - 0.30; y = 0.45 + 1.4 * s - 2 * s * s }
+            return [self.ball(0.40, y, size: 0.12)]
+        }
+        let started = starts(events)
+        XCTAssertEqual(started.count, 1)
+        XCTAssertGreaterThanOrEqual(started.first?.time ?? 0, 0.29)
+    }
 }

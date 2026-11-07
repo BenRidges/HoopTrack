@@ -95,6 +95,17 @@ nonisolated struct ShotTracker: Sendable {
         /// about 0.6 with the model's wide boxes; the rim-as-ball boxes
         /// on the real clips are 0.75–1.0.
         var rimShapedMinWidth: Double = 0.7
+        /// Between shots, ball boxes up to this many rim widths are tracked.
+        /// Ball / rim box width is 0.49 × (rim distance / ball distance),
+        /// so with the phone 1–2 m behind the shooter the ball at release
+        /// is 1.5–2.5 rim widths: dropping it at `maxBallToRim` cut off the
+        /// start of its rise, and perspective flattens the rest. 3.0 keeps
+        /// a ball down to 0.16 of the rim's distance from the lens (~1.1 m
+        /// for a rim 7 m away). A shot still only starts once its ball is
+        /// back under `maxBallToRim`, i.e. flying away from the lens:
+        /// lifting the ball to the set point or a pump fake that close
+        /// rises just as far in the image but doesn't move away.
+        var maxBallToRimIdle: Double = 3.0
     }
 
     var tuning = Tuning()
@@ -212,7 +223,7 @@ nonisolated struct ShotTracker: Sendable {
     /// Between shots: the ball boxes that could be a ball about to be shot.
     private func startable(_ balls: [CGRect], hoop: CGRect) -> [CGRect] {
         balls.filter { box in
-            Double(box.width) <= tuning.maxBallToRim * Double(hoop.width) && !isRimShaped(box, hoop: hoop)
+            Double(box.width) <= tuning.maxBallToRimIdle * Double(hoop.width) && !isRimShaped(box, hoop: hoop)
         }
     }
 
@@ -319,6 +330,9 @@ nonisolated struct ShotTracker: Sendable {
         }
         let run = Array(track[runStart...])
         guard run.count >= 4 else { return nil }
+        // Still nearer the lens than a ball in flight can be: not released
+        // yet (see Tuning.maxBallToRimIdle).
+        guard Double(latest.box.width) <= tuning.maxBallToRim * rimUnitY / aspect else { return nil }
 
         let rise = (latest.y - run[0].y) / rimUnitY
         let speed = upwardSpeed(at: run.count - 1, in: run) / rimUnitY
@@ -326,10 +340,18 @@ nonisolated struct ShotTracker: Sendable {
         guard rise >= tuning.minRise, speed >= tuning.minRiseSpeed, nearRimHeight else { return nil }
 
         // Release = fastest upward moment of the run (hands push until release,
-        // gravity only slows it after).
-        var releaseIndex = 0
+        // gravity only slows it after) since the ball was last held: rising
+        // slower than a shot starts, as at the set point. Close to the lens
+        // the lift to the set point moves faster in the image than the
+        // shot, and a release (and ball filter) taken there loses the ball.
+        var firstAfterHold = 1
+        for i in 1..<run.count where upwardSpeed(at: i, in: run) < tuning.minRiseSpeed * rimUnitY {
+            firstAfterHold = i + 1
+        }
+        firstAfterHold = min(firstAfterHold, run.count - 1)
+        var releaseIndex = firstAfterHold
         var fastest = -Double.infinity
-        for i in 1..<run.count {
+        for i in firstAfterHold..<run.count {
             let v = upwardSpeed(at: i, in: run)
             if v > fastest { fastest = v; releaseIndex = i }
         }
