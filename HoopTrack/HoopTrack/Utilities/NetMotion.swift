@@ -215,6 +215,11 @@ nonisolated struct NetCheck<Context: Sendable>: Sendable {
     /// or a net out of shot never swings, and then a still net proves nothing.
     private var sureMakes: [Double] = []
     private var sureMakeSwings: [Double] = []
+    /// The rim those swings were measured under. What a net does is a
+    /// property of that net seen from there: when the hoop turns up
+    /// somewhere else in the picture (the phone was moved), it's unknown
+    /// again.
+    private var learnedHoop: CGRect?
 
     /// The rim of the call being held, so the net grid stays where the shot was.
     var heldHoop: CGRect? { held?.outcome.hoop }
@@ -232,6 +237,11 @@ nonisolated struct NetCheck<Context: Sendable>: Sendable {
                          now: Double, meter: NetMotionMeter) -> [Call] {
         var ready: [Call] = []
         if let earlier = flush(meter: meter) { ready.append(earlier) }
+        if let learned = learnedHoop, Self.isAnotherView(learned, outcome.hoop) {
+            sureMakes.removeAll()
+            sureMakeSwings.removeAll()
+        }
+        learnedHoop = outcome.hoop
         guard ShotEvidence.needsNetCheck(confidence: outcome.confidence) else {
             if outcome.result == .make, let arrival = outcome.rimArrivalTime { sureMakes.append(arrival) }
             ready.append(Call(outcome: outcome, context: context,
@@ -267,6 +277,14 @@ nonisolated struct NetCheck<Context: Sendable>: Sendable {
     mutating func drop() {
         held = nil
         sureMakes.removeAll()
+    }
+
+    /// The hoop moved by more than its own size, or changed size by a
+    /// third: the camera was moved, not the box wobbling.
+    static func isAnotherView(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(Double(a.midX - b.midX)) > Double(a.width)
+            || abs(Double(a.midY - b.midY)) > Double(a.height)
+            || abs(Double(b.width - a.width)) > Double(a.width) / 3
     }
 
     private mutating func learn(now: Double, meter: NetMotionMeter) {
