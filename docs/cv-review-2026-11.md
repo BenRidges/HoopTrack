@@ -6,10 +6,11 @@ end of the doc lists what to do next, most valuable first. It sits alongside
 `upgrade-cv-detection.md`, which is still the long-range plan; this doc is
 about where the code actually stood and stands.
 
-Nothing here has been run on a phone yet. The tracker logic is covered by
-unit tests on synthetic trajectories, and `Tools/HoopTrackCore` can now
-replay real session logs through it (see "Tuning it" below). The thresholds
-still need tuning against real sessions.
+Nothing here has been run on a phone yet. It has been measured two ways
+(see "Measured" below): a physics simulator of 55 situations, and the
+shipped pipeline, Core ML model included, run on four hand-labelled real
+clips (118 shots) on a Mac. None of those clips is filmed from the app's
+own setup, a phone straight behind the shooter.
 
 ## What was broken
 
@@ -53,6 +54,14 @@ tracking / lost, with a coach card until the hoop is found.
   a crossing ball or a second shooter's ball can't take it over, and the
   gate widens on its own across missed frames. A ball that goes out of the
   top of the frame is followed back in through that edge.
+- A shot starts from a ball rising fast toward rim height. The model
+  often boxes the rim itself as a ball, so between shots a box much wider
+  than tall that sits on the hoop is ignored. A track may only link boxes
+  a ball could fly between (13 m/s), a rise made of one jump isn't a
+  shot, and a ball that keeps growing as it comes back at the lens (a
+  pass from under the hoop) is dropped without a call. With the phone
+  close behind the shooter the ball at release is wider than the rim; it
+  is tracked anyway and the shot starts once it flies away.
 - Release is the frame of peak upward speed: close to where the ball left
   the hands, not the apex.
 - The rim is held where it was at release until the shot resolves. The
@@ -154,6 +163,58 @@ because at 2–3 m hands are too small. It runs at about 30 fps on the camera
 queue. A bounce counts when a wrist moves at least 12 % of torso length,
 which filters out jitter.
 
+## Measured (7 November 2026)
+
+Two measurements, both in `Tools/HoopTrackCore`, and both now regression
+tests in `swift test`.
+
+**Real footage.** `cv-replay` runs the shipped pipeline on a video on a Mac
+(`Tools/cv/README.md`). Four CC BY clips with every shot labelled by hand,
+before and after the fixes in this round:
+
+| Clip | View | Detected | Right | Phantom shots |
+|---|---|---|---|---|
+| Somorin dusk, cam 1 | 45° behind the shooter (closest to the app's) | 27/27 → 27/27 | 25 → 27 | 0 → 0 |
+| Somorin dusk, cam 2 | same, darker | 26/29 → 29/29 | 25 → 29 | 9 → 2 |
+| Alec park, 11 Jul | side-on, far | 18/22 → 17/22 | 18 → 17 | 12 → 6 |
+| Alec park, 1 Aug | camera low, looking up at the rim | 6/40 → 6/40 | 4 → 2 | 5 → 3 |
+
+On the first three, every shot called is now called right (73/73), and
+phantom shots fell from about 1.8 to 0.7 a minute. The alec 11 Jul shot
+lost (153.05) was a lucky match before: a phantom's close-up crop caught
+the real release against the trees. The 1 Aug clip is a detector problem:
+the hoop is found on about 1% of frames, so it says little about the
+tracker.
+
+**Simulator** (`swift run -c release -Xswiftc -enable-testing shot-sim`,
+55 scenarios × 200 shots):
+
+| | Detected | Right, of all shots | Phantoms (non-shot play) |
+|---|---|---|---|
+| Before, seed 1 / 2 | 81.0% / 80.0% | 66.8% / 66.4% | 3.5 / 3.9 a minute |
+| After, seed 1 / 2 | 88.3% / 88.2% | 74.7% / 74.5% | 2.6 / 2.7 a minute |
+| Seed 11 (no change was tuned on it) | 80.1% → 88.0% | 65.2% → 73.5% | 4.2 → 3.1 a minute |
+
+No scenario got worse by more than 3 points, the mean time from the ball
+reaching the rim to the call is unchanged (~0.3 s), and many more of the
+wrong calls are now flagged "Check" (on back-iron misses 5% → 96%).
+
+What each part of the round added, applied in order (simulator seeds 1 and
+2; real clips on the old logs):
+
+- Shot start (rim-shaped boxes, link speed, one-jump rule, cooldown from
+  the last sighting, passes back toward the lens, close camera): most of
+  it. Right calls +5.5 / +6.3 points, phantoms down a third; on the real
+  clips phantoms 26 → 9.
+- Ball filter with gravity and perspective, shape and re-entry rules:
+  +0.3 / +0.1 points on the simulator; on the real clips +1 right on each
+  dusk clip, −1 on alec 1 Aug (559.50, below).
+- Make/miss depth doubts, per-view net learning, the second-ball flag:
+  +1.6 / +1.1 points; cam 1 to 27/27.
+- Telemetry and tooling (every hoop logged, End right after a shot keeps
+  it, the pipeline stopped off the frame race): what the replay scores
+  now equals what the app records, in every simulator scenario.
+
 ## Known limits
 
 - **Small ball at release.** Close-up detection only applies during flight.
@@ -172,11 +233,23 @@ which filters out jitter.
   closer to the rim than that, seen from behind the shooter, is still a
   sure make; on a net that swings only the bounced ones get caught later.
   Side-on there is no size trend, so only the "too big" cue applies.
+  In the simulator this is still the biggest source of wrong calls
+  (frontrim and airshort scenarios). None of the real clips is from that
+  position, so it needs footage before it's tightened.
 - **Release height** is assumed. A tall shooter or a jumper shifts the arc by
   a few degrees.
-- **Tuning.** `ShotTracker.Tuning` values are first-principles guesses that
-  pass synthetic tests. So are the net check's thresholds (`ShotEvidence`).
-  None of them come from real footage yet.
+- **Tuning.** `ShotTracker.Tuning` values are physical where they can be
+  (ball and rim sizes, gravity, ball speeds) and say where each comes from.
+  Some were settled on the simulator and the four clips (the filter's
+  noise levels, the bounce kick, `gateSigma`). Four clips is a small set,
+  and none is from the app's own viewpoint.
+- **Mac, not phone.** `cv-replay` runs every frame; a phone that falls
+  behind drops frames, which the replay doesn't model. The tracker only
+  sees what a Mac's detector saw.
+- **Stale hoop boxes.** When the hoop box is old and covers only part of
+  the rim, the ball filter can take a fixed false ball nearby for the shot
+  ball kicked out sideways (alec 1 Aug 559.50). A fix for it broke
+  another clip, so it waits for more footage.
 - **Net check.** It needs the net in the grid below the detected rim. A
   shooter standing in front of the net adds noise to both windows. That's
   why it only settles calls the tracker wasn't sure of, and why its own
@@ -189,7 +262,7 @@ from symlinks into the app target and needs no simulator.
 
 ```
 cd Tools/HoopTrackCore
-swift test                                        # 164 logic tests
+swift test                                        # 260 tests
 swift run shot-eval detections.jsonl labels.csv   # replay + score a session
 ```
 
@@ -229,25 +302,34 @@ over ssh. See `Tools/cv/README.md`.
 
 ## Next, in order of payoff
 
-1. **Label 20–30 real sessions** and tune `ShotTracker.Tuning` with
+1. **Record from the app's own setup.** Five to ten minutes of shooting
+   with the phone straight behind the shooter, at chest height, about 3 m
+   back, with makes, rim-outs and short misses. That's the one view none
+   of the four clips has, and where the simulator still calls short misses
+   makes. Label it, run `cv-replay`, add it to the fixtures.
+2. **Label 20–30 real sessions** and tune `ShotTracker.Tuning` with
    `shot-eval` until the numbers stop improving. Commit the labelled logs as
    fixtures so regressions show up in `swift test`.
-2. **Check close-up detection on device**, then try a tighter
+3. **Check close-up detection on device**, then try a tighter
    `minSidePx` and margin.
-3. **Retrain from this viewpoint** with the new loop in
+4. **Retrain from this viewpoint** with the new loop in
    `docs/training-review-2026-11.md`. That means footage of a phone behind
    the shooter at chest height, in gyms and outdoors, at dusk. Shared
    sessions, ranked by where the app went wrong, are the best labels it
-   produces. Settle the model licence first.
-4. **Better position from the shooter.** The model already detects `person`.
+   produces. The real clips show what the model gets wrong most: the rim
+   boxed as a ball (it needs rims as hard negatives for "ball"), hoops seen
+   from below, and small balls against trees. The tracker works around the
+   first; only training fixes the other two. Settle the model licence
+   first.
+5. **Better position from the shooter.** The model already detects `person`.
    - At release, take the person box nearest the ball. The bottom of the box
      is where the feet touch the floor.
    - Add a one-time calibration (tap the free-throw line or the rim on
      screen) to get camera height and tilt. Ground-plane geometry then gives
      position to well under a metre, much tighter than ball size.
-5. **Smooth sizes before depth.** Feed the ball filter's box sizes, rather
+6. **Smooth sizes before depth.** Feed the ball filter's box sizes, rather
    than the median of five raw boxes, into `CourtPositionEstimator`.
-6. **Sound** (Phase E of `upgrade-cv-detection.md`). A tiny on-device
+7. **Sound** (Phase E of `upgrade-cv-detection.md`). A tiny on-device
    classifier for rim, backboard and net audio is a third opinion that
    works even when the net is out of shot. It needs labelled audio first, so
    the first step is an opt-in "record sound" for session videos. That adds
