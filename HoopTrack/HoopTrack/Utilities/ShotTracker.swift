@@ -339,7 +339,7 @@ nonisolated struct ShotTracker: Sendable {
                 }
                 guard let best = scored.min(by: { $0.surprise < $1.surprise }),
                       best.distance <= cap,
-                      best.surprise <= tuning.gateSigma || best.distance <= 0.75 * rimUnitY else { return nil }
+                      best.surprise <= tuning.gateSigma else { return nil }
                 return (best.box, best.surprise)
             }
             let flight = best(filter, bounceSD: bounceSD)
