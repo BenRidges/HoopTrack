@@ -59,6 +59,15 @@ tracking / lost, with a coach card until the hoop is found.
 - A make has to drop through the rim line inside the rim's width. It then
   has to leave below the net, or disappear into it and stay gone for
   0.45 s. A ball that comes back up is a bounce, not a make.
+- From one camera that column is a ray: a short miss dropping in front of
+  the rim (or, facing the shooter, beyond it) looks the same in 2D. So a
+  make is only sure if the ball's size puts it at the rim's depth: no more
+  than 10% bigger than a ball in the ring (0.239 m in 0.49 m), and not
+  coming back toward the camera (facing the shooter: going back out) just
+  before it drops, which is what a bounce off the rim or board does. A
+  doubted make waits for the net check (`ShotTracker.Doubts`).
+- Another ball right next to the shot ball at the rim (two people at one
+  hoop) can be followed instead of it, so that call is flagged.
 - Pausing drops a shot in the air instead of calling it on resume.
 - Timeouts and lost-ball guesses get low confidence. Shots under 0.6 are
   flagged "Check" in the summary, which has a one-tap "They're all right".
@@ -74,10 +83,19 @@ tracking / lost, with a coach card until the hoop is found.
   show at once. The rest wait up to 0.7 s and are then settled:
   - a settled make with a swinging net is confirmed;
   - one with a still net is flagged;
+  - a make the ball's size doubted, with a still net that is known to swing
+    on clean makes, becomes a flagged miss;
   - a ball lost at the rim with a swinging net becomes a flagged make;
-  - a grazing miss with a big swing is flagged.
-- It learns from clean makes whether this net moves at all. On a bare rim
-  or a chain net it stands aside rather than flag every make.
+  - a grazing miss with a big swing is flagged;
+  - with a second ball at the rim the net can't say which went in, so the
+    flag stays.
+- It learns from clean makes whether this net moves at all, per view (a
+  phone moved to another spot starts over). On a bare rim or a chain net
+  it stands aside rather than flag every make.
+- On the labelled clips (`hoop-footage`, 2026-11) the Somorin nets
+  separate cleanly, measured from the tracker's arrival: makes 2.0–6.8,
+  misses 0.45–1.3, rim hits included. The thin alec-park nets don't (makes
+  around 0.9), and there the check stands aside.
 - `shot-eval` runs the same check (`--no-net` to compare without it).
 
 **Where from** (`Utilities/ShotGeometry.swift`):
@@ -146,6 +164,11 @@ which filters out jitter.
   frame to frame. Zones near the three-point line will sometimes be wrong.
 - **Rim line.** The rim line sits at a fixed fraction of the hoop box. A camera
   well below rim height sees the rim as a thin ellipse and the line drifts.
+- **In front of the rim.** Size only separates a ball clearly nearer the
+  camera than the rim: about 0.7 m short from 7 m away. A short air ball
+  closer to the rim than that, seen from behind the shooter, is still a
+  sure make; on a net that swings only the bounced ones get caught later.
+  Side-on there is no size trend, so only the "too big" cue applies.
 - **Release height** is assumed. A tall shooter or a jumper shifts the arc by
   a few degrees.
 - **Tuning.** `ShotTracker.Tuning` values are first-principles guesses that
