@@ -106,6 +106,33 @@ final class ShotTrackerStartTests: XCTestCase {
         XCTAssertEqual(outcomes(events).map(\.result), [.make])
     }
 
+    // MARK: - Association: one ball, physically possible steps
+
+    func test_twoStaticFalsePositives_doNotChainIntoARise() {
+        // F7: something ball-like sits low for 3 frames, is missed on the
+        // 4th as another box shows up 2.9 rim widths higher near the rim.
+        // Linked, that was a rise of 2.9 rim widths in 1/60 s.
+        var tracker = ShotTracker()
+        let rimLine = 0.80 - 0.15 * 0.10, rimUnit = 0.10 * aspect
+        let events = run(duration: 1.5, tracker: &tracker) { t in
+            if t < 0.05 { return [self.ball(0.30, rimLine - 3 * rimUnit)] }
+            return [self.ball(0.35, rimLine - 0.2 * rimUnit)]
+        }
+        XCTAssertTrue(starts(events).isEmpty)
+    }
+
+    func test_shotAt30fps_missedAtRelease_stillStarts() {
+        // The shooter's arms hide the ball for 0.2 s at release: one long
+        // step, then the ball keeps rising on its own.
+        var tracker = ShotTracker()
+        let events = run(duration: 1.6, fps: 30, tracker: &tracker) { t in
+            if t > 0.05 && t < 0.2 { return [] }
+            return t <= 1.2 ? [self.ball(0.5, self.arcY(t))] : []
+        }
+        XCTAssertEqual(starts(events).count, 1)
+        XCTAssertEqual(outcomes(events).map(\.result), [.make])
+    }
+
     // MARK: - Phone close behind the shooter
 
     func test_closeCamera_bigBallMovingAway_startsAShot() {

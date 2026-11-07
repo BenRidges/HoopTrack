@@ -106,6 +106,13 @@ nonisolated struct ShotTracker: Sendable {
         /// lifting the ball to the set point or a pump fake that close
         /// rises just as far in the image but doesn't move away.
         var maxBallToRimIdle: Double = 3.0
+        /// Fastest a basketball moves on court, m/s: a long three leaves the
+        /// hand at ~9 m/s, a hard pass at 10–12. Between shots a track may
+        /// only link boxes this speed apart (see `canLink`).
+        var maxBallSpeed: Double = 13
+        /// Slack per link, ball diameters: box centres jitter by a few % of
+        /// the box, and blur moves the centre by up to half the streak.
+        var linkSlack: Double = 0.5
     }
 
     var tuning = Tuning()
@@ -252,7 +259,7 @@ nonisolated struct ShotTracker: Sendable {
             let limit = tuning.gate * rimUnitY * max(1, (time - last.time) * 30)
             for (b, ball) in balls.enumerated() {
                 let d = distance(from: last, to: ball)
-                if d <= limit { pairs.append((t, b, d)) }
+                if d <= limit, canLink(last, to: ball, dt: time - last.time) { pairs.append((t, b, d)) }
             }
         }
         pairs.sort { $0.distance < $1.distance }
@@ -273,6 +280,30 @@ nonisolated struct ShotTracker: Sendable {
         if candidates.count > 6 {
             candidates = Array(candidates.sorted { $0.count > $1.count }.prefix(6))
         }
+    }
+
+    /// Between shots: could `box` be the ball last seen as `sample`, `dt`
+    /// seconds later? Measured in the ball's own diameters, a sideways
+    /// step doesn't depend on how far the ball is from the lens, so a
+    /// speed limit in m/s is a limit in diameters per second. The rim
+    /// gate alone allowed 4 rim widths a frame (~55 m/s at 30 fps) and
+    /// grew without limit across gaps, so a ball low in the frame could
+    /// link to a false positive near the rim as one fast "rise".
+    /// (Box size isn't compared: the ball clipped by the frame edge
+    /// changes size more than a different object does.)
+    private func canLink(_ sample: Sample, to box: CGRect, dt: Double) -> Bool {
+        let near = max(diameter(of: sample.box), diameter(of: box))
+        guard near > 0, dt >= 0 else { return false }
+        // Moving along the line of sight off-centre also shifts the image
+        // (up to ~tan 34° of the depth change at the frame edge): ×1.25.
+        let diametersPerSecond = 1.25 * tuning.maxBallSpeed / CourtPositionEstimator.ballDiameterM
+        return distance(from: sample, to: box) <= near * (diametersPerSecond * dt + tuning.linkSlack)
+    }
+
+    /// Apparent ball diameter, height units: the shorter side, since blur
+    /// stretches the box along the ball's path.
+    private func diameter(of box: CGRect) -> Double {
+        min(Double(box.width) * aspect, Double(box.height))
     }
 
     /// During a shot: the candidate the ball filter finds least surprising.
