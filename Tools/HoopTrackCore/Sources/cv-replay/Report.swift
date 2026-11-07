@@ -367,7 +367,9 @@ struct Report {
                      + (differing == 0 ? "identical" : "\(differing) frames differ, first at \(f(firstDiff ?? 0, 3)) s")
                      + (unmapped > 0 ? " (\(unmapped) log lines not matched to a fed frame)" : ""))
         lines.append("Frames where the detector returned 2+ hoops: \(multiHoop) "
-                     + "(the log keeps only the most confident, so replay can pick a different hoop there)")
+                     + (entries.contains { $0.baskets != nil }
+                        ? "(all are logged, so the replay chooses among them as the app did)"
+                        : "(this log keeps only the most confident, so the replay can pick a different hoop there)"))
         let checked = entries.filter { $0.checkedEvent != nil }.count
         lines.append("Log lines with a published call (cv): \(checked) (one per frame; a frame publishing two calls logs the last)")
         lines.append("")

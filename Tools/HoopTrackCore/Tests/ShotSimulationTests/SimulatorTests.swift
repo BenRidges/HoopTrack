@@ -56,6 +56,14 @@ final class SimulatorTests: XCTestCase {
         XCTAssertEqual(run.liveCalls, ShotReplay.run(run.entries))
     }
 
+    func test_liveApp_andReplay_agree_withASecondBasketInView() {
+        // Every basket is logged, so the replay's smoother chooses among the
+        // same candidates the app's did (it used to see only the top one).
+        let run = Simulator.run(scenario("mixed-harsh"), shots: 10, seed: 1)
+        XCTAssertTrue(run.entries.contains { ($0.baskets?.count ?? 0) >= 2 })
+        XCTAssertEqual(run.liveCalls, ShotReplay.run(run.entries))
+    }
+
     func test_logLooksLikeThePhones() {
         let run = Simulator.run(scenario("mixed-real"), shots: 3, seed: 1)
         let times = run.entries.map(\.timestampSec)

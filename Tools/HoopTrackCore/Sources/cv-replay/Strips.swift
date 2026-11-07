@@ -10,8 +10,8 @@
 //
 //   yellow   every ball candidate (with confidence in the close-up)
 //   orange   the tracker's shot ball
-//   cyan     the detector's most confident hoop (what the log keeps)
-//   blue     any other hoops the detector returned
+//   cyan     the detector's most confident hoop (the log's `rb`)
+//   blue     any other hoops the detector returned (the rest of `rs`)
 //   green    the smoothed hoop the tracker was given
 //   white    the rim the shot is judged against (held from release), dashed
 //   magenta  the detection crop (DetectionRegion), dashed
@@ -144,7 +144,9 @@ struct StripWriter {
             overlay.hoop = report.trace.frames[index].hoop
             overlay.shotBall = report.trace.frames[index].shotBall
         }
-        if let stat = live.probe.first(where: { abs($0.pts - pts) < 1e-6 }) {
+        if entry.baskets != nil {
+            overlay.otherBaskets = Array(ShotReplay.hoops(in: entry).dropFirst())
+        } else if let stat = live.probe.first(where: { abs($0.pts - pts) < 1e-6 }) {
             overlay.otherBaskets = stat.baskets.dropFirst().map(\.box)
         }
         overlay.shotRim = shotRim
@@ -199,7 +201,7 @@ enum StripRenderer {
         let overlay: Overlay
     }
 
-    static let legend = "yellow ball candidates · orange shot ball · cyan detector hoop (logged) · blue other hoops · "
+    static let legend = "yellow ball candidates · orange shot ball · cyan detector's top hoop · blue other hoops · "
         + "green smoothed hoop · white dashed shot rim · magenta dashed detection crop"
 
     static let frameW: CGFloat = 1280, frameH: CGFloat = 720

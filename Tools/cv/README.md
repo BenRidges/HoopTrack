@@ -108,7 +108,7 @@ Differences that remain:
   it, and frames the pipeline skipped).
 - **A probe around the detector.** `CVPipeline` gets a `DetectorProbe` that
   calls `CoreMLBallDetector` and returns its result untouched; it only times
-  inference and keeps every hoop candidate (the log keeps one).
+  inference and keeps every hoop candidate.
 - `DetectionLogger` and `SessionRecorder` write under `~/Documents`; the
   harness points `CFFIXED_USER_HOME` at a scratch folder in the output
   directory first and moves the files out, so the Mac's Documents stay clean.
@@ -131,7 +131,7 @@ Differences that remain:
 
 Strip colours: yellow ball candidates (confidence in the close-up), orange
 the tracker's shot ball (its last accepted box, so it trails the ball when a
-frame has no detection), cyan the detector's top hoop (what the log keeps),
+frame has no detection), cyan the detector's top hoop (the log's `rb`),
 blue other hoops, green the smoothed hoop, white dashed the rim the shot is
 judged against (held from release), magenta dashed the detection crop.
 Boxes are drawn from the Vision-normalised log values (origin bottom-left),
@@ -160,10 +160,12 @@ Known ways the two can differ:
   If the session ends inside that wait, `CVPipeline.stop()` drops it
   (`NetCheck.drop`), but `ShotReplay.run` flushes it, so `shot-eval` counts a
   shot the app never logged. Seen on a clip cut 0.3 s after a miss.
-- **Two hoops in view.** The detector returns up to three hoops and
-  `CourtCalibrationService` picks the one overlapping the hoop it tracks; the
-  log keeps only the most confident, so the replay's smoother can pick
-  another. The summary counts frames with 2+ hoops.
+- **Two hoops in view, in older logs.** The detector returns up to three
+  hoops and `CourtCalibrationService` picks the one overlapping the hoop it
+  tracks (or the biggest). Logs now keep all of them (`rs`) and the replay
+  chooses among them the same way; logs from before kept only the most
+  confident (`rb`), so a replay of one can lock onto another hoop. The
+  summary counts frames with 2+ hoops.
 - The log's `cv` field holds one published call per frame (the last); a
   frame that publishes two logs one. `shot-eval` recomputes calls and doesn't
   read it.

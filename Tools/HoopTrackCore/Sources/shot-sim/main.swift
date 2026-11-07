@@ -43,7 +43,7 @@ usage: shot-sim [--scenario NAMES] [--shots N] [--seed S] [--dump DIR] [--trace]
   --kinds      per shot kind breakdown under each row
   --net-stats  net swing (NetMotionMeter) after true makes and misses, to check the net model
   --live       score the calls the app's own pipeline published while the log was written,
-               instead of replaying the log (they differ when a second basket is in view)
+               instead of replaying the log (the two should agree; the last line says if not)
 """
 
 if flag("--help") || flag("-h") {
@@ -137,7 +137,7 @@ if phantomMinutes > 0 {
 }
 if useNet && !live {
     // The app's own pipeline ran live while the log was written; the
-    // replay should publish the same calls (it only sees the top basket).
+    // replay should publish the same calls from the log alone.
     print(liveDiffers.isEmpty ? "live app calls = replayed calls in every scenario"
           : "live app calls differ from the replay in: " + liveDiffers.joined(separator: ", "))
 }

@@ -9,8 +9,7 @@
 //                        exactly as LiveSessionViewModel would receive it.
 //   DetectorProbe      — passes every call straight to CoreMLBallDetector
 //                        and returns its result untouched; it only notes the
-//                        inference time and the hoop candidates (the log
-//                        keeps only the most confident one).
+//                        inference time and the hoop candidates.
 
 import CoreGraphics
 import CoreMedia

@@ -114,7 +114,8 @@ the phone itself.
 
 **Logging**: with "Help improve shot tracking" on, these go to
 `detections.jsonl` for every frame:
-- the ball candidates and the raw rim box;
+- the ball candidates and every hoop candidate (the hoop smoother chooses
+  among them, and so does the replay);
 - the detection crop;
 - net movement;
 - the tracker's call, and the call as published after the net check.

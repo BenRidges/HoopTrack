@@ -292,8 +292,9 @@ nonisolated final class CVPipeline: @unchecked Sendable {
     // MARK: - Telemetry (CV-A)
 
     /// Everything needed to replay the frame offline (Tools/HoopTrackCore
-    /// shot-eval): all ball candidates, the raw rim, the crop, net movement,
-    /// the tracker's call and the call published after the net check.
+    /// shot-eval): all ball candidates, every hoop candidate (the smoother
+    /// chose from all of them), the crop, net movement, the tracker's call
+    /// and the call published after the net check.
     private func logTelemetry(_ scene: SceneDetection, region: CGRect?,
                               event: ShotTracker.Event?, netActivity: Double?,
                               published: NetCheck<CourtPositionEstimator.Estimate?>.Call?,
@@ -314,6 +315,7 @@ nonisolated final class CVPipeline: @unchecked Sendable {
             state:          tracker.isTrackingShot ? "tracking" : "idle"
         )
         entry.balls = scene.balls.map { box($0.boundingBox) + [Double($0.confidence)] }
+        entry.baskets = scene.baskets.map { box($0.boundingBox) + [Double($0.confidence)] }
         entry.region = region.map(box)
         switch event {
         case .started:

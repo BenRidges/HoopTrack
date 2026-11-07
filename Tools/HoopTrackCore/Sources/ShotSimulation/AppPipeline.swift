@@ -87,6 +87,7 @@ struct AppPipeline {
                                       rimBox: basket.map(\.box.array),
                                       state: tracker.isTrackingShot ? "tracking" : "idle")
         entry.balls = scene.balls.map { $0.box.array + [$0.confidence] }
+        entry.baskets = scene.baskets.map { $0.box.array + [$0.confidence] }
         entry.region = region.map { Box($0).array }
         switch event {
         case .started:

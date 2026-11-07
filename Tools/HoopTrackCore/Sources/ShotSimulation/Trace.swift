@@ -53,7 +53,7 @@ struct TraceReplay: Sendable {
 
         for entry in entries.sorted(by: { $0.timestampSec < $1.timestampSec }) {
             let t = entry.timestampSec
-            if let rim = smoother.choose(from: entry.rimBox.flatMap(rect).map { [$0] } ?? []) {
+            if let rim = smoother.choose(from: ShotReplay.hoops(in: entry)) {
                 smoother.update(basketRect: rim, timestamp: t)
             } else {
                 smoother.updateNoDetection(timestamp: t)
@@ -64,8 +64,7 @@ struct TraceReplay: Sendable {
             } else {
                 meter.reset()
             }
-            let balls = entry.balls?.compactMap { rect(Array($0.prefix(4))) }
-                ?? entry.ballBox.flatMap(rect).map { [$0] } ?? []
+            let balls = ShotReplay.balls(in: entry)
             let locked = tracker.lockedHoop
             let event = tracker.update(balls: balls, hoop: hoop, time: t)
             out.frames.append(TraceFrame(time: t, hoop: hoop, tracking: tracker.isTrackingShot,
@@ -85,11 +84,6 @@ struct TraceReplay: Sendable {
         let r = check.netResponds
         if let call = check.flush(meter: meter) { add(call, at: entries.last?.timestampSec ?? 0, responds: r) }
         return out
-    }
-
-    private static func rect(_ values: [Double]) -> CGRect? {
-        guard values.count >= 4, values[2] > 0, values[3] > 0 else { return nil }
-        return CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
     }
 }
 
@@ -131,9 +125,10 @@ enum TraceReport {
             + "the net swing was below \(f(ShotEvidence.strongSwing, 1))" + (noFootage > 0 ? " (\(noFootage) without net footage)" : "")
     }
 
-    /// Sessions where the replayed hoop (from the logged top basket only)
-    /// sat on something other than the real hoop for over a third of the
-    /// session.
+    /// Sessions where the replayed hoop sat on something other than the
+    /// real hoop for over a third of the session (a far basket the smoother
+    /// locked onto: logs from before every basket was logged replayed from
+    /// the top one only, and the live smoother can lock on too).
     static func wrongHoop(_ run: SimulationRun, replay: TraceReplay) -> [String] {
         var out: [String] = []
         for (n, session) in run.sessions.enumerated() {

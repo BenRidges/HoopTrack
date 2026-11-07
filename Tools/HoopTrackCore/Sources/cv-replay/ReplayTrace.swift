@@ -60,7 +60,7 @@ enum ReplayTrace {
         let sorted = entries.sorted(by: { $0.timestampSec < $1.timestampSec })
         for (index, entry) in sorted.enumerated() {
             let t = entry.timestampSec
-            if let rim = smoother.choose(from: entry.rimBox.flatMap(rect).map { [$0] } ?? []) {
+            if let rim = smoother.choose(from: ShotReplay.hoops(in: entry)) {
                 smoother.update(basketRect: rim, timestamp: t)
             } else {
                 smoother.updateNoDetection(timestamp: t)
@@ -73,9 +73,7 @@ enum ReplayTrace {
                 meter.reset()
             }
 
-            let balls = entry.balls?.compactMap { rect(Array($0.prefix(4))) }
-                ?? entry.ballBox.flatMap(rect).map { [$0] } ?? []
-            let event = tracker.update(balls: balls, hoop: hoop, time: t)
+            let event = tracker.update(balls: ShotReplay.balls(in: entry), hoop: hoop, time: t)
             switch event {
             case .started:
                 if let call = check.flush(meter: meter) { add(call, at: index, t: t) }
@@ -94,10 +92,5 @@ enum ReplayTrace {
         }
         if let call = check.flush(meter: meter) { add(call, at: nil, t: nil) }
         return (calls, frames)
-    }
-
-    private static func rect(_ values: [Double]) -> CGRect? {
-        guard values.count >= 4, values[2] > 0, values[3] > 0 else { return nil }
-        return CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
     }
 }
