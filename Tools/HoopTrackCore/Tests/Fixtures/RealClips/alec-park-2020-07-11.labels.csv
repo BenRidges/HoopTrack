@@ -1,0 +1,33 @@
+# seconds from start of trimmed clip when the ball reaches the rim, make|miss
+# source offset: clip t = source t - 7.00
+22.10,make
+33.45,make
+52.45,miss
+63.27,make
+76.30,make
+88.30,make
+95.10,make
+107.60,make
+114.90,make
+123.22,miss
+130.45,make
+139.68,make
+153.05,make
+157.50,make
+183.15,miss
+197.15,miss
+208.55,miss
+226.35,make
+236.40,make
+278.80,miss
+291.90,make
+321.85,miss
+# --- notes (comment lines are ignored by ShotEvaluation.parseLabels) ---
+# Left out (could not call with certainty): 145.80 (ball tossed up from close range left of the rim, drifts outside it; may not be a shot),
+#   263.45 (hits left rim, pops very high, comes down at the rim's right end and falls like the clean makes; probably a make, not confirmed),
+#   302.50 (long heave that lands about three rim widths left of the hoop; air ball if it was a shot).
+# Lower-confidence calls kept: 22.10, 33.45 and 114.90 makes (roll on the rim, then drop through), 95.10 make (first contact 95.1, bounces
+#   very high, drops in ~96.3), 153.05, 236.40 and 291.90 makes (drop through the near-left side of the ring; net strings visible over the ball at 1080p).
+# The net is a thin white string net, barely visible at 720p. Makes often leave the net toward the bottom-left (towards the camera side).
+# Not shots: at ~9.6 the player stands close to the camera with the ball overhead, so in the image it looks near the hoop. 0-3 s is an empty court;
+#   the player walks in past the camera at ~3-5 s.

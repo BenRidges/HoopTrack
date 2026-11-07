@@ -180,6 +180,12 @@ The report shows how many shots were detected, how many calls were right,
 which way the wrong calls went, phantom shots and missed shots. Change
 `ShotTracker.Tuning`, re-run, compare.
 
+Four labelled real clips (118 shots, CC BY footage) are already in
+`Tools/HoopTrackCore/Tests/Fixtures/RealClips` as the logs the shipped
+pipeline wrote for them (gzipped; the videos stay out of git), and
+`RealClipFixtureTests` holds each to a floor in `swift test`. Raise the
+floors when a change does better.
+
 Until there are labelled sessions, `swift run shot-sim` benchmarks the same
 code path on simulated footage. It covers shot physics with rim, board and
 net, a phone behind the shooter or behind the hoop, a detector noise model

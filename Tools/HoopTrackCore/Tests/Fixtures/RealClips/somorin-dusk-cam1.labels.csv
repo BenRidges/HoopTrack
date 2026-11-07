@@ -1,0 +1,35 @@
+# seconds from start of trimmed clip when the ball reaches the rim, make|miss
+# source offset: clip t = source t - 0.00
+1.95,make
+7.90,make
+14.20,miss
+18.70,make
+24.70,make
+30.87,miss
+36.80,make
+41.70,make
+46.70,miss
+51.70,miss
+57.30,make
+62.40,make
+67.95,miss
+73.50,miss
+78.80,make
+85.40,make
+91.73,miss
+102.80,make
+108.93,miss
+116.95,make
+123.45,miss
+136.30,miss
+142.85,make
+149.47,make
+154.90,make
+159.85,make
+164.67,make
+# --- notes (comment lines are ignored by ShotEvaluation.parseLabels) ---
+# All calls are high confidence: makes visibly pass through the net and swing it.
+# 1.95 make: the source video starts with this shot already released (~0.9 s), so a tracker that still needs to lock onto the hoop will probably miss it.
+# 30.87, 123.45, 136.30 misses come off the backboard/left rim and never drop through the rim line. 67.95 miss: rattles, then falls off the left side outside the net.
+# A rebounder in black stands under the hoop and passes the ball back after every shot (bounce and chest passes cross the court). The shooter is at the
+#   left edge close to the camera, partly cut off. The ball usually leaves the top of the frame near its apex. There are two dark smudges on the lens in the upper-left sky.

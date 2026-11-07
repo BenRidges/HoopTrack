@@ -1,0 +1,52 @@
+# seconds from start of trimmed clip when the ball reaches the rim, make|miss
+# source offset: clip t = source t - 0.00
+8.62,make
+26.50,miss
+41.60,make
+49.30,make
+54.85,make
+59.70,make
+69.38,miss
+80.86,make
+93.80,miss
+98.52,miss
+109.10,make
+126.85,miss
+150.95,make
+159.95,make
+166.30,miss
+177.00,make
+188.57,make
+197.35,make
+203.40,make
+210.12,miss
+249.90,make
+261.30,miss
+265.65,make
+276.55,miss
+290.10,miss
+303.75,make
+316.15,miss
+328.75,miss
+347.80,miss
+364.40,miss
+377.20,make
+406.95,miss
+412.25,miss
+417.12,make
+450.45,miss
+464.05,miss
+524.10,make
+533.85,make
+548.08,make
+559.50,make
+# --- notes (comment lines are ignored by ShotEvaluation.parseLabels) ---
+# Left out (could not call with certainty): 437.6 (ball sits on the rim and rolls off the back-right by the bracket),
+#   485.3 (lands on the rim's right end and shoots off to the right, probably a miss).
+# Lower-confidence calls kept: 8.62 make (rolls ~0.4 s behind the front rim, comes out below it), 54.85 make (bounces up, drops in ~55.55),
+#   59.70 make, 177.00 make (rattles until ~177.85), 249.90 make (close shot off the glass), 276.55 miss (comes down just in front of the rim's left tip),
+#   377.20 make (hops on the rim, drops in ~378.0), 533.85 make (rolls right-to-left round the rim).
+# Not shots but could fool a tracker: someone in a red/orange cap stands just below the frame and their cap pokes into the bottom edge
+#   (orange blob, e.g. ~80-110, 188-210, 347-365, 437, 464 s) and passes in front of the hoop at ~397.9 and ~430.5;
+#   ball in the air across the top of the frame ~76-77.6 (not a shot at the rim); a player carries the ball past the camera ~540.9 and ~553.9.
+# Ball usually leaves the top of the frame near its apex (hoop is near the top edge).
