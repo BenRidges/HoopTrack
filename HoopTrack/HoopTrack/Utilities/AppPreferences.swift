@@ -22,6 +22,8 @@ nonisolated enum AppPreferences {
 
         // Session options (Profile → Session options). All on by default;
         // each one is a single switch so it can be turned off on its own.
+        /// LiveLayout raw value: where the live screen puts the score.
+        static let liveLayout             = "liveLayout"
         /// ShotCallMode raw value: say each call, play a sound, or neither.
         static let shotCalls              = "shotCalls"
         /// Live tips on where the phone is ("Too close", "Good spot").
@@ -56,6 +58,7 @@ nonisolated enum AppPreferences {
         let defaults = UserDefaults.standard
         func on(_ key: String) -> Bool { defaults.object(forKey: key) as? Bool ?? true }
         return SessionOptions(
+            layout: defaults.string(forKey: Key.liveLayout).flatMap { LiveLayout(rawValue: $0) } ?? .quiet,
             shotCalls: defaults.string(forKey: Key.shotCalls).flatMap { ShotCallMode(rawValue: $0) } ?? .voice,
             setupCoach: on(Key.setupCoach),
             drillGuidance: on(Key.drillGuidance),
@@ -72,13 +75,31 @@ nonisolated enum AppPreferences {
         Key.hasCompletedOnboarding, Key.appLockEnabled, Key.healthKitEnabled,
         Key.shareTrainingData, Key.showDetectionBoxes,
         Key.trainingReminderEnabled, Key.trainingReminderHour,
-        Key.shotCalls, Key.setupCoach, Key.drillGuidance, Key.timedDrillsWaitForShot,
+        Key.liveLayout, Key.shotCalls, Key.setupCoach, Key.drillGuidance, Key.timedDrillsWaitForShot,
         Key.autoPause, Key.dimDuringSessions, Key.showTarget, Key.reviewOnVideo, Key.goAgain,
         "preferredCameraPosition", "selectedDrillType", "onboardingPlayerName",
     ]
 
     static func removeAll() {
         allKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+    }
+}
+
+/// Where the live shooting screen puts the score.
+nonisolated enum LiveLayout: String, CaseIterable, Identifiable, Sendable {
+    /// Bottom-left, with the clock bottom-right and every button hidden
+    /// until the picture is tapped.
+    case quiet
+    /// Bottom-centre, with Pause and End always in the bottom corners.
+    case centre
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .quiet:  return "Quiet"
+        case .centre: return "Centre"
+        }
     }
 }
 
@@ -104,6 +125,7 @@ nonisolated enum ShotCallMode: String, CaseIterable, Identifiable, Sendable {
 /// The session options in force for one shooting session. Read once at the
 /// start (`AppPreferences.sessionOptions`); tests pass their own.
 nonisolated struct SessionOptions: Equatable, Sendable {
+    var layout: LiveLayout = .quiet
     var shotCalls: ShotCallMode = .voice
     var setupCoach = true
     var drillGuidance = true
@@ -113,7 +135,7 @@ nonisolated struct SessionOptions: Equatable, Sendable {
     var showTarget = true
 
     /// Everything off: what sessions did before these options existed.
-    static let none = SessionOptions(shotCalls: .off, setupCoach: false, drillGuidance: false,
+    static let none = SessionOptions(layout: .quiet, shotCalls: .off, setupCoach: false, drillGuidance: false,
                                      timedDrillsWaitForShot: false, autoPause: false,
                                      dimScreen: false, showTarget: false)
 }

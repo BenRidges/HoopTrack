@@ -5,6 +5,7 @@
 import SwiftUI
 
 struct SessionOptionsView: View {
+    @AppStorage(AppPreferences.Key.liveLayout) private var liveLayout = LiveLayout.quiet.rawValue
     @AppStorage(AppPreferences.Key.shotCalls) private var shotCalls = ShotCallMode.voice.rawValue
     @AppStorage(AppPreferences.Key.setupCoach) private var setupCoach = true
     @AppStorage(AppPreferences.Key.drillGuidance) private var drillGuidance = true
@@ -20,6 +21,16 @@ struct SessionOptionsView: View {
     var body: some View {
         List {
             Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Live screen")
+                    Picker("Live screen", selection: $liveLayout) {
+                        ForEach(LiveLayout.allCases) { Text($0.displayName).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    caption(layoutCaption)
+                }
+                .padding(.vertical, 4)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Call each shot")
                     Picker("Call each shot", selection: $shotCalls) {
@@ -60,6 +71,13 @@ struct SessionOptionsView: View {
         .courtList()
         .navigationTitle("Session options")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var layoutCaption: String {
+        switch LiveLayout(rawValue: liveLayout) ?? .quiet {
+        case .quiet:  return "The score sits in the bottom-left corner, out of your way. Every button stays hidden until you tap the screen."
+        case .centre: return "The score sits in the middle at the bottom, with Pause and End always showing in the corners."
+        }
     }
 
     private var callsCaption: String {

@@ -1,53 +1,48 @@
 // PlayoffHUD.swift
-// The live session's playoff layer: the scoreboard that replaces the plain
-// makes/attempts block, and the card that marks each result. Readable from
-// the free-throw line: big numbers, pips for makes and misses.
+// The live session's playoff layer: the scoreboard that takes the plain
+// score's place, and the card that marks each result. Readable from the
+// free-throw line: big numbers, pips for the misses a game can still take.
 
 import SwiftUI
 
-/// Top-left of the live HUD during a playoff sitting.
+/// The live screen's score during a playoff sitting, in the score's place:
+/// this game's makes against the makes it takes to win, the misses it can
+/// still afford as pips, and the series. Its caption ("FIRST ROUND · GAME 3")
+/// goes in the line above, between calls.
 struct PlayoffScoreboard: View {
     let run: PlayoffRun
     let comebackZone: CourtZone?
+    var alignment: HorizontalAlignment = .leading
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(caption)
-                .font(.label)
-                .foregroundStyle(.white.opacity(0.7))
+        VStack(alignment: alignment, spacing: 6) {
             switch run.status {
             case .playing:
-                HStack(alignment: .center, spacing: 14) {
-                    count(run.gameMakes, of: run.makesToWin)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Pips(filled: run.gameMakes, total: run.makesToWin, color: .make)
-                        Pips(filled: run.gameMisses, total: run.missesToLose, color: .miss)
-                    }
+                count(run.gameMakes, of: run.makesToWin)
+                HStack(spacing: 10) {
+                    Pips(filled: run.gameMisses, total: run.missesToLose, color: .miss)
+                    Text("Series \(run.wins)–\(run.losses)")
                 }
-                Text("Series \(run.wins)–\(run.losses)")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                .font(.system(size: 17, weight: .semibold))
             case .comeback:
                 count(run.comebackMakes, of: run.comebackTarget)
                 Text(comebackZone.map { "Makes · \($0.displayName)" } ?? "Makes to earn the round back")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .font(.system(size: 17, weight: .semibold))
             case .champion, .retired:
                 Label(run.status == .champion ? "Champion" : "Run ended",
                       systemImage: run.status == .champion ? "trophy.fill" : "flag.checkered")
-                    .font(.score(32))
+                    .font(.score(48))
                     .foregroundStyle(run.status == .champion ? Color.leather : .white)
             }
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .liveShadow()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
     }
 
-    private var caption: String {
+    /// The line above the score.
+    static func caption(for run: PlayoffRun) -> String {
         switch run.status {
         case .playing:  return "\(run.roundName.uppercased()) · GAME \(run.gameNumber)"
         case .comeback: return "COMEBACK · \(run.roundName.uppercased())"
@@ -56,14 +51,15 @@ struct PlayoffScoreboard: View {
     }
 
     private func count(_ value: Int, of total: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
+        HStack(alignment: .lastTextBaseline, spacing: 3) {
             Text("\(value)")
-                .font(.score(56))
-                .contentTransition(.numericText())
+                .font(.score(118))
+                .contentTransition(.numericText(value: Double(value)))
             Text("/\(total)")
-                .font(.score(30))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.score(48))
+                .foregroundStyle(.white.opacity(0.72))
         }
+        .animation(.snappy(duration: 0.25), value: value)
     }
 
     private var spoken: String {

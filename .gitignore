@@ -23,3 +23,8 @@ __pycache__/
 
 # cv-replay default output directory (Tools/cv/README.md)
 cv-replay-out/
+
+# Design-skill scratch: decision mock-ups (they embed frames of the CC BY
+# test footage) and the picker's state. The surface briefs are kept.
+.impeccable/mocks/
+.impeccable/questions/

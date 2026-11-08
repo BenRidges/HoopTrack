@@ -9,6 +9,8 @@ import SwiftUI
 struct HoldToEndButton: View {
     var title: String = "Hold to end"
     var holdDuration: Double = 0.8
+    var width: CGFloat = 150
+    var height: CGFloat = 48
     /// Shows "Saving…" and ignores presses while the parent finishes up.
     var isBusy: Bool = false
     let onConfirm: () -> Void
@@ -31,7 +33,7 @@ struct HoldToEndButton: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
         }
-        .frame(width: 150, height: 48)
+        .frame(width: width, height: height)
         .contentShape(Capsule())
         .onLongPressGesture(minimumDuration: holdDuration, maximumDistance: 40) {
             guard !isBusy else { return }

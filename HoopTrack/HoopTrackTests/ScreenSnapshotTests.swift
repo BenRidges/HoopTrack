@@ -130,39 +130,123 @@ final class ScreenSnapshotTests: XCTestCase {
         }
     }
 
-    func test_liveSessionOptions() throws {
-        // The live screen's session-option pieces over a stand-in for the
-        // camera: a drill step, the best to beat, the clock waiting.
-        let landscape = CGSize(width: 874, height: 402)
-        let plan = try XCTUnwrap(DrillPlan.plan(for: .aroundTheArc))
-        try snapshot("15-live-drill", size: landscape) {
-            ZStack {
-                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
-                VStack {
-                    HStack(alignment: .top) {
-                        SessionTargetPill(target: .makes(best: 18), makes: 12, attempts: 20)
-                        Spacer()
-                        DrillStepPill(progress: plan.progress(after: 7))
-                        Spacer()
-                        ClockWaitingTag()
-                    }
-                    Spacer()
-                }
-                .padding(24)
-                DrillCueBanner(cue: DrillCue(text: "Move to the right wing", id: 1))
-            }
+    func test_liveScreen() throws {
+        // The live HUD in each state, over court footage when the run points
+        // LIVE_BACKDROP_DIR at frames from it (a stand-in gradient otherwise),
+        // at iPhone 14 landscape size with its safe-area insets.
+        let quiet = LiveReadout(layout: .quiet)
+        var make = quiet
+        make.word = .init(text: "MAKE", color: .make)
+        make.makes = 12; make.attempts = 17; make.percent = 70.6
+        make.target = .makes(best: 18)
+        make.drill = .step("Left wing", toGo: 3)
+        make.clock = "6:42"
+        make.edge = .init(color: .make)
+        try live("15-live-quiet-make", backdrop: "cam1-7.75", make, LiveControls())
+
+        var miss = make
+        miss.word = .init(text: "MISS", color: .miss)
+        miss.attempts = 18; miss.percent = 66.7
+        miss.drill = .step("Left wing", toGo: 2)
+        miss.clock = "6:51"
+        miss.edge = .init(color: .miss)
+        try live("16-live-quiet-tapped", backdrop: "cam1-14.5", miss,
+                 LiveControls(shown: true, canUndo: true, changes: .miss))
+
+        var finding = quiet
+        finding.clock = "0:08"
+        finding.setup = .init(title: "Point the camera at the hoop",
+                              detail: "Phone sideways and steady, about 3 m behind where you shoot, with the whole rim in view.",
+                              offersHandScoring: true)
+        finding.edge = .init(color: .leather, breathing: true)
+        try live("17-live-finding-hoop", backdrop: "cam1-5.0", finding, LiveControls(), tracking: false)
+
+        var tip = finding
+        tip.clock = "0:21"
+        tip.setup = .init(title: SetupAdvice.tooClose.title, detail: SetupAdvice.tooClose.detail)
+        try live("18-live-setup-tip", backdrop: "cam1-5.0", tip, LiveControls())
+
+        var cue = quiet
+        cue.makes = 14; cue.attempts = 20; cue.percent = 70
+        cue.target = .makes(best: 18)
+        cue.drill = .cue("Move to the left corner")
+        cue.clock = "7:58"
+        try live("19-live-drill-cue", backdrop: "cam1-5.0", cue, LiveControls())
+
+        var resting = cue
+        resting.word = .init(text: "PAUSED · SHOOT TO CARRY ON", color: .white.opacity(0.8), isCall: false)
+        resting.drill = .step("Left corner", toGo: 5)
+        resting.edge = .init(color: .white.opacity(0.35))
+        try live("20-live-break", backdrop: "cam1-5.0", resting, LiveControls())
+
+        var run = PlayoffRun(spot: .threes)
+        for result in [ShotResult.make, .make, .make, .make, .miss, .make, .miss, .make, .make, .miss, .make,
+                       .make, .miss, .make] {
+            run.record(result)
         }
-        try snapshot("16-live-setup-tip", size: landscape) {
-            ZStack {
-                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
-                SetupTipCard(advice: .tooClose)
-            }
+        var playoff = quiet
+        playoff.playoff = run
+        playoff.word = .init(text: PlayoffScoreboard.caption(for: run), color: .white.opacity(0.8), isCall: false)
+        playoff.clock = "4:12"
+        try live("21-live-playoff", backdrop: "cam1-5.0", playoff, LiveControls())
+
+        var centre = make
+        centre.layout = .centre
+        try live("22-live-centre-make", backdrop: "cam1-7.75", centre, LiveControls())
+        var centreTap = miss
+        centreTap.layout = .centre
+        try live("23-live-centre-tapped", backdrop: "cam1-14.5", centreTap,
+                 LiveControls(shown: true, canUndo: true, changes: .miss))
+
+        var byHand = quiet
+        byHand.makes = 6; byHand.attempts = 9; byHand.percent = 66.7
+        byHand.clock = "3:05"
+        try live("24-live-by-hand", backdrop: "cam1-5.0", byHand,
+                 LiveControls(shown: true, large: true, canUndo: true), tracking: false)
+
+        try snapshot("25-live-paused", size: Self.landscape, ownSafeArea: true) {
+            ZStack { backdrop("cam1-5.0"); LivePausedOverlay(onResume: {}, onEnd: {}) }
+                .safeAreaPadding(Self.landscapeInsets)
         }
-        try snapshot("17-live-still-shooting", size: landscape) {
+        try snapshot("26-live-still-shooting", size: Self.landscape, ownSafeArea: true) {
+            ZStack { backdrop("cam1-5.0"); StillShootingCard(onEnd: {}, onKeepGoing: {}) }
+                .safeAreaPadding(Self.landscapeInsets)
+        }
+    }
+
+    // MARK: - Live screen helpers
+
+    private static let landscape = CGSize(width: 844, height: 390)
+    private static let landscapeInsets = EdgeInsets(top: 0, leading: 47, bottom: 21, trailing: 47)
+    /// The rim in the cam1 frames (Vision-normalised).
+    private static let rim = CGRect(x: 0.438, y: 0.776, width: 0.047, height: 0.046)
+
+    private func live(_ name: String, backdrop frame: String, _ readout: LiveReadout,
+                      _ controls: LiveControls, tracking: Bool = true) throws {
+        try snapshot(name, size: Self.landscape, ownSafeArea: true) {
             ZStack {
-                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
-                StillShootingCard(onEnd: {}, onKeepGoing: {})
+                backdrop(frame)
+                if tracking { HoopBracket(rect: Self.rim, isTracking: true).ignoresSafeArea() }
+                LiveHUD(readout: readout, controls: controls)
             }
+            .safeAreaPadding(Self.landscapeInsets)
+        }
+    }
+
+    /// A frame of court footage, filled the way the camera preview fills.
+    @ViewBuilder
+    private func backdrop(_ name: String) -> some View {
+        if let dir = ProcessInfo.processInfo.environment["LIVE_BACKDROP_DIR"],
+           let image = UIImage(contentsOfFile: "\(dir)/\(name).jpg") {
+            // Flexible, like the camera preview: a fixed frame would widen
+            // the stack by the insets and push everything off-centre.
+            Color.clear
+                .overlay { Image(uiImage: image).resizable().scaledToFill() }
+                .clipped()
+                .ignoresSafeArea()
+        } else {
+            LinearGradient(colors: [Color(white: 0.3), Color(white: 0.12)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
         }
     }
 
@@ -235,6 +319,7 @@ final class ScreenSnapshotTests: XCTestCase {
     private func snapshot<Content: View>(_ name: String,
                                          size: CGSize = CGSize(width: 402, height: 874),
                                          scrolledBy offset: CGFloat = 0,
+                                         ownSafeArea: Bool = false,
                                          @ViewBuilder _ content: () -> Content) throws {
         let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SNAPSHOT_DIR"]!)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -243,6 +328,9 @@ final class ScreenSnapshotTests: XCTestCase {
         let window = scene.map(UIWindow.init(windowScene:)) ?? UIWindow()
         window.frame = CGRect(origin: .zero, size: size)
         let host = UIHostingController(rootView: content().appEnvironment(services, auth: auth))
+        // A landscape screen drawn in the portrait test host brings its own
+        // insets rather than the host's.
+        if ownSafeArea { host.safeAreaRegions = [] }
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
