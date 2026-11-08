@@ -42,6 +42,8 @@ enum TrainingLaunch: Identifiable, Equatable {
 struct CompletedSession: Identifiable {
     let id = UUID()
     let result: SessionResult
+    /// What "Go again" starts; nil hides it (turned off, or nothing to repeat).
+    var again: TrainingLaunch?
 }
 
 @MainActor
@@ -57,6 +59,10 @@ final class AppState: ObservableObject {
     @Published var notice: String?
     /// How the live session ended, acted on once it has finished dismissing.
     private var queuedEnd: SessionEnd?
+    /// The session that just ended, for "Go again".
+    private var endedLaunch: TrainingLaunch?
+    /// "Go again" was tapped: starts once the summary has gone.
+    private var queuedRelaunch: TrainingLaunch?
 
     static let discardedNotice = "Session not saved: nothing recorded."
 
@@ -66,6 +72,7 @@ final class AppState: ObservableObject {
     /// back in portrait.
     func finishSession(with end: SessionEnd?) {
         queuedEnd = end
+        endedLaunch = activeLaunch
         activeLaunch = nil
     }
 
@@ -73,7 +80,8 @@ final class AppState: ObservableObject {
     func sessionCoverDismissed() {
         switch queuedEnd {
         case .saved(let result):
-            presentedSummary = CompletedSession(result: result)
+            presentedSummary = CompletedSession(result: result,
+                                                again: AppPreferences.goAgain ? endedLaunch : nil)
         case .discarded:
             // Without this the session just vanished, which read as a crash.
             notice = Self.discardedNotice
@@ -81,6 +89,20 @@ final class AppState: ObservableObject {
             break
         }
         queuedEnd = nil
+        endedLaunch = nil
+    }
+
+    /// The summary's "Go again": the same session, once the sheet is down.
+    func goAgain(_ launch: TrainingLaunch) {
+        queuedRelaunch = launch
+        presentedSummary = nil
+    }
+
+    /// Hooked to the summary sheet's onDismiss.
+    func summaryDismissed() {
+        guard let launch = queuedRelaunch else { return }
+        queuedRelaunch = nil
+        if activeLaunch == nil { activeLaunch = launch }
     }
 
     /// Handles `hooptrack://` URLs:

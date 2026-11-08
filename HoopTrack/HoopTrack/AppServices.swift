@@ -20,6 +20,8 @@ final class AppServices: ObservableObject {
     let dataService: DataService
     let coordinator: SessionFinalizationCoordinator
     let hapticService = HapticService()
+    /// Calls shots out loud; outlives a session so its last words finish.
+    let announcer = SessionAnnouncer()
     let notificationService: NotificationService
     let cameraService = CameraService()
     let appState = AppState()
@@ -124,6 +126,7 @@ extension View {
             .environmentObject(services.dataService)
             .environmentObject(services.coordinator)
             .environmentObject(services.hapticService)
+            .environmentObject(services.announcer)
             .environmentObject(services.notificationService)
             .environmentObject(services.cameraService)
             .environmentObject(services.appState)

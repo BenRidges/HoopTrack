@@ -77,8 +77,10 @@ nonisolated final class CVPipeline: ShotPipelineControl, @unchecked Sendable {
     nonisolated(unsafe) private var frameCancellable: AnyCancellable?
     nonisolated(unsafe) private weak var delegate: ShotPipelineDelegate?
 
-    /// Video is written for the whole session, paused or not, so shot
-    /// offsets line up with the file.
+    /// Video is written for the whole session, paused or not, except in a
+    /// long break (the recorder's `isHolding`): see SessionRecorder. A shot
+    /// starting ends the break here, on the frame it's seen, rather than
+    /// when the main actor hears of it.
     nonisolated(unsafe) var recorder: SessionRecorder?
     /// Shots aren't detected while paused. Set from the main actor at any
     /// time and read on the pipeline queue every frame, hence the lock.
@@ -222,6 +224,7 @@ nonisolated final class CVPipeline: ShotPipelineControl, @unchecked Sendable {
         var published: [NetCheck<CourtPositionEstimator.Estimate?>.Call] = []
         switch event {
         case .started(let release):
+            recorder?.isHolding = false
             // A held call can't wait through another shot.
             if let call = netCheck.flush(meter: net.meter) { published.append(call) }
             pendingEstimate = calibration.state.hoopRect.flatMap { hoop in
@@ -328,7 +331,7 @@ nonisolated final class CVPipeline: ShotPipelineControl, @unchecked Sendable {
                             zone: zone,
                             distanceFt: estimate?.distanceFt,
                             science: science,
-                            videoOffset: recorder?.startTime.map { max(0, outcome.release.time - $0) })
+                            videoOffset: recorder?.fileOffset(of: outcome.release.time))
     }
 
     // MARK: - Main-actor publishing (throttled)

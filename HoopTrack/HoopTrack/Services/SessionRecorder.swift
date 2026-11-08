@@ -8,6 +8,10 @@
 // output never had a connection and sessions were never actually recorded.
 // It also kept recording until the summary was dismissed, so the video
 // filename wasn't known when the session was saved.
+//
+// During a long break (`isHolding`, set by the session's auto-pause) frames
+// aren't written, and the gap is closed so the file skips straight to the
+// next shot. `fileOffset(of:)` turns a camera time into a time in the file.
 
 @preconcurrency import AVFoundation
 import Foundation
@@ -22,12 +26,30 @@ nonisolated final class SessionRecorder: @unchecked Sendable {
     private var failed = false
 
     private var firstFrameTime: Double?
+    private var holding = false
+    private var cuts = VideoCuts()
 
-    /// Presentation time (seconds) of the first written frame. Shot offsets
-    /// into the video are measured from here. Safe from any thread.
+    /// Presentation time (seconds) of the first written frame. Safe from
+    /// any thread.
     var startTime: Double? {
         lock.lock(); defer { lock.unlock() }
         return firstFrameTime
+    }
+
+    /// While true nothing is written, and the time is cut from the file.
+    /// Safe from any thread.
+    var isHolding: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return holding }
+        set { lock.lock(); holding = newValue; lock.unlock() }
+    }
+
+    /// Where camera time `time` (seconds, the capture clock) falls in the
+    /// file, allowing for cut breaks. Nil before the first frame. Safe from
+    /// any thread.
+    func fileOffset(of time: Double) -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        guard let firstFrameTime else { return nil }
+        return cuts.fileOffset(of: time, start: firstFrameTime)
     }
 
     init(sessionID: UUID) {
@@ -44,14 +66,48 @@ nonisolated final class SessionRecorder: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !finished, !failed else { return }
 
+        if holding, writer != nil {
+            cuts.skipped()
+            return
+        }
         if writer == nil { startWriting(with: buffer) }
         guard let writer, let input, writer.status == .writing else {
             if writer?.status == .failed { failed = true }
             return
         }
-        if input.isReadyForMoreMediaData {
+        guard input.isReadyForMoreMediaData else { return }
+        let time = CMSampleBufferGetPresentationTimeStamp(buffer)
+        let shift = cuts.writing(at: CMTimeGetSeconds(time), frameInterval: Self.frameInterval)
+        if shift > 0, let moved = Self.retimed(buffer, back: shift) {
+            input.append(moved)
+        } else {
             input.append(buffer)
         }
+    }
+
+    /// A gap is closed to one frame at the capture rate.
+    private static let frameInterval = 1.0 / HoopTrack.Camera.targetFPS
+
+    /// `buffer` moved `seconds` earlier.
+    private static func retimed(_ buffer: CMSampleBuffer, back seconds: Double) -> CMSampleBuffer? {
+        var count: CMItemCount = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: 0, arrayToFill: nil,
+                                                     entriesNeededOut: &count) == noErr, count > 0 else { return nil }
+        var timing = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+        guard CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: count, arrayToFill: &timing,
+                                                     entriesNeededOut: &count) == noErr else { return nil }
+        let shift = CMTime(seconds: seconds, preferredTimescale: 600_000)
+        for i in timing.indices {
+            timing[i].presentationTimeStamp = CMTimeSubtract(timing[i].presentationTimeStamp, shift)
+            if timing[i].decodeTimeStamp.isValid {
+                timing[i].decodeTimeStamp = CMTimeSubtract(timing[i].decodeTimeStamp, shift)
+            }
+        }
+        var moved: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: buffer,
+                                                    sampleTimingEntryCount: count, sampleTimingArray: &timing,
+                                                    sampleBufferOut: &moved) == noErr else { return nil }
+        return moved
     }
 
     /// Stops recording and waits for the file. Nil if nothing was written.

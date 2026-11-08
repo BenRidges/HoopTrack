@@ -4,6 +4,10 @@
 // Miss / Undo are the input when nothing is tracking. While the hoop is
 // tracked they stay out of the picture until the screen is tapped, and
 // right after a call the other result changes it rather than adding a shot.
+//
+// Session options add a setup tip until the first shot, a named drill's
+// step under the status, your best under the score, a quiet "Paused" when
+// nobody's shooting, and a screen that dims until it's touched.
 
 import SwiftUI
 import UIKit
@@ -20,15 +24,18 @@ struct LiveSessionView: View {
     @EnvironmentObject private var coordinator: SessionFinalizationCoordinator
     @EnvironmentObject private var cameraService: CameraService
     @EnvironmentObject private var hapticService: HapticService
+    @EnvironmentObject private var announcer: SessionAnnouncer
     @AppStorage(AppPreferences.Key.showDetectionBoxes) private var showDetectionBoxes = false
 
     @StateObject private var holder = ViewModelHolder()
+    @State private var dimmer = ScreenDimmer()
 
     var body: some View {
         ZStack {
             if let viewModel = holder.viewModel {
                 LiveSessionContent(viewModel: viewModel,
                                    showDetectionBoxes: showDetectionBoxes,
+                                   dimmer: dimmer,
                                    onFinish: onFinish)
             } else {
                 Color.black.ignoresSafeArea()
@@ -43,11 +50,18 @@ struct LiveSessionView: View {
                                                         dataService: dataService,
                                                         coordinator: coordinator,
                                                         camera: cameraService,
-                                                        haptics: hapticService)
+                                                        haptics: hapticService,
+                                                        options: AppPreferences.sessionOptions,
+                                                        announcer: announcer)
             }
             UIApplication.shared.isIdleTimerDisabled = true
+            if holder.viewModel?.options.dimScreen == true {
+                dimmer.delay = .seconds(HoopTrack.Session.dimAfterSec)
+                dimmer.start()
+            }
         }
         .onDisappear {
+            dimmer.stop()
             holder.viewModel?.tearDown()
             UIApplication.shared.isIdleTimerDisabled = false
         }
@@ -65,6 +79,7 @@ private struct LiveSessionContent: View {
 
     @ObservedObject var viewModel: LiveSessionViewModel
     let showDetectionBoxes: Bool
+    let dimmer: ScreenDimmer
     let onFinish: (SessionEnd?) -> Void
 
     @EnvironmentObject private var cameraService: CameraService
@@ -74,15 +89,29 @@ private struct LiveSessionContent: View {
     /// button press keeps them up a little longer.
     @State private var controlsRevealed = false
     @State private var revealCount = 0
+    /// The hoop's taken a while to find: the coach says what to check.
+    @State private var longSearch = false
+    /// "Good spot" shows for a moment, then gets out of the way.
+    @State private var goodSpotShown = false
+    @State private var cue: DrillCue?
 
     var body: some View {
         ZStack {
             // A tap anywhere on the picture brings up Make / Miss / Undo.
             ZStack { camera }
                 .contentShape(Rectangle())
-                .onTapGesture { revealControls() }
+                .onTapGesture {
+                    viewModel.noteActivity()
+                    revealControls()
+                }
             ShotFlashOverlay(flash: viewModel.lastShot)
             hud
+            if let cue {
+                DrillCueBanner(cue: cue)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 96)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
             if let moment = viewModel.playoffMoment, let run = viewModel.playoff, !viewModel.isPaused {
                 PlayoffMomentCard(moment: moment, run: run, comebackZone: viewModel.comebackZone,
                                   onDismiss: { viewModel.dismissPlayoffMoment() },
@@ -91,10 +120,22 @@ private struct LiveSessionContent: View {
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
             if viewModel.isPaused { pausedOverlay }
-            if showsHoopCoach { hoopCoach }
+            if showsHoopCoach {
+                hoopCoach
+            } else if let advice = shownAdvice {
+                SetupTipCard(advice: advice)
+                    .id(advice)
+                    .transition(.opacity)
+            }
+            if viewModel.idlePrompt {
+                StillShootingCard(onEnd: { finish() }, onKeepGoing: { viewModel.noteActivity() })
+            }
         }
         .animation(.snappy, value: viewModel.playoffMoment)
         .animation(.easeInOut(duration: 0.2), value: showsShotButtons)
+        .animation(.easeInOut(duration: 0.25), value: shownAdvice)
+        .animation(.snappy, value: cue)
+        .animation(.snappy, value: viewModel.idlePrompt)
         .task { await viewModel.start(showDetectionBoxes: showDetectionBoxes) }
         .task(id: revealCount) {
             guard revealCount > 0 else { return }
@@ -107,6 +148,35 @@ private struct LiveSessionContent: View {
         }
         .onChange(of: viewModel.timeIsUp) { _, up in
             if up { finish() }
+        }
+        .onChange(of: viewModel.idleTimedOut) { _, out in
+            if out { finish() }
+        }
+        .onChange(of: viewModel.idlePrompt) { _, asking in
+            // Whoever walks up to the phone should be able to read it.
+            if asking { dimmer.wake() }
+        }
+        .onChange(of: viewModel.drillCue) { _, newCue in
+            guard let newCue else { return }
+            cue = newCue
+            if newCue.isFinished { dimmer.wake() }
+        }
+        .task(id: cue?.id) {
+            guard let shown = cue else { return }
+            try? await Task.sleep(for: .seconds(shown.isFinished ? 5 : 3.5))
+            if !Task.isCancelled, cue == shown { cue = nil }
+        }
+        .task(id: showsHoopCoach) {
+            longSearch = false
+            guard showsHoopCoach, viewModel.options.setupCoach else { return }
+            try? await Task.sleep(for: .seconds(12))
+            if !Task.isCancelled { longSearch = true }
+        }
+        .task(id: viewModel.setupAdvice) {
+            goodSpotShown = viewModel.setupAdvice == .good
+            guard goodSpotShown else { return }
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { goodSpotShown = false }
         }
         .onChange(of: cameraService.permissionStatus) { _, _ in
             viewModel.cameraPermissionChanged()
@@ -150,12 +220,23 @@ private struct LiveSessionContent: View {
                 if let run = viewModel.playoff {
                     PlayoffScoreboard(run: run, comebackZone: viewModel.comebackZone)
                 } else {
-                    scoreBlock
+                    VStack(alignment: .leading, spacing: 6) {
+                        scoreBlock
+                        if let target = viewModel.target {
+                            SessionTargetPill(target: target, makes: viewModel.makes, attempts: viewModel.attempts)
+                        }
+                    }
                 }
                 Spacer()
-                statusPill
+                VStack(spacing: 8) {
+                    statusPill
+                    if let progress = viewModel.drillProgress { DrillStepPill(progress: progress) }
+                }
                 Spacer()
-                clockBlock
+                VStack(alignment: .trailing, spacing: 6) {
+                    clockBlock
+                    if viewModel.isClockWaiting { ClockWaitingTag() }
+                }
             }
             Spacer()
             HStack(alignment: .bottom) {
@@ -212,6 +293,7 @@ private struct LiveSessionContent: View {
 
     private var statusText: String {
         if viewModel.shotInFlight { return "Shot in the air" }
+        if viewModel.isIdle { return "Paused · shoot to carry on" }
         switch viewModel.hoopStatus {
         case .manual:    return "Manual scoring"
         case .searching: return "Finding the hoop"
@@ -222,6 +304,7 @@ private struct LiveSessionContent: View {
 
     private var statusColor: Color {
         if viewModel.shotInFlight { return .leather }
+        if viewModel.isIdle { return .white.opacity(0.5) }
         switch viewModel.hoopStatus {
         case .manual:    return .white.opacity(0.5)
         case .searching: return .leather
@@ -362,16 +445,25 @@ private struct LiveSessionContent: View {
             && !viewModel.skippedHoopSearch && cameraService.permissionStatus == .authorized
     }
 
-    /// First-run guidance until the rim is found. The camera stays visible
-    /// so you can aim; dismiss to score by hand.
+    /// The setup tip to show: problems until fixed, "Good spot" briefly.
+    private var shownAdvice: SetupAdvice? {
+        guard let advice = viewModel.setupAdvice, !viewModel.skippedHoopSearch,
+              viewModel.phase == .live, !viewModel.isPaused else { return nil }
+        return advice.isGood && !goodSpotShown ? nil : advice
+    }
+
+    /// Guidance until the rim is found. The camera stays visible so you can
+    /// aim; dismiss to score by hand.
     private var hoopCoach: some View {
         VStack(spacing: 14) {
             Image(systemName: "viewfinder")
                 .font(.system(size: 34, weight: .semibold))
                 .foregroundStyle(Color.leather)
-            Text("Point the camera at the hoop")
+            Text(longSearch ? "Still looking for the rim" : "Point the camera at the hoop")
                 .font(.title3.bold())
-            Text("Phone sideways and steady, about 3 m behind where you shoot. The whole rim should be in view.")
+            Text(longSearch
+                 ? "Check the whole rim is in the picture and there's light on it. If you're far away, move closer."
+                 : "Phone sideways and steady, about 3 m behind where you shoot. The whole rim should be in view.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.75))
                 .multilineTextAlignment(.center)

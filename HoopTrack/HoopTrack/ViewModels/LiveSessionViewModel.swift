@@ -2,6 +2,11 @@
 // Owns one live shooting session: camera, CV pipeline, recording, timer,
 // shot log and the hand-off to SessionFinalizationCoordinator.
 //
+// The session options (Profile → Session options) live here too: calls
+// said out loud (SessionAnnouncing), setup tips from the rim's place in the
+// picture, named-drill steps, a timed drill's clock waiting for the first
+// shot, pausing when nobody's shooting, and a target to chase.
+//
 // Ending a session stops the pipeline and finishes the video *before*
 // saving, so the summary has the video and the camera isn't left running
 // (and recording) behind it. Calls the pipeline made before the end — one
@@ -45,6 +50,25 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     @Published private(set) var lastShot: ShotFlash?
     /// Set when a timed drill runs out; the view ends the session.
     @Published private(set) var timeIsUp = false
+    /// A timed drill whose clock starts on the first shot, still waiting.
+    @Published private(set) var isClockWaiting = false
+
+    // Session options
+    /// The setup tip on screen; nil once shooting starts (or tips are off).
+    @Published private(set) var setupAdvice: SetupAdvice?
+    /// Where a named drill is up to; nil without drill guidance.
+    @Published private(set) var drillProgress: DrillProgress?
+    /// "Move to the right wing": changes when a drill step is done.
+    @Published private(set) var drillCue: DrillCue?
+    /// Nobody's shot for a while: the clock (and video) are paused until
+    /// the next shot. Not the same as `isPaused`, which the player chose.
+    @Published private(set) var isIdle = false
+    /// Paused so long the session may be over: ask.
+    @Published private(set) var idlePrompt = false
+    /// Nobody answered: the view ends (and saves) the session.
+    @Published private(set) var idleTimedOut = false
+    /// Your best (or goal) for the live screen.
+    @Published private(set) var target: SessionTarget?
     @Published private(set) var makes = 0
     @Published private(set) var attempts = 0
     @Published var skippedHoopSearch = false
@@ -74,6 +98,8 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     private let coordinator: SessionFinalizationCoordinator
     private let camera: CameraService
     private let haptics: HapticService
+    let options: SessionOptions
+    private let announcer: (any SessionAnnouncing)?
     private(set) var session: TrainingSession?
     private var pipeline: (any ShotPipelineControl)?
     /// While the session is ending and waits for the pipeline to stop: the
@@ -87,26 +113,43 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     var clock: () -> Date = { .now }
     private var flightTimeout: Task<Void, Never>?
     private var limitWatcher: Task<Void, Never>?
+    private var idleWatcher: Task<Void, Never>?
+    /// The last shot, tap or button press (see `checkIdle`).
+    private var lastActivity = Date.distantPast
+    /// Video in a long break can be cut (not with telemetry on: its frames
+    /// are found in the video by log time).
+    private var canCutVideo = true
+    private var drillPlan: DrillPlan?
+    private var cueCounter = 0
+    private var targetMet = false
+    // Setup tips: the tip waiting to settle, and whether to stop giving them.
+    private var adviceCandidate: (advice: SetupAdvice, since: Date)?
+    private var setupDone = false
+    private var hoopFoundOnce = false
+    private var lastTipSpoken = Date.distantPast
     private var courtType: CourtType = .nba
     private var showDetectionBoxes = false
 
-    // Active-time clock (pauses excluded).
+    // Active-time clock (pauses, breaks and a timed drill's wait excluded).
     private var runningSince: Date?
     private var accumulated: TimeInterval = 0
-    private var lastAnnouncement = Date.distantPast
 
     init(namedDrill: NamedDrill?,
          playoffSeriesID: UUID? = nil,
          dataService: DataService,
          coordinator: SessionFinalizationCoordinator,
          camera: CameraService,
-         haptics: HapticService) {
+         haptics: HapticService,
+         options: SessionOptions = .none,
+         announcer: (any SessionAnnouncing)? = nil) {
         self.namedDrill = namedDrill
         self.playoffSeriesID = playoffSeriesID
         self.dataService = dataService
         self.coordinator = coordinator
         self.camera = camera
         self.haptics = haptics
+        self.options = options
+        self.announcer = announcer
     }
 
     // MARK: - Lifecycle
@@ -138,6 +181,14 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
             playoff = base
             comebackZone = PlayoffRun.weakestZone(dataService.recentShotZones())
         }
+        announcer?.begin(mode: options.shotCalls)
+        if options.drillGuidance, series == nil {
+            drillPlan = namedDrill.flatMap(DrillPlan.plan(for:))
+            drillProgress = drillPlan?.progress(after: 0)
+        }
+        if options.showTarget, series == nil, let profile {
+            target = Self.target(for: namedDrill, profile: profile, excluding: session?.id)
+        }
 
         beginClock()
         if camera.permissionStatus == .authorized {
@@ -149,9 +200,10 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     #if DEBUG
     /// Tests: run the session on `pipeline` (start() only builds one when
-    /// the camera is available).
+    /// the camera is available), tracking as if a detector were there.
     func useForTesting(pipeline: any ShotPipelineControl) {
         self.pipeline = pipeline
+        if hoopStatus == .manual { hoopStatus = .searching }
     }
     #endif
 
@@ -184,6 +236,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
            (try? dataService.fetchOrCreateProfile())?.supabaseUserID != nil,
            let logger = try? DetectionLogger(sessionID: session.id) {
             pipeline.attachTelemetry(logger: logger)
+            canCutVideo = false
         }
         pipeline.start(framePublisher: camera.framePublisher, delegate: self)
         self.pipeline = pipeline
@@ -196,8 +249,8 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         guard phase != .ending else { return }
         phase = .ending
         let active = activeElapsed()
-        limitWatcher?.cancel()
-        flightTimeout?.cancel()
+        stopWatchers()
+        announcer?.end()
         camera.stopSession()
         let recorder = self.recorder
         self.recorder = nil
@@ -220,11 +273,13 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         isPaused.toggle()
         pipeline?.isPaused = isPaused
         if isPaused {
-            if let since = runningSince { accumulated += Date.now.timeIntervalSince(since) }
-            runningSince = nil
+            // A pause the player chose replaces a break the app noticed.
+            leaveIdle()
+            stopClock()
             shotInFlight = false
         } else {
-            runningSince = .now
+            lastActivity = clock()
+            runClockIfDue()
         }
         haptics.tap()
     }
@@ -234,8 +289,8 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         guard phase != .ending else { return nil }
         phase = .ending
         let active = activeElapsed()
-        limitWatcher?.cancel()
-        flightTimeout?.cancel()
+        stopWatchers()
+        announcer?.end()
         // Before anything is decided: a shot called just before End counts.
         await stopPipeline()
         let videoURL = await finishRecording()
@@ -269,13 +324,26 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     // MARK: - Clock
 
-    func activeElapsed(at date: Date = .now) -> TimeInterval {
-        accumulated + (runningSince.map { date.timeIntervalSince($0) } ?? 0)
+    func activeElapsed(at date: Date? = nil) -> TimeInterval {
+        let now = date ?? clock()
+        return accumulated + (runningSince.map { max(0, now.timeIntervalSince($0)) } ?? 0)
     }
 
     private func beginClock() {
-        runningSince = .now
+        // A timed drill can wait for the first shot: the walk from the
+        // phone to the court isn't part of your five minutes.
+        isClockWaiting = timeLimit != nil && options.timedDrillsWaitForShot
+        lastActivity = clock()
         phase = .live
+        runClockIfDue()
+        if options.autoPause {
+            idleWatcher = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    self?.checkIdle()
+                }
+            }
+        }
         guard let limit = timeLimit else { return }
         limitWatcher = Task { [weak self] in
             while !Task.isCancelled {
@@ -283,11 +351,86 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
                 guard let self else { return }
                 if self.activeElapsed() >= limit {
                     self.haptics.longPress()
+                    self.announcer?.say("Time. \(self.makes.counted("make")).")
                     self.timeIsUp = true
                     return
                 }
             }
         }
+    }
+
+    /// The clock runs unless paused, in a break, or waiting for a timed
+    /// drill's first shot.
+    private func runClockIfDue() {
+        guard runningSince == nil, !isPaused, !isIdle, !isClockWaiting, phase == .live else { return }
+        runningSince = clock()
+    }
+
+    /// `at`: when the time stopped counting, if before now.
+    private func stopClock(at end: Date? = nil) {
+        if let since = runningSince { accumulated += max(0, (end ?? clock()).timeIntervalSince(since)) }
+        runningSince = nil
+    }
+
+    private func stopWatchers() {
+        limitWatcher?.cancel()
+        idleWatcher?.cancel()
+        flightTimeout?.cancel()
+    }
+
+    /// A shot (or the player): the clock starts, a break ends.
+    private func noteShotActivity() {
+        lastActivity = clock()
+        if isClockWaiting {
+            isClockWaiting = false
+            runClockIfDue()
+        }
+        leaveIdle()
+        if !setupDone {
+            setupDone = true
+            setupAdvice = nil
+        }
+    }
+
+    // MARK: - Breaks (auto-pause)
+
+    /// The screen was touched: somebody's there.
+    func noteActivity() {
+        guard phase == .live else { return }
+        lastActivity = clock()
+        leaveIdle()
+    }
+
+    /// Called every few seconds. No shot (or touch) for two minutes and the
+    /// clock and the video pause until the next one; after fifteen it asks
+    /// whether you're done, and after twenty it ends and saves the session,
+    /// so a phone left running at the court doesn't record all evening.
+    func checkIdle() {
+        guard options.autoPause, phase == .live, !isPaused else { return }
+        let quiet = clock().timeIntervalSince(lastActivity)
+        if !isIdle, quiet >= HoopTrack.Session.idlePauseSec {
+            isIdle = true
+            // The two quiet minutes weren't training either.
+            stopClock(at: lastActivity)
+            if canCutVideo { recorder?.isHolding = true }
+            announcer?.say("Paused. Shoot to carry on.")
+        }
+        guard isIdle else { return }
+        if !idlePrompt, quiet >= HoopTrack.Session.idleAskSec {
+            idlePrompt = true
+            announcer?.say("Still shooting? The session ends in five minutes.")
+        }
+        if !idleTimedOut, quiet >= HoopTrack.Session.idleEndSec {
+            idleTimedOut = true
+        }
+    }
+
+    private func leaveIdle() {
+        guard isIdle else { return }
+        isIdle = false
+        idlePrompt = false
+        recorder?.isHolding = false
+        runClockIfDue()
     }
 
     // MARK: - Manual logging & corrections
@@ -298,6 +441,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     /// both). Otherwise, or with the same result, it logs a shot.
     func logManual(_ result: ShotResult) {
         guard phase == .live else { return }
+        lastActivity = clock()
         if let shot = correctableShot, shot.result != result {
             correct(shot, to: result)
             return
@@ -323,20 +467,21 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         shotCounter += 1
         lastShot = ShotFlash(result: result, id: shotCounter, corrected: true)
         result == .make ? haptics.makeMade() : haptics.missMade()
-        if UIAccessibility.isVoiceOverRunning {
-            let word = result == .make ? "make" : "miss"
-            UIAccessibility.post(notification: .announcement, argument: "Changed to \(word). \(makes) for \(attempts).")
-        }
+        announcer?.shot(result, makes: makes, attempts: attempts, corrected: true)
         updatePlayoff(announce: true, replacingMoment: true)
+        updateTarget(announce: true)
     }
 
     /// Removes the most recent shot (wrong call, or a shot that never happened).
     func undoLast() {
         lastAutoCall = nil
+        noteActivity()
         guard let session, let last = session.orderedShots.last else { return }
         dataService.deleteShot(last)
         refreshCounts()
         updatePlayoff(announce: false)
+        updateDrill(announce: false)
+        updateTarget(announce: false)
         haptics.tap()
     }
 
@@ -357,9 +502,51 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         hoopRect = state.hoopRect
         if !wasFound, state.isTracking {
             haptics.shotDetected()
-            UIAccessibility.post(notification: .announcement, argument: "Hoop found. Start shooting.")
+            lastActivity = clock()
+        }
+        updateSetupAdvice(state)
+    }
+
+    /// Hoop found: with tips on, the first settled tip is said with it
+    /// ("Hoop found. Too close…"); without, it's said straight away.
+    private func announceHoopFound(_ advice: SetupAdvice?) {
+        guard !hoopFoundOnce else { return }
+        hoopFoundOnce = true
+        var words = "Hoop found. " + (advice?.spoken ?? "Start shooting.")
+        if isClockWaiting { words += " The clock starts on your first shot." }
+        announcer?.say(words)
+    }
+
+    /// Setup tips until the first shot: a tip shows once it has held for
+    /// `setupSettleSec`, and is said when it changes.
+    private func updateSetupAdvice(_ state: CalibrationState) {
+        guard options.setupCoach, !setupDone else {
+            if state.isTracking { announceHoopFound(nil) }
+            return
+        }
+        guard case .tracking(let rect) = state else {
+            adviceCandidate = nil
+            if case .looking = state { setupAdvice = nil }
+            return
+        }
+        let advice = SetupCheck.advice(hoop: rect)
+        let now = clock()
+        if adviceCandidate?.advice != advice { adviceCandidate = (advice, now) }
+        guard let candidate = adviceCandidate, advice != setupAdvice,
+              now.timeIntervalSince(candidate.since) >= HoopTrack.Session.setupSettleSec else { return }
+        setupAdvice = advice
+        if !hoopFoundOnce {
+            announceHoopFound(advice)
+            lastTipSpoken = now
+        } else if now.timeIntervalSince(lastTipSpoken) >= Self.tipSpacingSec {
+            // A rim on the edge of a limit can flip between two tips; the
+            // screen keeps up, the voice doesn't nag.
+            announcer?.say(advice.spoken)
+            lastTipSpoken = now
         }
     }
+
+    private static let tipSpacingSec: Double = 4
 
     func pipelineBallMoved(_ box: CGRect?) {
         ballBox = box
@@ -367,6 +554,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     func pipelineShotStarted() {
         guard !isPaused else { return }
+        noteShotActivity()
         // A tap from now on is about this shot, not the last call.
         lastAutoCall = nil
         shotInFlight = true
@@ -409,6 +597,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         guard let session, phase == .live || isStoppingPipeline else { return }
         // Counted quietly once the session is ending: the screen is going.
         let ending = phase != .live
+        if !ending { noteShotActivity() }
         do {
             let shot = try dataService.addShot(to: session, result: result, zone: zone, shotType: .unknown,
                                                courtX: courtX, courtY: courtY, science: science,
@@ -425,13 +614,72 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         refreshCounts()
         guard !ending else {
             updatePlayoff(announce: false)
+            updateDrill(announce: false)
             return
         }
         shotCounter += 1
         lastShot = ShotFlash(result: result, id: shotCounter)
         result == .make ? haptics.makeMade() : haptics.missMade()
-        announce(result)
+        announcer?.shot(result, makes: makes, attempts: attempts, corrected: false)
         updatePlayoff(announce: true)
+        updateDrill(announce: true)
+        updateTarget(announce: true)
+    }
+
+    /// Moves the drill on after a shot; at the end of a step, says how it
+    /// went and where to go next.
+    private func updateDrill(announce: Bool) {
+        guard let plan = drillPlan else { return }
+        let before = drillProgress
+        let now = plan.progress(after: attempts)
+        drillProgress = now
+        guard announce, let before, !now.isSameStep(as: before), attempts > 0 else { return }
+        // How the step just finished went: its last `shotsInStep` shots.
+        let stepShots = session?.orderedShots.suffix(before.shotsInStep) ?? []
+        let made = stepShots.filter(\.isMake).count
+        let score = "\(made) of \(stepShots.count)"
+        let text: String
+        let spoken: String
+        if now.isFinished {
+            text = "Drill done · \(makes) of \(attempts)"
+            spoken = "Drill done. \(makes) of \(attempts). Hold End to finish."
+        } else if now.stepCount == nil {
+            text = "\(now.stepLabel)"
+            spoken = "\(before.stepName) done, \(score). \(now.stepLabel)."
+        } else {
+            text = "Move to the \(now.spot.lowercased())"
+            spoken = "\(score). Move to the \(now.spot.lowercased())."
+        }
+        cueCounter += 1
+        drillCue = DrillCue(text: text, id: cueCounter, isFinished: now.isFinished)
+        announcer?.say(spoken)
+        if now.isFinished { haptics.milestone() }
+    }
+
+    /// Says so once when a best is beaten.
+    private func updateTarget(announce: Bool) {
+        guard let target else { return }
+        let met = target.isMet(makes: makes, attempts: attempts)
+        defer { targetMet = met }
+        guard announce, met, !targetMet, case .makes = target else { return }
+        haptics.milestone()
+        announcer?.say("New best!")
+    }
+
+    /// Your best makes in this drill, or for a free session your field-goal
+    /// goal, else your most makes in any session.
+    private static func target(for drill: NamedDrill?, profile: PlayerProfile,
+                               excluding current: UUID?) -> SessionTarget? {
+        let drillBest = drill.flatMap { drill in
+            profile.sessions
+                .filter { $0.namedDrill == drill && $0.isComplete && $0.id != current }
+                .map(\.shotsMade).max()
+        }
+        let fgGoal = profile.goals
+            .filter { $0.metric == .fgPercent && !$0.isAchieved }
+            .map(\.targetValue).min()
+        return SessionTarget.choose(drillBest: drillBest, isNamedDrill: drill != nil,
+                                    fgGoal: fgGoal, mostMakes: profile.prMostMakesSession)
     }
 
     /// Replays this sitting's shots on top of the run as it stood, so an
@@ -456,9 +704,7 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         case .eliminated:                              haptics.longPress()
         case .gameWon, .gameLost:                      break
         }
-        if UIAccessibility.isVoiceOverRunning {
-            UIAccessibility.post(notification: .announcement, argument: PlayoffMoment.spoken(event, run: run))
-        }
+        announcer?.say(PlayoffMoment.spoken(event, run: run))
     }
 
     private func refreshCounts() {
@@ -471,22 +717,13 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     /// Offset into the video for manually logged shots. Capture timestamps
     /// run on the host clock, so "now" on that clock lines up with the file.
     private func recordingOffsetNow() -> Double? {
-        guard let start = recorder?.startTime else { return nil }
-        return max(0, CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())) - start)
+        recorder?.fileOffset(of: CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())))
     }
 
     private func finishRecording() async -> URL? {
         let recorder = self.recorder
         self.recorder = nil
         return await recorder?.finish()
-    }
-
-    private func announce(_ result: ShotResult) {
-        guard UIAccessibility.isVoiceOverRunning,
-              Date.now.timeIntervalSince(lastAnnouncement) >= 2 else { return }
-        lastAnnouncement = .now
-        let word = result == .make ? "Make" : "Miss"
-        UIAccessibility.post(notification: .announcement, argument: "\(word). \(makes) for \(attempts).")
     }
 }
 
@@ -506,6 +743,13 @@ struct PlayoffMoment: Equatable, Identifiable {
         case .comebackComplete: return "You're back in. The series starts again at zero all."
         }
     }
+}
+
+/// A drill step just finished, for the live screen's cue.
+struct DrillCue: Equatable {
+    let text: String
+    let id: Int
+    var isFinished = false
 }
 
 struct ShotFlash: Equatable {

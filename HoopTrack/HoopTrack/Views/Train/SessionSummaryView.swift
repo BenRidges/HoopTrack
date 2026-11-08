@@ -4,7 +4,8 @@
 //
 // Shooting reports lead with FG%, then where the shots came from, then the
 // shot list. Any shot can be flipped make ↔ miss with one tap; calls the
-// tracker wasn't sure about are flagged so they get checked first.
+// tracker wasn't sure about are flagged so they get checked first, on video
+// when there is one (ShotCheckView).
 
 import SwiftUI
 import SwiftData
@@ -12,6 +13,9 @@ import SwiftData
 /// Post-session sheet.
 struct SessionSummaryView: View {
     let result: SessionResult
+    /// Starts the same session again; nil hides the button.
+    var goAgain: (() -> Void)? = nil
+    @EnvironmentObject private var dataService: DataService
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -25,8 +29,29 @@ struct SessionSummaryView: View {
                         Button("Done") { dismiss() }.bold()
                     }
                 }
+                .safeAreaInset(edge: .bottom) {
+                    if let goAgain, canGoAgain {
+                        Button(action: goAgain) {
+                            Label(isPlayoff ? "Keep playing" : "Go again", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.primary)
+                        .padding(.horizontal, Metrics.screenPadding)
+                        .padding(.top, 10)
+                        .padding(.bottom, 6)
+                        .background(Color.court.opacity(0.94).ignoresSafeArea())
+                    }
+                }
         }
         .presentationDragIndicator(.visible)
+    }
+
+    private var isPlayoff: Bool { result.session.playoffSeriesID != nil }
+
+    /// A playoff run that's been won (or ended) has nothing to go again to.
+    private var canGoAgain: Bool {
+        guard let id = result.session.playoffSeriesID else { return true }
+        guard let series = dataService.playoffSeries(id: id) else { return false }
+        return series.status != .champion && series.status != .retired
     }
 }
 
@@ -78,6 +103,8 @@ struct SessionReport: View {
     @EnvironmentObject private var hapticService: HapticService
     @State private var highlighted: ShotRecord.ID?
     @State private var showReplay = false
+    @State private var checking: ShotCheckBatch?
+    @AppStorage(AppPreferences.Key.reviewOnVideo) private var reviewOnVideo = true
 
     private var shots: [ShotRecord] { session.orderedShots.filter { $0.result != .pending } }
     private var flagged: [ShotRecord] { shots.filter(\.needsReview) }
@@ -106,6 +133,9 @@ struct SessionReport: View {
         .courtBackground()
         .fullScreenCover(isPresented: $showReplay) {
             SessionReplayView(session: session)
+        }
+        .fullScreenCover(item: $checking) { batch in
+            ShotCheckView(session: session, shots: batch.shots)
         }
     }
 
@@ -170,7 +200,8 @@ struct SessionReport: View {
     // MARK: Review
 
     private var reviewBanner: some View {
-        Panel {
+        let onVideo = reviewOnVideo ? ShotCheckView.checkable(in: session) : []
+        return Panel {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "questionmark.circle.fill")
                     .font(.title3)
@@ -178,15 +209,27 @@ struct SessionReport: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(flagged.count == 1 ? "1 call to check" : "\(flagged.count) calls to check")
                         .font(.headline)
-                    Text("The tracker wasn't sure about these. Tap a shot below to flip it.")
+                    Text(onVideo.isEmpty
+                         ? "The tracker wasn't sure about these. Tap a shot below to flip it."
+                         : "The tracker wasn't sure about these. Watch each one and tap Make or Miss.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Button("They're all right") {
-                        hapticService.tap()
-                        flagged.forEach { dataService.updateShot($0, result: $0.result) }
+                    HStack(spacing: 18) {
+                        if !onVideo.isEmpty {
+                            Button {
+                                checking = ShotCheckBatch(shots: onVideo)
+                            } label: {
+                                Label("Watch them", systemImage: "play.fill")
+                            }
+                            .foregroundStyle(Color.leather)
+                        }
+                        Button("They're all right") {
+                            hapticService.tap()
+                            flagged.forEach { dataService.updateShot($0, result: $0.result) }
+                        }
+                        .foregroundStyle(onVideo.isEmpty ? Color.leather : .secondary)
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.leather)
                     .padding(.top, 4)
                 }
             }
@@ -384,6 +427,13 @@ struct SessionReport: View {
 }
 
 // MARK: - Pieces
+
+/// The flagged shots to watch, fixed when checking starts: answering one
+/// unflags it, which would otherwise reshuffle the list mid-check.
+struct ShotCheckBatch: Identifiable {
+    let id = UUID()
+    let shots: [ShotRecord]
+}
 
 struct ZoneRow: View {
     let name: String

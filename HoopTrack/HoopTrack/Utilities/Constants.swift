@@ -53,6 +53,21 @@ nonisolated enum HoopTrack {
         static let correctionWindowSec: Double = 8
     }
 
+    // MARK: - Live session options (Profile → Session options)
+    enum Session {
+        /// A setup tip has to hold this long before it's shown (or said),
+        /// so a jittery rim box doesn't flick between tips.
+        static let setupSettleSec: Double = 1.2
+        /// No shot for this long and the clock (and video) pause.
+        static let idlePauseSec: Double = 120
+        /// Paused this long: ask whether the session's over.
+        static let idleAskSec: Double = 15 * 60
+        /// Paused this long and nobody answered: end and save it.
+        static let idleEndSec: Double = 20 * 60
+        /// Screen dims after this long without a touch.
+        static let dimAfterSec: Double = 20
+    }
+
     // MARK: - Shot Science (Phase 3 thresholds)
     enum ShotScience {
         /// Launch-angle band coaches teach for jump shots, degrees.

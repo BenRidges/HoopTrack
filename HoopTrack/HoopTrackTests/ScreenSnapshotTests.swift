@@ -119,6 +119,53 @@ final class ScreenSnapshotTests: XCTestCase {
         try snapshot("12-notice") { RootView() }
     }
 
+    func test_sessionOptions() throws {
+        try snapshot("13-session-options") { NavigationStack { SessionOptionsView() } }
+    }
+
+    func test_summaryWithGoAgain() throws {
+        let session = try seedHistory()
+        try snapshot("14-summary-go-again") {
+            SessionSummaryView(result: SessionResult(session: session, badgeChanges: []), goAgain: {})
+        }
+    }
+
+    func test_liveSessionOptions() throws {
+        // The live screen's session-option pieces over a stand-in for the
+        // camera: a drill step, the best to beat, the clock waiting.
+        let landscape = CGSize(width: 874, height: 402)
+        let plan = try XCTUnwrap(DrillPlan.plan(for: .aroundTheArc))
+        try snapshot("15-live-drill", size: landscape) {
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
+                VStack {
+                    HStack(alignment: .top) {
+                        SessionTargetPill(target: .makes(best: 18), makes: 12, attempts: 20)
+                        Spacer()
+                        DrillStepPill(progress: plan.progress(after: 7))
+                        Spacer()
+                        ClockWaitingTag()
+                    }
+                    Spacer()
+                }
+                .padding(24)
+                DrillCueBanner(cue: DrillCue(text: "Move to the right wing", id: 1))
+            }
+        }
+        try snapshot("16-live-setup-tip", size: landscape) {
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
+                SetupTipCard(advice: .tooClose)
+            }
+        }
+        try snapshot("17-live-still-shooting", size: landscape) {
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
+                StillShootingCard(onEnd: {}, onKeepGoing: {})
+            }
+        }
+    }
+
     // MARK: - Data
 
     /// Two weeks of shooting, with shots placed around the court, ratings,

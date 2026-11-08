@@ -55,8 +55,9 @@ struct RootView: View {
         }) { launch in
             session(for: launch)
         }
-        .sheet(item: $appState.presentedSummary) { completed in
-            SessionSummaryView(result: completed.result)
+        .sheet(item: $appState.presentedSummary, onDismiss: { appState.summaryDismissed() }) { completed in
+            SessionSummaryView(result: completed.result,
+                               goAgain: completed.again.map { launch in { appState.goAgain(launch) } })
         }
     }
 

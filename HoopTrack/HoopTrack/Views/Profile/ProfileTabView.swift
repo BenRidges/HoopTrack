@@ -232,6 +232,11 @@ struct ProfileTabView: View {
 
     @ViewBuilder
     private func training(_ profile: PlayerProfile) -> some View {
+        NavigationLink {
+            SessionOptionsView()
+        } label: {
+            LabeledContent("Session options", value: sessionOptionsSummary)
+        }
         Picker("Three-point line", selection: Binding(
             get: { profile.preferredCourtType },
             set: { profile.preferredCourtType = $0; try? dataService.modelContext.save() }
@@ -280,6 +285,17 @@ struct ProfileTabView: View {
             .onChange(of: healthKitEnabled) { _, on in
                 if on { Task { await coordinator.requestHealthKitPermission() } }
             }
+    }
+
+    @AppStorage(AppPreferences.Key.shotCalls) private var shotCalls = ShotCallMode.voice.rawValue
+
+    /// What the link shows on the right: how shots are called.
+    private var sessionOptionsSummary: String {
+        switch ShotCallMode(rawValue: shotCalls) ?? .voice {
+        case .voice:  return "Calls spoken"
+        case .sounds: return "Call sounds"
+        case .off:    return "Silent"
+        }
     }
 
     private func hourLabel(_ hour: Int) -> String {
