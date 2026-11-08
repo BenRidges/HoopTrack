@@ -74,13 +74,17 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
     private let coordinator: SessionFinalizationCoordinator
     private let camera: CameraService
     private let haptics: HapticService
-    private var session: TrainingSession?
+    private(set) var session: TrainingSession?
     private var pipeline: (any ShotPipelineControl)?
     /// While the session is ending and waits for the pipeline to stop: the
     /// calls it made before then still count.
     private var isStoppingPipeline = false
     private var recorder: SessionRecorder?
     private var shotCounter = 0
+    /// The tracker's latest call and when it landed (see `correctableShot`).
+    private var lastAutoCall: (shot: ShotRecord, at: Date)?
+    /// Now; tests move it on to step past the correction window.
+    var clock: () -> Date = { .now }
     private var flightTimeout: Task<Void, Never>?
     private var limitWatcher: Task<Void, Never>?
     private var courtType: CourtType = .nba
@@ -288,14 +292,47 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     // MARK: - Manual logging & corrections
 
+    /// The Make / Miss buttons. Right after an automatic call, the other
+    /// result means "that call was wrong": it changes the call instead of
+    /// logging a second shot (tapping Make on a wrong miss used to count
+    /// both). Otherwise, or with the same result, it logs a shot.
     func logManual(_ result: ShotResult) {
         guard phase == .live else { return }
+        if let shot = correctableShot, shot.result != result {
+            correct(shot, to: result)
+            return
+        }
         record(result: result, zone: .unknown, courtX: 0.5, courtY: 0.5,
                science: nil, videoOffset: nil, detectionConfidence: nil)
     }
 
+    /// The automatic call a tap of the other result would change: the
+    /// latest shot, called by the tracker, within the correction window,
+    /// with no shot started since and not already changed.
+    var correctableShot: ShotRecord? {
+        guard let call = lastAutoCall,
+              clock().timeIntervalSince(call.at) <= HoopTrack.CV.correctionWindowSec,
+              session?.orderedShots.last?.id == call.shot.id else { return nil }
+        return call.shot
+    }
+
+    private func correct(_ shot: ShotRecord, to result: ShotResult) {
+        lastAutoCall = nil
+        dataService.updateShot(shot, result: result)
+        refreshCounts()
+        shotCounter += 1
+        lastShot = ShotFlash(result: result, id: shotCounter, corrected: true)
+        result == .make ? haptics.makeMade() : haptics.missMade()
+        if UIAccessibility.isVoiceOverRunning {
+            let word = result == .make ? "make" : "miss"
+            UIAccessibility.post(notification: .announcement, argument: "Changed to \(word). \(makes) for \(attempts).")
+        }
+        updatePlayoff(announce: true, replacingMoment: true)
+    }
+
     /// Removes the most recent shot (wrong call, or a shot that never happened).
     func undoLast() {
+        lastAutoCall = nil
         guard let session, let last = session.orderedShots.last else { return }
         dataService.deleteShot(last)
         refreshCounts()
@@ -330,6 +367,8 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     func pipelineShotStarted() {
         guard !isPaused else { return }
+        // A tap from now on is about this shot, not the last call.
+        lastAutoCall = nil
         shotInFlight = true
         flightTimeout?.cancel()
         flightTimeout = Task { [weak self] in
@@ -371,11 +410,14 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
         // Counted quietly once the session is ending: the screen is going.
         let ending = phase != .live
         do {
-            try dataService.addShot(to: session, result: result, zone: zone, shotType: .unknown,
-                                    courtX: courtX, courtY: courtY, science: science,
-                                    videoOffset: videoOffset ?? recordingOffsetNow(),
-                                    needsReview: (detectionConfidence ?? 1) < HoopTrack.CV.lowConfidence,
-                                    detectionConfidence: detectionConfidence)
+            let shot = try dataService.addShot(to: session, result: result, zone: zone, shotType: .unknown,
+                                               courtX: courtX, courtY: courtY, science: science,
+                                               videoOffset: videoOffset ?? recordingOffsetNow(),
+                                               needsReview: (detectionConfidence ?? 1) < HoopTrack.CV.lowConfidence,
+                                               detectionConfidence: detectionConfidence)
+            // Only the tracker's calls can be changed by a tap; a shot
+            // logged by hand closes the window.
+            lastAutoCall = detectionConfidence != nil && !ending ? (shot, clock()) : nil
         } catch {
             errorMessage = error.localizedDescription
             return
@@ -394,14 +436,17 @@ final class LiveSessionViewModel: ObservableObject, ShotPipelineDelegate {
 
     /// Replays this sitting's shots on top of the run as it stood, so an
     /// undo un-decides a game as cleanly as a shot decides one.
-    private func updatePlayoff(announce: Bool) {
+    /// `replacingMoment`: the last shot's result changed, so a moment it
+    /// showed (a game won, a series won) goes if the new result decides
+    /// nothing.
+    private func updatePlayoff(announce: Bool, replacingMoment: Bool = false) {
         guard let base = playoffBase, let session else { return }
         var run = base
         var event: PlayoffEvent?
         for shot in session.orderedShots { event = run.record(shot.result) }
         playoff = run
         guard announce, let event else {
-            if !announce { playoffMoment = nil }
+            if !announce || replacingMoment { playoffMoment = nil }
             return
         }
         momentCounter += 1
@@ -466,4 +511,6 @@ struct PlayoffMoment: Equatable, Identifiable {
 struct ShotFlash: Equatable {
     let result: ShotResult
     let id: Int
+    /// A tap changed the tracker's call to this.
+    var corrected = false
 }

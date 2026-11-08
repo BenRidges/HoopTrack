@@ -135,11 +135,18 @@ struct ShotFlashOverlay: View {
                 .blur(radius: 14)
                 .ignoresSafeArea()
             if let visible {
-                Text(visible.result == .make ? "MAKE" : "MISS")
-                    .font(.score(84))
-                    .foregroundStyle(color)
-                    .shadow(color: .black.opacity(0.6), radius: 12)
-                    .transition(reduceMotion ? AnyTransition.opacity : .scale(scale: 0.8).combined(with: .opacity))
+                VStack(spacing: 2) {
+                    if visible.corrected {
+                        Text("CHANGED TO")
+                            .font(.label)
+                            .foregroundStyle(.white)
+                    }
+                    Text(visible.result == .make ? "MAKE" : "MISS")
+                        .font(.score(84))
+                        .foregroundStyle(color)
+                }
+                .shadow(color: .black.opacity(0.6), radius: 12)
+                .transition(reduceMotion ? AnyTransition.opacity : .scale(scale: 0.8).combined(with: .opacity))
             }
         }
         .opacity(visible == nil ? 0 : 1)

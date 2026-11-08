@@ -1,8 +1,9 @@
 // LiveSessionView.swift
 // Landscape, full-bleed camera. Everything you need at a glance from 20 ft
 // away: score top-left, hoop status top-centre, clock top-right. Make /
-// Miss / Undo stay within thumb reach at all times — they're the primary
-// input when there's no model, and one-tap corrections when there is.
+// Miss / Undo are the input when nothing is tracking. While the hoop is
+// tracked they stay out of the picture until the screen is tapped, and
+// right after a call the other result changes it rather than adding a shot.
 
 import SwiftUI
 import UIKit
@@ -67,11 +68,19 @@ private struct LiveSessionContent: View {
     let onFinish: (SessionEnd?) -> Void
 
     @EnvironmentObject private var cameraService: CameraService
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var saveFailed = false
+    /// Make / Miss / Undo brought up by a tap while tracking; each tap or
+    /// button press keeps them up a little longer.
+    @State private var controlsRevealed = false
+    @State private var revealCount = 0
 
     var body: some View {
         ZStack {
-            camera
+            // A tap anywhere on the picture brings up Make / Miss / Undo.
+            ZStack { camera }
+                .contentShape(Rectangle())
+                .onTapGesture { revealControls() }
             ShotFlashOverlay(flash: viewModel.lastShot)
             hud
             if let moment = viewModel.playoffMoment, let run = viewModel.playoff, !viewModel.isPaused {
@@ -85,7 +94,17 @@ private struct LiveSessionContent: View {
             if showsHoopCoach { hoopCoach }
         }
         .animation(.snappy, value: viewModel.playoffMoment)
+        .animation(.easeInOut(duration: 0.2), value: showsShotButtons)
         .task { await viewModel.start(showDetectionBoxes: showDetectionBoxes) }
+        .task(id: revealCount) {
+            guard revealCount > 0 else { return }
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { controlsRevealed = false }
+        }
+        .onChange(of: autoTracking) { _, tracking in
+            // Tracking found the hoop again: let the buttons linger, then go.
+            if tracking { revealControls() }
+        }
         .onChange(of: viewModel.timeIsUp) { _, up in
             if up { finish() }
         }
@@ -255,12 +274,45 @@ private struct LiveSessionContent: View {
         .accessibilityHidden(true)
     }
 
+    /// The tracker has the hoop, so shots are being called on their own.
+    private var autoTracking: Bool {
+        viewModel.hoopStatus == .tracking && !viewModel.skippedHoopSearch
+    }
+
+    private var showsShotButtons: Bool {
+        !autoTracking || controlsRevealed || voiceOver
+    }
+
+    private func revealControls() {
+        controlsRevealed = true
+        revealCount += 1
+    }
+
+    @ViewBuilder
     private var shotButtons: some View {
+        if showsShotButtons {
+            shotButtonRow
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+        } else {
+            // Where the buttons are: a tap anywhere brings them back.
+            Image(systemName: "hand.tap")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+                .frame(width: 44, height: 44)
+                .background(Color.black.opacity(0.35), in: Circle())
+                .onTapGesture { revealControls() }
+                .accessibilityHidden(true)
+                .transition(.opacity)
+        }
+    }
+
+    private var shotButtonRow: some View {
         let manual = viewModel.hoopStatus == .manual || viewModel.skippedHoopSearch
         let size: CGFloat = manual ? 76 : 58
         return HStack(spacing: 14) {
             Button {
                 viewModel.undoLast()
+                revealControls()
             } label: {
                 Image(systemName: "arrow.uturn.backward")
                     .font(.system(size: 17, weight: .bold))
@@ -271,11 +323,16 @@ private struct LiveSessionContent: View {
             .opacity(viewModel.attempts == 0 ? 0.4 : 1)
             .accessibilityLabel("Undo last shot")
 
-            roundButton("Miss", systemImage: "xmark", color: .miss, size: size) {
+            let changes = viewModel.correctableShot?.result
+            roundButton("Miss", systemImage: "xmark", color: .miss, size: size,
+                        hint: changes == .make ? "Changes the last call to a miss" : nil) {
                 viewModel.logManual(.miss)
+                revealControls()
             }
-            roundButton("Make", systemImage: "checkmark", color: .make, size: size) {
+            roundButton("Make", systemImage: "checkmark", color: .make, size: size,
+                        hint: changes == .miss ? "Changes the last call to a make" : nil) {
                 viewModel.logManual(.make)
+                revealControls()
             }
         }
         .foregroundStyle(.white)
@@ -283,7 +340,7 @@ private struct LiveSessionContent: View {
     }
 
     private func roundButton(_ title: String, systemImage: String, color: Color,
-                             size: CGFloat, action: @escaping () -> Void) -> some View {
+                             size: CGFloat, hint: String?, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.36, weight: .heavy))
@@ -294,6 +351,7 @@ private struct LiveSessionContent: View {
         }
         .buttonStyle(.pressable)
         .accessibilityLabel(title)
+        .accessibilityHint(hint ?? "")
         .accessibilityInputLabels([title, title == "Make" ? "Score" : "Missed"])
     }
 

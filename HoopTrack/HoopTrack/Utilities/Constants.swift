@@ -46,6 +46,11 @@ nonisolated enum HoopTrack {
         /// When the phone is this hot or hotter, detect on every other frame
         /// (recording continues at full rate) before iOS throttles for us.
         static let throttleAtThermalState = 2   // ProcessInfo.ThermalState.serious
+        /// For this long after an automatic call, tapping the other result
+        /// changes that call instead of logging another shot. Long enough to
+        /// walk back to a phone 3 m away and tap twice; the next shot starting
+        /// closes it sooner (shots come ~5 s apart).
+        static let correctionWindowSec: Double = 8
     }
 
     // MARK: - Shot Science (Phase 3 thresholds)

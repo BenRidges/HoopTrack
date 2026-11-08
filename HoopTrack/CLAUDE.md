@@ -63,7 +63,7 @@ Per-frame work runs on `CVPipeline`'s own serial queue, called synchronously fro
 - **Telemetry** (opt-in) — `detections.jsonl` per frame, then `TelemetryManifest` (sampled frames with their boxes + every shot's outcome). `Tools/dataset/build_dataset.py` turns those into a YOLO dataset; `Tools/training/train_detector.py` trains, gates against the shipped model and exports. See `docs/training-review-2026-11.md`.
 - **`ShotGeometry`** — distance from apparent ball/rim size and the camera FOV; launch angle from flight time.
 - **`DribblePipeline`** — body-pose wrists + `WristBounceDetector` (front camera, portrait).
-- Manual Make / Miss / Undo are always available; low-confidence calls are stored with `needsReview` and flagged in the summary. `ShotRecord.detectionConfidence` is nil for hand-logged shots.
+- Manual Make / Miss / Undo: always shown when nothing is tracking; while the hoop is tracked they stay hidden until the picture is tapped (4 s, or whenever VoiceOver is on). For `HoopTrack.CV.correctionWindowSec` after an automatic call, and until the next shot starts, tapping the other result changes that call (`DataService.updateShot`, marked user-corrected) instead of logging a second shot. Low-confidence calls are stored with `needsReview` and flagged in the summary. `ShotRecord.detectionConfidence` is nil for hand-logged shots.
 - `BallDetectorStub` exists in DEBUG builds only.
 
 ### Constants
